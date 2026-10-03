@@ -58,6 +58,9 @@ pub(crate) fn request_body(req: &ChatRequest<'_>, opts: &OllamaSettings) -> Valu
         "model": req.model,
         "messages": req.messages.iter().map(message_to_json).collect::<Vec<_>>(),
         "stream": true,
+        // Hidden reasoning costs hundreds of tokens per step, which is tens of
+        // seconds on a laptop CPU. Waddle narrates instead.
+        "think": false,
         "keep_alive": opts.keep_alive,
         "options": {
             "temperature": req.temperature,
@@ -184,7 +187,8 @@ mod tests {
     fn body_carries_resource_caps() {
         let opts = OllamaSettings { num_thread: Some(3), keep_alive: "30s".into(), num_ctx: 4096 };
         let msgs = vec![Message::user("hi")];
-        let body = request_body(&ChatRequest { model: "qwen3-vl:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 64 }, &opts);
+        let body = request_body(&ChatRequest { model: "qwen3.5:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 64 }, &opts);
+        assert_eq!(body["think"], false);
         assert_eq!(body["options"]["num_thread"], 3);
         assert_eq!(body["options"]["num_ctx"], 4096);
         assert_eq!(body["keep_alive"], "30s");

@@ -6130,7 +6130,7 @@ dependencies = [
 
 [[package]]
 name = "waddle"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6156,7 +6156,7 @@ dependencies = [
 
 [[package]]
 name = "waddle-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6164,6 +6164,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "hex",
+ "image",
  "log",
  "regex",
  "reqwest 0.12.28",

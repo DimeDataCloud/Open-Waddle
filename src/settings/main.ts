@@ -42,8 +42,8 @@ interface AuditRecord {
 
 const PRESETS: Record<string, Partial<Settings>> = {
   openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "qwen/qwen3-vl-8b-instruct", fast_model: "google/gemini-2.5-flash-lite" },
-  ollama: { provider: "ollama", base_url: "http://localhost:11434", model: "qwen3-vl:4b", fast_model: "" },
-  lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "qwen3-vl-4b", fast_model: "" },
+  ollama: { provider: "ollama", base_url: "http://localhost:11434", model: "qwen3.5:4b", fast_model: "" },
+  lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "qwen3.5-4b", fast_model: "" },
   foundry: { provider: "openai_compat", base_url: "http://localhost:5273/v1", model: "phi-4-mini", fast_model: "" },
   mock: { provider: "mock", base_url: "", model: "demo", fast_model: "" },
 };
@@ -62,6 +62,11 @@ function presetFor(s: Settings): string {
 
 function syncVisibility(): void {
   const preset = $<HTMLSelectElement>("preset").value;
+  // Demo mode needs no endpoint, model or key; hidden fields mustn't block Save.
+  const demo = preset === "mock";
+  $("brain-opts").classList.toggle("hidden", demo);
+  $("base_url").required = !demo;
+  $("model").required = !demo;
   $("ollama-opts").classList.toggle("hidden", preset !== "ollama");
   $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
 }

@@ -275,7 +275,7 @@ impl<'a> Agent<'a> {
             if self.cancel.is_cancelled() {
                 return self.halted();
             }
-            if self.steps_left.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_err() {
+            if !self.take_step() {
                 break;
             }
             self.fold_in_steering(&mut messages, steer);
@@ -356,6 +356,18 @@ impl<'a> Agent<'a> {
             outcome: Outcome::StepLimit,
             message: format!("I've taken {} steps and stopped to check in. Want me to keep going?", self.deps.settings.max_steps),
         }
+    }
+
+    /// Spends one step from the budget shared across the whole task tree.
+    fn take_step(&self) -> bool {
+        let mut n = self.steps_left.load(Ordering::SeqCst);
+        while n > 0 {
+            match self.steps_left.compare_exchange_weak(n, n - 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return true,
+                Err(current) => n = current,
+            }
+        }
+        false
     }
 
     fn halted(&self) -> RunResult {

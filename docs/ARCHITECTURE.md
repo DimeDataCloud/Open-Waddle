@@ -103,7 +103,8 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 |---|---|---|
 | Laya (421M local decision model) | Deferred | Free, but ~1.5 GB RAM through Python and 0.2–0.5 s per call on CPU (the blueprint's 25–65 ms is GPU/WebGPU). Safety gating must be fixed rules anyway, and routing already happens inside the planner call. Revisit "needs a screenshot?" and "task done?" decisions, benchmarked against the activity log. |
 | Jev (cloud router) | Not used | A paid extra network hop (`typesafe/jev-router` on OpenRouter). |
-| Qwen2.5-VL | Replaced by Qwen3-VL | Qwen2.5-VL can't call tools in Ollama; Qwen3-VL can (Ollama ≥ 0.12.7). |
+| Qwen2.5-VL / Qwen3-VL (local) | Replaced by Qwen3.5-4B | Qwen2.5-VL can't call tools in Ollama. Qwen3.5-4B (Feb 2026) beats Qwen3-VL-4B at computer use at the same size (OSWorld-Verified 35.6 vs 26.2, ScreenSpot-Pro 60.3 vs 59.5) and has vision and tools in Ollama ≥ 0.17.6. Its hidden thinking is off (`think: false`): it costs 30–60 s per step on a laptop CPU. |
+| Other local candidates (Oct 2026) | Not default | Gemma 4 E4B: about twice the RAM, no GUI-agent results. Holo3.1-4B (a computer-use fine-tune of Qwen3.5-4B): better at clicking, but its vision file doesn't load in Ollama; try it through LM Studio. Snapdragon NPU runtimes (Nexa/GenieX, Foundry Local): free up the CPU, but tool calls with images are unproven there; next experiment. |
 | Local vision model on Snapdragon | Optional, not default | Ollama runs CPU-only on Adreno today; a 4–8 GB vision model at full CPU breaks the headroom goal. Cloud default: ~$0.005 per task. |
 | Tauri 3 | Not used | Still alpha; built on Tauri 2.12 stable. |
 

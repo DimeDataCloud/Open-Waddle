@@ -26,17 +26,19 @@
               <option value="mock">Demo (no AI)</option>
             </select>
           </label>
-          <label>Endpoint URL <input id="base_url" type="url" required /></label>
-          <label>Planner model <input id="model" required /></label>
-          <label>Quick-reply model <input id="fast_model" placeholder="blank = same as planner" /></label>
-          <label>API key <input id="api_key" type="password" autocomplete="off" /></label>
-          <label>Coordinates
-            <select id="coord_mode">
-              <option value="auto">Auto (from model name)</option>
-              <option value="norm1000">0–1000 grid (Qwen, Gemini)</option>
-              <option value="pixels">Pixels (Claude, GPT)</option>
-            </select>
-          </label>
+          <div id="brain-opts">
+            <label>Endpoint URL <input id="base_url" type="url" required /></label>
+            <label>Planner model <input id="model" required /></label>
+            <label>Quick-reply model <input id="fast_model" placeholder="blank = same as planner" /></label>
+            <label>API key <input id="api_key" type="password" autocomplete="off" /></label>
+            <label>Coordinates
+              <select id="coord_mode">
+                <option value="auto">Auto (from model name)</option>
+                <option value="norm1000">0–1000 grid (Qwen, Gemini)</option>
+                <option value="pixels">Pixels (Claude, GPT)</option>
+              </select>
+            </label>
+          </div>
           <div id="ollama-opts" class="grid3">
             <label>CPU threads <input id="num_thread" type="number" min="1" placeholder="auto" /></label>
             <label>Keep loaded <input id="keep_alive" placeholder="30s" /></label>

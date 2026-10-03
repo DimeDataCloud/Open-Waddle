@@ -1,84 +1,23 @@
 //! End-to-end behaviour of the planner loop and the real-time session, using a
 //! scripted provider and a fake host.
 
+mod common;
+
 use async_trait::async_trait;
+use common::FakeHost;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use waddle_core::agent::{prune_images, Agent, AgentDeps, ApprovalRequest, TaskStatus};
+use waddle_core::agent::{prune_images, Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::llm::mock::{call, reply, MockProvider};
 use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
 use waddle_core::tools::fs::Workspace;
-use waddle_core::tools::{Capabilities, GuiAction, GuiResult};
+use waddle_core::tools::GuiAction;
 use waddle_core::skills::SkillStore;
-use waddle_core::{AgentEvent, Decision, EnvInfo, Host, Lane, Outcome, Session, SessionConfig, Settings};
-
-type Policy = Box<dyn Fn(&ApprovalRequest) -> Option<Decision> + Send + Sync>;
-
-struct FakeHost {
-    events: Mutex<Vec<AgentEvent>>,
-    approvals: Mutex<Vec<ApprovalRequest>>,
-    gui_calls: Mutex<Vec<GuiAction>>,
-    /// None = never answer (let a countdown or halt resolve it).
-    policy: Policy,
-    busy: Mutex<Vec<bool>>,
-    applied: Mutex<Vec<Settings>>,
-}
-
-impl FakeHost {
-    fn new(policy: Policy) -> Arc<Self> {
-        Arc::new(Self {
-            events: Mutex::default(),
-            approvals: Mutex::default(),
-            gui_calls: Mutex::default(),
-            policy,
-            busy: Mutex::default(),
-            applied: Mutex::default(),
-        })
-    }
-    fn events(&self) -> Vec<AgentEvent> {
-        self.events.lock().unwrap().clone()
-    }
-}
-
-#[async_trait]
-impl Host for FakeHost {
-    fn emit(&self, event: AgentEvent) {
-        self.events.lock().unwrap().push(event);
-    }
-    fn env(&self) -> EnvInfo {
-        EnvInfo { os: "TestOS".into(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, ..Default::default() } }
-    }
-    async fn request_approval(&self, req: ApprovalRequest) -> Decision {
-        self.approvals.lock().unwrap().push(req.clone());
-        match (self.policy)(&req) {
-            Some(d) => d,
-            None => std::future::pending().await,
-        }
-    }
-    fn resolve_approval(&self, _id: &str, _decision: Decision) {}
-    async fn gui(&self, action: GuiAction, _cancel: &CancellationToken) -> anyhow::Result<GuiResult> {
-        self.gui_calls.lock().unwrap().push(action.clone());
-        Ok(match action {
-            GuiAction::LookAtScreen => GuiResult::Screenshot {
-                image: ImageData { mime: "image/png".into(), base64: "AAAA".into() },
-                width: 1440,
-                height: 960,
-            },
-            _ => GuiResult::Done("ok".into()),
-        })
-    }
-    fn set_busy(&self, busy: bool) {
-        self.busy.lock().unwrap().push(busy);
-    }
-    async fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
-        self.applied.lock().unwrap().push(settings);
-        Ok(())
-    }
-}
+use waddle_core::{AgentEvent, Decision, Host, Lane, Outcome, Session, SessionConfig, Settings};
 
 fn settings() -> Settings {
     Settings { model: "test-model".into(), tier2_countdown_ms: 20, ..Settings::default() }
