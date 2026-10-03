@@ -94,12 +94,12 @@ pub fn bootstrap(state: State<'_, AppState>) -> Bootstrap {
 }
 
 #[tauri::command]
-pub fn get_settings(state: State<'_, AppState>) -> SettingsView {
-    view(&state, None)
+pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<SettingsView> {
+    Ok(view(&state, None))
 }
 
 #[tauri::command]
-pub fn save_settings(
+pub async fn save_settings(
     app: AppHandle,
     state: State<'_, AppState>,
     settings: Settings,
@@ -120,22 +120,24 @@ pub fn save_settings(
 }
 
 #[tauri::command]
-pub fn audit_recent(state: State<'_, AppState>, limit: usize) -> CmdResult<Vec<AuditRecord>> {
+pub async fn audit_recent(state: State<'_, AppState>, limit: usize) -> CmdResult<Vec<AuditRecord>> {
     state.audit.recent(limit.min(500)).map_err(err)
 }
 
 #[tauri::command]
-pub fn audit_verify(state: State<'_, AppState>) -> CmdResult<VerifyReport> {
+pub async fn audit_verify(state: State<'_, AppState>) -> CmdResult<VerifyReport> {
     state.audit.verify().map_err(err)
 }
 
+/// Async on purpose: creating a window from a sync command deadlocks WebView2
+/// on Windows (white window, frozen overlay).
 #[tauri::command]
-pub fn open_settings(app: AppHandle) -> CmdResult<()> {
+pub async fn open_settings(app: AppHandle) -> CmdResult<()> {
     crate::show_settings(&app).map_err(err)
 }
 
 #[tauri::command]
-pub fn open_workspace(state: State<'_, AppState>) -> CmdResult<()> {
+pub async fn open_workspace(state: State<'_, AppState>) -> CmdResult<()> {
     let path = state.workspace().root().to_path_buf();
     #[cfg(windows)]
     let r = std::process::Command::new("explorer").arg(&path).spawn();
@@ -158,12 +160,12 @@ pub struct SkillView {
 }
 
 #[tauri::command]
-pub fn skills_list(state: State<'_, AppState>) -> Vec<SkillView> {
-    state.skills.list().into_iter().map(|s| SkillView { name: s.name, body: s.body }).collect()
+pub async fn skills_list(state: State<'_, AppState>) -> CmdResult<Vec<SkillView>> {
+    Ok(state.skills.list().into_iter().map(|s| SkillView { name: s.name, body: s.body }).collect())
 }
 
 #[tauri::command]
-pub fn skill_forget(state: State<'_, AppState>, name: String) -> CmdResult<String> {
+pub async fn skill_forget(state: State<'_, AppState>, name: String) -> CmdResult<String> {
     state.skills.forget(&name).map_err(err)
 }
 

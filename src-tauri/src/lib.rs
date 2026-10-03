@@ -109,6 +109,9 @@ pub fn focus_overlay(app: &AppHandle) {
     }
 }
 
+/// Shows (or creates) the settings window. Never call this from a sync
+/// command or an event handler: on Windows, creating a WebView2 window there
+/// deadlocks the main thread. Use an async command or `open_settings_soon`.
 pub fn show_settings(app: &AppHandle) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("settings") {
         w.show()?;
@@ -121,6 +124,16 @@ pub fn show_settings(app: &AppHandle) -> tauri::Result<()> {
         .min_inner_size(420.0, 480.0)
         .build()?;
     Ok(())
+}
+
+/// Opens the settings window from an event handler, off the main thread.
+pub fn open_settings_soon(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = show_settings(&app) {
+            log::warn!("could not open settings: {e}");
+        }
+    });
 }
 
 /// Places the overlay over the primary monitor's work area (not the full
@@ -166,9 +179,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             focus_overlay(app);
             let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": false }));
         }
-        "settings" => {
-            let _ = show_settings(app);
-        }
+        "settings" => open_settings_soon(app),
         "wander" => {
             let _ = app.emit_to("overlay", "wander:toggle", ());
         }
