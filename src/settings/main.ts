@@ -1,0 +1,235 @@
+import { invoke } from "@tauri-apps/api/core";
+
+interface Settings {
+  provider: "openai_compat" | "ollama" | "mock";
+  base_url: string;
+  model: string;
+  fast_model: string;
+  coord_mode: "auto" | "pixels" | "norm1000";
+  tier2_mode: "countdown" | "ask";
+  tier2_countdown_ms: number;
+  max_steps: number;
+  task_timeout_secs: number;
+  command_timeout_secs: number;
+  workspace_dir: string | null;
+  wander: boolean;
+  self_source_dir: string | null;
+  max_delegation_depth: number;
+  character: { id: string; color: string };
+  ollama: { num_thread: number | null; keep_alive: string; num_ctx: number };
+  voice: { backend: "system" | "whisper_api" | "off"; base_url: string; model: string; language: string | null };
+}
+
+interface SettingsView {
+  settings: Settings;
+  has_api_key: boolean;
+  has_stt_key: boolean;
+  workspace: string;
+  demo: boolean;
+  key_storage: string | null;
+}
+
+interface AuditRecord {
+  id: number;
+  ts_ms: number;
+  task_id: string;
+  kind: string;
+  tool: string | null;
+  tier: number | null;
+  decision: string | null;
+  detail: string | null;
+}
+
+const PRESETS: Record<string, Partial<Settings>> = {
+  openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "qwen/qwen3-vl-8b-instruct", fast_model: "google/gemini-2.5-flash-lite" },
+  ollama: { provider: "ollama", base_url: "http://localhost:11434", model: "qwen3-vl:4b", fast_model: "" },
+  lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "qwen3-vl-4b", fast_model: "" },
+  foundry: { provider: "openai_compat", base_url: "http://localhost:5273/v1", model: "phi-4-mini", fast_model: "" },
+  mock: { provider: "mock", base_url: "", model: "demo", fast_model: "" },
+};
+
+const $ = <T extends HTMLElement = HTMLInputElement>(id: string) => document.getElementById(id) as T;
+let current: Settings;
+
+function presetFor(s: Settings): string {
+  if (s.provider === "mock") return "mock";
+  if (s.provider === "ollama") return "ollama";
+  if (s.base_url.includes("openrouter.ai")) return "openrouter";
+  if (s.base_url.includes(":1234")) return "lmstudio";
+  if (s.base_url.includes(":5273")) return "foundry";
+  return "custom";
+}
+
+function syncVisibility(): void {
+  const preset = $<HTMLSelectElement>("preset").value;
+  $("ollama-opts").classList.toggle("hidden", preset !== "ollama");
+  $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
+}
+
+function fill(view: SettingsView): void {
+  const s = (current = view.settings);
+  $<HTMLSelectElement>("preset").value = presetFor(s);
+  $("base_url").value = s.base_url;
+  $("model").value = s.model;
+  $("fast_model").value = s.fast_model;
+  $("api_key").value = "";
+  $("api_key").placeholder = view.has_api_key ? "saved (leave blank to keep)" : "paste your key";
+  $<HTMLSelectElement>("coord_mode").value = s.coord_mode;
+  $("num_thread").value = s.ollama.num_thread?.toString() ?? "";
+  $("keep_alive").value = s.ollama.keep_alive;
+  $("num_ctx").value = String(s.ollama.num_ctx);
+  $<HTMLSelectElement>("tier2_mode").value = s.tier2_mode;
+  $("tier2_countdown_ms").value = String(s.tier2_countdown_ms);
+  $("max_steps").value = String(s.max_steps);
+  $("command_timeout_secs").value = String(s.command_timeout_secs);
+  $("workspace_dir").value = s.workspace_dir ?? "";
+  $("workspace_dir").placeholder = view.workspace;
+  $<HTMLSelectElement>("voice_backend").value = s.voice.backend;
+  $("voice_base_url").value = s.voice.base_url;
+  $("voice_model").value = s.voice.model;
+  $("voice_language").value = s.voice.language ?? "";
+  $("stt_key").value = "";
+  $("stt_key").placeholder = view.has_stt_key ? "saved (leave blank to keep)" : "e.g. a free Groq key";
+  $("self_source_dir").value = s.self_source_dir ?? "";
+  $("max_delegation_depth").value = String(s.max_delegation_depth);
+  $("color").value = s.character.color;
+  $("wander").checked = s.wander;
+  $("mode").textContent = view.demo
+    ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
+    : `Using ${s.model}. Workspace: ${view.workspace}`;
+  syncVisibility();
+}
+
+function collect(): Settings {
+  const num = (id: string, fallback: number) => {
+    const v = Number($(id).value);
+    return Number.isFinite(v) && $(id).value !== "" ? v : fallback;
+  };
+  const threads = $("num_thread").value.trim();
+  return {
+    ...current,
+    provider: PRESETS[$<HTMLSelectElement>("preset").value]?.provider ?? "openai_compat",
+    base_url: $("base_url").value.trim(),
+    model: $("model").value.trim(),
+    fast_model: $("fast_model").value.trim(),
+    coord_mode: $<HTMLSelectElement>("coord_mode").value as Settings["coord_mode"],
+    tier2_mode: $<HTMLSelectElement>("tier2_mode").value as Settings["tier2_mode"],
+    tier2_countdown_ms: num("tier2_countdown_ms", 2000),
+    max_steps: num("max_steps", 20),
+    command_timeout_secs: num("command_timeout_secs", 60),
+    workspace_dir: $("workspace_dir").value.trim() || null,
+    wander: $("wander").checked,
+    self_source_dir: $("self_source_dir").value.trim() || null,
+    max_delegation_depth: num("max_delegation_depth", 2),
+    character: { ...current.character, color: $("color").value },
+    ollama: { num_thread: threads ? Number(threads) : null, keep_alive: $("keep_alive").value.trim() || "30s", num_ctx: num("num_ctx", 8192) },
+    voice: {
+      backend: $<HTMLSelectElement>("voice_backend").value as Settings["voice"]["backend"],
+      base_url: $("voice_base_url").value.trim(),
+      model: $("voice_model").value.trim(),
+      language: $("voice_language").value.trim() || null,
+    },
+  };
+}
+
+async function loadSkills(): Promise<void> {
+  const skills = await invoke<{ name: string; body: string }[]>("skills_list");
+  const list = $("skills");
+  if (!skills.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "None yet. Waddle saves skills as it learns (you approve each one).";
+    list.replaceChildren(li);
+    return;
+  }
+  list.replaceChildren(
+    ...skills.map((sk) => {
+      const li = document.createElement("li");
+      const text = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = sk.name;
+      const body = document.createElement("pre");
+      body.textContent = sk.body;
+      text.append(name, body);
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "link";
+      forget.textContent = "Forget";
+      forget.onclick = async () => {
+        await invoke("skill_forget", { name: sk.name });
+        void loadSkills();
+      };
+      li.append(text, forget);
+      return li;
+    }),
+  );
+}
+
+async function loadAudit(): Promise<void> {
+  const rows = await invoke<AuditRecord[]>("audit_recent", { limit: 50 });
+  const body = $("audit");
+  body.replaceChildren(
+    ...rows.map((r) => {
+      const tr = document.createElement("tr");
+      const cells = [
+        new Date(r.ts_ms).toLocaleTimeString(),
+        r.tool ? `${r.kind}: ${r.tool}` : r.kind,
+        r.tier?.toString() ?? "",
+        r.decision ?? "",
+        r.detail ?? "",
+      ];
+      cells.forEach((text, i) => {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (i === 4) td.className = "detail";
+        tr.appendChild(td);
+      });
+      return tr;
+    }),
+  );
+}
+
+$<HTMLSelectElement>("preset").addEventListener("change", () => {
+  const p = PRESETS[$<HTMLSelectElement>("preset").value];
+  if (p) {
+    $("base_url").value = p.base_url ?? "";
+    $("model").value = p.model ?? "";
+    $("fast_model").value = p.fast_model ?? "";
+  }
+  syncVisibility();
+});
+$<HTMLSelectElement>("voice_backend").addEventListener("change", syncVisibility);
+$("open-ws").addEventListener("click", () => void invoke("open_workspace"));
+$("verify").addEventListener("click", async () => {
+  const r = await invoke<{ ok: boolean; entries: number; first_bad_id: number | null }>("audit_verify");
+  $("verify-result").textContent = r.ok
+    ? `Log intact: ${r.entries} entries verified.`
+    : `Tampering detected at entry ${r.first_bad_id}.`;
+});
+
+$<HTMLFormElement>("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const status = $("status");
+  status.textContent = "Saving…";
+  try {
+    const apiKey = $("api_key").value.trim();
+    const sttKey = $("stt_key").value.trim();
+    const view = await invoke<SettingsView>("save_settings", {
+      settings: collect(),
+      apiKey: apiKey ? apiKey : null,
+      sttKey: sttKey ? sttKey : null,
+    });
+    fill(view);
+    status.textContent = view.key_storage === "file" ? "Saved (keychain unavailable: key stored in a private file)." : "Saved.";
+  } catch (err) {
+    status.textContent = `Couldn't save: ${err}`;
+  }
+});
+
+void invoke<SettingsView>("get_settings").then(fill);
+void loadAudit();
+void loadSkills();
+setInterval(() => {
+  void loadAudit();
+  void loadSkills();
+}, 5000);

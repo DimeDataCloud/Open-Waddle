@@ -1,0 +1,417 @@
+//! End-to-end behaviour of the planner loop and the real-time session, using a
+//! scripted provider and a fake host.
+
+use async_trait::async_trait;
+use serde_json::json;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
+
+use waddle_core::agent::{prune_images, Agent, AgentDeps, ApprovalRequest, TaskStatus};
+use waddle_core::audit::AuditLog;
+use waddle_core::llm::mock::{call, reply, MockProvider};
+use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
+use waddle_core::tools::fs::Workspace;
+use waddle_core::tools::{Capabilities, GuiAction, GuiResult};
+use waddle_core::skills::SkillStore;
+use waddle_core::{AgentEvent, Decision, EnvInfo, Host, Lane, Outcome, Session, SessionConfig, Settings};
+
+type Policy = Box<dyn Fn(&ApprovalRequest) -> Option<Decision> + Send + Sync>;
+
+struct FakeHost {
+    events: Mutex<Vec<AgentEvent>>,
+    approvals: Mutex<Vec<ApprovalRequest>>,
+    gui_calls: Mutex<Vec<GuiAction>>,
+    /// None = never answer (let a countdown or halt resolve it).
+    policy: Policy,
+    busy: Mutex<Vec<bool>>,
+    applied: Mutex<Vec<Settings>>,
+}
+
+impl FakeHost {
+    fn new(policy: Policy) -> Arc<Self> {
+        Arc::new(Self {
+            events: Mutex::default(),
+            approvals: Mutex::default(),
+            gui_calls: Mutex::default(),
+            policy,
+            busy: Mutex::default(),
+            applied: Mutex::default(),
+        })
+    }
+    fn events(&self) -> Vec<AgentEvent> {
+        self.events.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl Host for FakeHost {
+    fn emit(&self, event: AgentEvent) {
+        self.events.lock().unwrap().push(event);
+    }
+    fn env(&self) -> EnvInfo {
+        EnvInfo { os: "TestOS".into(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, ..Default::default() } }
+    }
+    async fn request_approval(&self, req: ApprovalRequest) -> Decision {
+        self.approvals.lock().unwrap().push(req.clone());
+        match (self.policy)(&req) {
+            Some(d) => d,
+            None => std::future::pending().await,
+        }
+    }
+    fn resolve_approval(&self, _id: &str, _decision: Decision) {}
+    async fn gui(&self, action: GuiAction, _cancel: &CancellationToken) -> anyhow::Result<GuiResult> {
+        self.gui_calls.lock().unwrap().push(action.clone());
+        Ok(match action {
+            GuiAction::LookAtScreen => GuiResult::Screenshot {
+                image: ImageData { mime: "image/png".into(), base64: "AAAA".into() },
+                width: 1440,
+                height: 960,
+            },
+            _ => GuiResult::Done("ok".into()),
+        })
+    }
+    fn set_busy(&self, busy: bool) {
+        self.busy.lock().unwrap().push(busy);
+    }
+    async fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
+        self.applied.lock().unwrap().push(settings);
+        Ok(())
+    }
+}
+
+fn settings() -> Settings {
+    Settings { model: "test-model".into(), tier2_countdown_ms: 20, ..Settings::default() }
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    workspace: Arc<Workspace>,
+    audit: Arc<AuditLog>,
+}
+
+fn session_config(f: &Fixture, provider: Arc<dyn Provider>) -> SessionConfig {
+    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, self_source: None }
+}
+
+fn fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Arc::new(Workspace::new(dir.path().join("ws")).unwrap());
+    Fixture { _dir: dir, workspace, audit: Arc::new(AuditLog::open_in_memory().unwrap()) }
+}
+
+async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, self_source: None };
+    let env = host.env();
+    let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let r = agent.run("do the thing", &[], &mut rx).await;
+    (r.outcome, r.message)
+}
+
+#[tokio::test]
+async fn tiers_gate_actions_and_denials_reach_the_model() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Writing a note.", vec![call("write_file", json!({"path":"note.txt","content":"hi"}))]),
+        reply("Deleting it.", vec![call("run_command", json!({"command":"rm note.txt"}))]),
+        reply("Okay, I'll leave it.", vec![]),
+    ]));
+    // Tier 2 countdown elapses on its own; tier 3 is denied by the user.
+    let host = FakeHost::new(Box::new(|r| if r.tier == 3 { Some(Decision::Denied) } else { None }));
+    let (outcome, message) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    assert_eq!(outcome, Outcome::Done);
+    assert_eq!(message, "Okay, I'll leave it.");
+    assert_eq!(std::fs::read_to_string(f.workspace.root().join("note.txt")).unwrap(), "hi");
+
+    let approvals = host.approvals.lock().unwrap().clone();
+    assert_eq!(approvals.len(), 2);
+    assert_eq!((approvals[0].tier, approvals[0].countdown_ms), (2, Some(20)));
+    assert_eq!((approvals[1].tier, approvals[1].countdown_ms), (3, None));
+
+    let last_request = provider.requests.lock().unwrap().last().unwrap().clone();
+    let denial = last_request.iter().rev().find(|m| m.role == Role::Tool).unwrap();
+    assert!(denial.text.starts_with("The user denied this action (tier 3"), "{}", denial.text);
+
+    let report = f.audit.verify().unwrap();
+    // write_file (gate + result) and the denied command.
+    assert!(report.ok && report.entries == 3, "{report:?}");
+    let decisions: Vec<_> = f.audit.recent(50).unwrap().into_iter().filter_map(|r| r.decision).collect();
+    assert!(decisions.contains(&"denied".to_string()) && decisions.contains(&"approved".to_string()));
+
+    let events = host.events();
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::TextDelta { lane: Lane::Planner, .. })));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolFinished { tool, ok: true, .. } if tool == "write_file")));
+}
+
+#[tokio::test]
+async fn halting_mid_command_kills_it_and_stops_the_loop() {
+    let f = fixture();
+    let sleeper = if cfg!(windows) { "Start-Sleep 30" } else { "sleep 30" };
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Waiting.", vec![call("run_command", json!({"command": sleeper}))]),
+        reply("should never be asked", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let cancel = CancellationToken::new();
+    let c2 = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        c2.cancel();
+    });
+    let start = std::time::Instant::now();
+    let (outcome, _) = run_agent(&f, host, provider.clone(), cancel).await;
+    assert_eq!(outcome, Outcome::Halted);
+    assert!(start.elapsed() < Duration::from_secs(5));
+    assert_eq!(provider.request_count(), 1, "no model call after halt");
+    assert!(f.audit.recent(20).unwrap().iter().any(|r| r.kind == "halt"));
+}
+
+#[tokio::test]
+async fn denial_skips_remaining_calls_in_the_same_turn() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply(
+            "Two things.",
+            vec![call("run_command", json!({"command":"rm a"})), call("write_file", json!({"path":"b.txt","content":"b"}))],
+        ),
+        reply("Fine.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Denied)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    assert_eq!(host.approvals.lock().unwrap().len(), 1);
+    assert!(!f.workspace.root().join("b.txt").exists());
+    let req = provider.requests.lock().unwrap().last().unwrap().clone();
+    let results: Vec<_> = req.iter().filter(|m| m.role == Role::Tool).collect();
+    assert_eq!(results.len(), 2, "every tool call is answered");
+    assert!(results[1].text.starts_with("Skipped"));
+}
+
+#[tokio::test]
+async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Looking.", vec![call("look_at_screen", json!({}))]),
+        reply("Clicking.", vec![call("click", json!({"x": 500, "y": 250}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = AgentDeps {
+        provider: provider.clone(),
+        host: host.clone(),
+        audit: f.audit.clone(),
+        workspace: f.workspace.clone(),
+        settings: Settings { model: "qwen/qwen3-vl-8b-instruct".into(), ..settings() },
+        skills: None,
+        self_source: None,
+    };
+    let env = host.env();
+    let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    agent.run("click the middle top", &[], &mut rx).await;
+
+    let gui = host.gui_calls.lock().unwrap().clone();
+    assert!(matches!(gui[1], GuiAction::Click { x, y, .. } if x == 720.0 && y == 240.0), "{:?}", gui[1]);
+    let second = provider.requests.lock().unwrap()[1].clone();
+    assert!(second.iter().any(|m| m.role == Role::User && !m.images.is_empty()));
+}
+
+#[test]
+fn only_the_latest_screenshot_is_kept() {
+    let img = || ImageData { mime: "image/png".into(), base64: "X".into() };
+    let mut msgs = vec![Message::user_with_image("a", img()), Message::user("b"), Message::user_with_image("c", img())];
+    prune_images(&mut msgs);
+    assert!(msgs[0].images.is_empty() && msgs[0].text.contains("removed"));
+    assert_eq!(msgs[2].images.len(), 1);
+}
+
+/// Planner with a delay per step; instant canned answer when called without tools (quick lane).
+struct LaneProvider {
+    planner: MockProvider,
+    quick_calls: Mutex<u32>,
+}
+
+#[async_trait]
+impl Provider for LaneProvider {
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        if req.tools.is_empty() {
+            *self.quick_calls.lock().unwrap() += 1;
+            on_event(StreamEvent::TextDelta("On it!".into()));
+            return Ok(reply("On it!", vec![]));
+        }
+        self.planner.chat(req, on_event).await
+    }
+}
+
+async fn wait_until(mut cond: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if cond() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("condition not met in time");
+}
+
+#[tokio::test]
+async fn messages_while_busy_get_a_quick_reply_and_steer_the_planner() {
+    let f = fixture();
+    let provider = Arc::new(LaneProvider {
+        planner: MockProvider::scripted(vec![
+            reply("Listing.", vec![call("list_dir", json!({}))]),
+            reply("Adjusted!", vec![]),
+        ])
+        .with_delay(Duration::from_millis(150)),
+        quick_calls: Mutex::new(0),
+    });
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+
+    session.user_message("look at my files".into());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(session.is_busy());
+    session.user_message("actually only text files".into());
+
+    wait_until(|| !session.is_busy()).await;
+    assert_eq!(*provider.quick_calls.lock().unwrap(), 1);
+    let events = host.events();
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::TextDelta { lane: Lane::Quick, text, .. } if text == "On it!")));
+    let second = provider.planner.requests.lock().unwrap()[1].clone();
+    let steer = second.iter().find(|m| m.text.contains("(New message from the user")).expect("steering message");
+    assert!(steer.text.contains("only text files"));
+    assert!(steer.text.contains("You already replied"), "{}", steer.text);
+    assert!(matches!(events.last(), Some(AgentEvent::TaskFinished { outcome: Outcome::Done, .. })));
+    assert_eq!(*host.busy.lock().unwrap(), vec![true, false]);
+}
+
+#[tokio::test]
+async fn saying_stop_halts_without_a_model_call() {
+    let f = fixture();
+    let provider = Arc::new(LaneProvider {
+        planner: MockProvider::scripted(vec![reply("Thinking hard.", vec![call("list_dir", json!({}))])]).with_delay(Duration::from_secs(5)),
+        quick_calls: Mutex::new(0),
+    });
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+    session.user_message("do something slow".into());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    session.user_message("Stop!".into());
+    wait_until(|| !session.is_busy()).await;
+    assert_eq!(*provider.quick_calls.lock().unwrap(), 0);
+    assert!(host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { outcome: Outcome::Halted, .. })));
+}
+
+#[tokio::test]
+async fn follow_up_tasks_see_conversation_memory() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Hi there!", vec![]), reply("Sure.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+    session.user_message("hello".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    wait_until(|| !session.is_busy()).await;
+    session.user_message("and again".into());
+    wait_until(|| provider.request_count() == 2).await;
+    let second = provider.requests.lock().unwrap()[1].clone();
+    assert!(second.iter().any(|m| m.role == Role::Assistant && m.text == "Hi there!"));
+}
+
+fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, self_source }
+}
+
+async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {
+    let env = deps.host.env();
+    let agent = Agent::new(deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    agent.run("goal", &[], &mut rx).await
+}
+
+#[tokio::test]
+async fn delegate_runs_a_nested_agent_and_returns_its_result() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Splitting this up.", vec![call("delegate", json!({"goal": "write the note", "context": "say hi"}))]),
+        reply("Writing.", vec![call("write_file", json!({"path": "sub.txt", "content": "hi"}))]),
+        reply("Note written.", vec![]),
+        reply("All done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = deps_with(&f, host.clone(), provider.clone(), None, None);
+    let r = run_with(&deps).await;
+    assert_eq!((r.outcome, r.message.as_str()), (Outcome::Done, "All done."));
+    assert!(f.workspace.root().join("sub.txt").exists());
+    let requests = provider.requests.lock().unwrap().clone();
+    assert!(requests[1][0].text.contains("You are a sub-task (depth 1)"));
+    assert!(requests[1].iter().any(|m| m.text.contains("Context from the parent task:\nsay hi")));
+    let parent_view = requests[3].iter().rev().find(|m| m.role == Role::Tool).unwrap();
+    assert_eq!(parent_view.text, "Sub-task done: Note written.");
+}
+
+#[tokio::test]
+async fn delegation_stops_at_the_depth_limit() {
+    let f = fixture();
+    let d = |g: &str| reply("Delegating.", vec![call("delegate", json!({"goal": g}))]);
+    let provider = Arc::new(MockProvider::scripted(vec![d("a"), d("b"), d("c"), reply("leaf", vec![]), reply("mid", vec![]), reply("top", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = deps_with(&f, host, provider.clone(), None, None);
+    run_with(&deps).await;
+    let requests = provider.requests.lock().unwrap().clone();
+    // Depth-2 agent is not offered `delegate`; its attempt is refused.
+    let refused = requests.iter().flatten().any(|m| m.text.contains("delegation depth limit (2) reached"));
+    assert!(refused);
+}
+
+#[tokio::test]
+async fn skills_need_approval_and_load_into_later_prompts() {
+    let f = fixture();
+    let store = Arc::new(SkillStore::new(f.workspace.root().parent().unwrap().join("skills")).unwrap());
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Remembering that.", vec![call("save_skill", json!({"name": "Notes", "instructions": "Notes go in notes.txt"}))]),
+        reply("Saved.", vec![]),
+        reply("Hi again.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = deps_with(&f, host.clone(), provider.clone(), Some(store.clone()), None);
+    run_with(&deps).await;
+    assert_eq!(host.approvals.lock().unwrap()[0].tier, 3);
+    run_with(&deps).await;
+    let third = provider.requests.lock().unwrap()[2].clone();
+    assert!(third[0].text.contains("### notes\nNotes go in notes.txt"));
+}
+
+#[tokio::test]
+async fn self_settings_changes_are_whitelisted_and_applied_through_the_host() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Switching.", vec![call("update_settings", json!({"changes": {"base_url": "https://evil.example"}}))]),
+        reply("Okay, model then.", vec![call("update_settings", json!({"changes": {"model": "better/model"}}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = deps_with(&f, host.clone(), provider, Some(Arc::new(SkillStore::new(f.workspace.root().join("..").join("sk")).unwrap())), None);
+    run_with(&deps).await;
+    let applied = host.applied.lock().unwrap().clone();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].model, "better/model");
+    assert_eq!(applied[0].base_url, Settings::default().base_url);
+}
+
+#[tokio::test]
+async fn self_source_is_reachable_with_approval_only() {
+    let f = fixture();
+    let src = Arc::new(Workspace::new(f.workspace.root().parent().unwrap().join("src")).unwrap());
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Patching myself.", vec![call("write_file", json!({"path": "self/notes.md", "content": "v2"}))]),
+        reply("Reading back.", vec![call("read_file", json!({"path": "self/notes.md"}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|r| Some(if r.tier == 3 { Decision::Approved } else { Decision::Denied })));
+    let deps = deps_with(&f, host.clone(), provider.clone(), None, Some(src.clone()));
+    run_with(&deps).await;
+    assert_eq!(std::fs::read_to_string(src.root().join("notes.md")).unwrap(), "v2");
+    assert_eq!(host.approvals.lock().unwrap()[0].tier, 3);
+    let last = provider.requests.lock().unwrap().last().unwrap().clone();
+    assert!(last.iter().any(|m| m.role == Role::Tool && m.text.contains("v2")));
+}

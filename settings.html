@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Waddle Settings</title>
+    <link rel="stylesheet" href="/src/settings/settings.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Waddle Settings</h1>
+        <p id="mode" class="muted"></p>
+      </header>
+
+      <form id="form">
+        <fieldset>
+          <legend>Brain</legend>
+          <label>Preset
+            <select id="preset">
+              <option value="openrouter">OpenRouter (cloud, cheap: recommended)</option>
+              <option value="ollama">Ollama (local, free, slower)</option>
+              <option value="lmstudio">LM Studio (local)</option>
+              <option value="foundry">Foundry Local (local, NPU)</option>
+              <option value="custom">Custom OpenAI-compatible</option>
+              <option value="mock">Demo (no AI)</option>
+            </select>
+          </label>
+          <label>Endpoint URL <input id="base_url" type="url" required /></label>
+          <label>Planner model <input id="model" required /></label>
+          <label>Quick-reply model <input id="fast_model" placeholder="blank = same as planner" /></label>
+          <label>API key <input id="api_key" type="password" autocomplete="off" /></label>
+          <label>Coordinates
+            <select id="coord_mode">
+              <option value="auto">Auto (from model name)</option>
+              <option value="norm1000">0–1000 grid (Qwen, Gemini)</option>
+              <option value="pixels">Pixels (Claude, GPT)</option>
+            </select>
+          </label>
+          <div id="ollama-opts" class="grid3">
+            <label>CPU threads <input id="num_thread" type="number" min="1" placeholder="auto" /></label>
+            <label>Keep loaded <input id="keep_alive" placeholder="30s" /></label>
+            <label>Context <input id="num_ctx" type="number" min="2048" step="1024" /></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Safety</legend>
+          <label>Tier 2 actions (clicks, typing, new files, read-only commands)
+            <select id="tier2_mode">
+              <option value="countdown">Show, then go after a countdown</option>
+              <option value="ask">Always ask first</option>
+            </select>
+          </label>
+          <div class="grid3">
+            <label>Countdown (ms) <input id="tier2_countdown_ms" type="number" min="500" step="250" /></label>
+            <label>Max steps <input id="max_steps" type="number" min="1" max="100" /></label>
+            <label>Command timeout (s) <input id="command_timeout_secs" type="number" min="5" max="600" /></label>
+          </div>
+          <label>Workspace folder <input id="workspace_dir" placeholder="Documents/Waddle" /></label>
+          <button type="button" id="open-ws" class="link">Open workspace folder</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Self-improvement</legend>
+          <p class="muted">Waddle can save skills to its memory, tune its own settings, split big jobs into sub-tasks, and (if you point it at its source folder) edit its own code. Every change to itself needs your approval.</p>
+          <div class="grid2">
+            <label>Sub-task depth <input id="max_delegation_depth" type="number" min="0" max="4" title="0 turns delegation off" /></label>
+            <label>Own source folder <input id="self_source_dir" placeholder="off" /></label>
+          </div>
+          <h4>Learned skills</h4>
+          <ul id="skills" class="skills"></ul>
+        </fieldset>
+
+        <fieldset>
+          <legend>Voice</legend>
+          <label>Talk input
+            <select id="voice_backend">
+              <option value="system">System dictation (Windows voice typing, free)</option>
+              <option value="whisper_api">Whisper-compatible API</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
+          <div id="whisper-opts">
+            <label>Transcription URL <input id="voice_base_url" type="url" /></label>
+            <div class="grid2">
+              <label>Model <input id="voice_model" /></label>
+              <label>Language <input id="voice_language" placeholder="auto" /></label>
+            </div>
+            <label>Transcription API key <input id="stt_key" type="password" autocomplete="off" /></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Character</legend>
+          <div class="grid2">
+            <label>Colour <input id="color" type="color" /></label>
+            <label class="check"><input id="wander" type="checkbox" /> Wander when idle</label>
+          </div>
+        </fieldset>
+
+        <div class="actions">
+          <span id="status" class="muted"></span>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+
+      <section>
+        <h2>Activity log <button type="button" id="verify" class="link">Verify integrity</button></h2>
+        <p id="verify-result" class="muted"></p>
+        <table>
+          <thead><tr><th>Time</th><th>Event</th><th>Tier</th><th>Decision</th><th>Detail</th></tr></thead>
+          <tbody id="audit"></tbody>
+        </table>
+      </section>
+    </main>
+    <script type="module" src="/src/settings/main.ts"></script>
+  </body>
+</html>
