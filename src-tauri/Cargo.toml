@@ -26,6 +26,7 @@ log.workspace = true
 tauri = { version = "2.12", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-global-shortcut = "2.4"
 enigo = "0.6"
+arboard = { version = "3", default-features = false }
 xcap = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 keyring = "4"

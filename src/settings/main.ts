@@ -42,7 +42,7 @@ interface AuditRecord {
 }
 
 const PRESETS: Record<string, Partial<Settings>> = {
-  openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "qwen/qwen3-vl-8b-instruct", fast_model: "google/gemini-2.5-flash-lite" },
+  openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna", fast_model: "google/gemini-2.5-flash-lite" },
   ollama: { provider: "ollama", base_url: "http://localhost:11434", model: "qwen3.5:4b", fast_model: "" },
   lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "qwen3.5-4b", fast_model: "" },
   foundry: { provider: "openai_compat", base_url: "http://localhost:5273/v1", model: "phi-4-mini", fast_model: "" },

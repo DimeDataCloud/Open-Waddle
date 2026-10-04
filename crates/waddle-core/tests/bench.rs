@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::{CoordMode, ProviderKind, Reasoning};
-use waddle_core::llm::{build_provider, ImageData};
+use waddle_core::llm::{build_provider, ChatRequest, ChatResponse, EventSink, ImageData, Provider};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::{Decision, Host, Outcome, Settings};
@@ -68,6 +68,47 @@ fn load() -> Suite {
     Suite { tasks, boxes, windows }
 }
 
+/// Spaces out model calls to stay under a requests-per-minute cap
+/// (`WADDLE_BENCH_RPM`; new OpenRouter accounts get 20 per model), and retries
+/// once after a 429. Waiting is not counted in a task's time.
+struct Paced {
+    inner: Arc<dyn Provider>,
+    gap: std::time::Duration,
+    waited: Arc<Mutex<f64>>,
+}
+
+static NEXT_SLOT: tokio::sync::Mutex<Option<Instant>> = tokio::sync::Mutex::const_new(None);
+
+impl Paced {
+    async fn slot(&self) {
+        let started = Instant::now();
+        let mut next = NEXT_SLOT.lock().await;
+        let at = next.unwrap_or(started).max(started);
+        *next = Some(at + self.gap);
+        drop(next);
+        tokio::time::sleep_until(at.into()).await;
+        *self.waited.lock().unwrap() += started.elapsed().as_secs_f64();
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for Paced {
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        self.slot().await;
+        let req2 = req;
+        match self.inner.chat(req, on_event).await {
+            Err(e) if e.to_string().contains("429") => {
+                let t = Instant::now();
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                *self.waited.lock().unwrap() += t.elapsed().as_secs_f64();
+                self.slot().await;
+                self.inner.chat(req2, &mut |_| {}).await
+            }
+            r => r,
+        }
+    }
+}
+
 fn screen(name: &str) -> ImageData {
     let png = std::fs::read(bench_dir().join(format!("screens/{name}.png"))).unwrap();
     ImageData { mime: "image/png".into(), base64: base64::engine::general_purpose::STANDARD.encode(png) }
@@ -97,6 +138,19 @@ fn satisfies(alt: &Value, action: &GuiAction, focus: Option<(f64, f64)>, boxes: 
             alt["keys"] == "enter" && text.ends_with('\n')
         }
         GuiAction::PressKeys { keys } => alt["keys"].as_str().is_some_and(|k| norm_keys(keys) == norm_keys(k)),
+        GuiAction::PointAt { x, y, .. } => bx("point").is_some_and(|b| inside((*x, *y), b)),
+        GuiAction::Scroll { dx, dy, at } => {
+            let dir_ok = match alt["scroll"].as_str() {
+                Some("down") => *dy > 0,
+                Some("up") => *dy < 0,
+                Some("right") => *dx > 0,
+                Some("left") => *dx < 0,
+                _ => false,
+            };
+            dir_ok && bx("at").is_none_or(|b| at.is_none_or(|p| inside(p, b)))
+        }
+        GuiAction::Drag { from, to } => bx("drag").is_some_and(|b| inside(*from, b)) && bx("to").is_some_and(|b| inside(*to, b)),
+        GuiAction::WriteClipboard { text } => alt["clipboard"].as_str().is_some_and(|w| text.to_lowercase().contains(&w.to_lowercase())),
         _ => false,
     }
 }
@@ -119,6 +173,8 @@ fn check_steps(expect: &[Value], actions: &[GuiAction], boxes: &HashMap<String, 
 struct TaskResult {
     id: String,
     pass: bool,
+    /// Did the right things, but may have kept re-checking the (static) test screen until the step limit.
+    hit: bool,
     secs: f64,
     cost: f64,
     tokens: u64,
@@ -130,6 +186,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     let id = task["id"].as_str().unwrap().to_string();
     let dir = tempfile::tempdir().unwrap();
     let workspace = Arc::new(Workspace::new(dir.path().join("ws")).unwrap());
+    let reminders = Arc::new(waddle_core::reminders::ReminderStore::new(dir.path().join("reminders.json")));
     let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
     *host.os.lock().unwrap() = "windows".into();
     let screen_name = task["screen"].as_str().unwrap_or("dialog");
@@ -168,13 +225,19 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         Ok("norm1000") => settings.coord_mode = CoordMode::Norm1000,
         _ => {}
     }
+    let waited = Arc::new(Mutex::new(0.0));
+    let mut provider = build_provider(&settings, Some(key.to_string()));
+    if let Some(rpm) = std::env::var("WADDLE_BENCH_RPM").ok().and_then(|v| v.parse::<f64>().ok()) {
+        provider = Arc::new(Paced { inner: provider, gap: std::time::Duration::from_secs_f64(60.0 / rpm), waited: waited.clone() });
+    }
     let deps = AgentDeps {
-        provider: build_provider(&settings, Some(key.to_string())),
+        provider,
         host: host.clone(),
         audit: Arc::new(AuditLog::open_in_memory().unwrap()),
         workspace: workspace.clone(),
         settings,
         skills: None,
+        reminders: Some(reminders.clone()),
         self_source: None,
     };
     let env = host.env();
@@ -187,17 +250,24 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         Ok(r) => r,
         Err(_) => waddle_core::agent::RunResult { outcome: Outcome::TimedOut, message: "timed out".into() },
     };
-    let secs = started.elapsed().as_secs_f64();
+    let secs = started.elapsed().as_secs_f64() - *waited.lock().unwrap();
     let usage = agent.usage();
     let actions = host.gui_calls.lock().unwrap().clone();
     let steps = host.timeline.lock().unwrap().iter().filter(|(_, l)| l == "model call").count();
 
-    let mut pass = r.outcome == Outcome::Done || r.outcome == Outcome::Failed;
+    // The fake screen never changes after a click, so a model that checks its work
+    // sees "nothing happened" and may retry until the step limit. `hit` forgives that.
+    let provider_error = r.message.starts_with("I couldn't reach my brain");
+    let finished = (r.outcome == Outcome::Done || r.outcome == Outcome::Failed) && !provider_error;
+    let mut pass = true;
     if let Some(expect) = task["expect"].as_array() {
         pass &= check_steps(expect, &actions, boxes);
     }
     if let Some(want) = task["answer"].as_str() {
         pass &= r.message.to_lowercase().contains(want);
+    }
+    if let Some(want) = task["reminder"].as_str() {
+        pass &= reminders.list().iter().any(|r| r.text.to_lowercase().contains(want));
     }
     if task["no_input"] == true {
         pass &= !actions.iter().any(GuiAction::is_blind_input);
@@ -206,6 +276,8 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         let body = std::fs::read_to_string(workspace.root().join(f[0].as_str().unwrap())).unwrap_or_default();
         pass &= body.trim().eq_ignore_ascii_case(f[1].as_str().unwrap());
     }
+    let hit = pass && !provider_error && r.outcome != Outcome::TimedOut;
+    let pass = pass && finished;
     if let (true, Ok(dir)) = (pass, std::env::var("WADDLE_BENCH_TRACES")) {
         let store = waddle_core::traces::TraceStore::new(dir.into());
         let (messages, tools) = agent.transcript();
@@ -231,8 +303,8 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
             other => format!("{other:?}"),
         })
         .collect();
-    let note = format!("{:?} [{}] {}", r.outcome, did.join(" "), r.message.chars().take(100).collect::<String>().replace('\n', " "));
-    TaskResult { id, pass, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
+    let note = format!("{:?} [{}] {}", r.outcome, did.join(" "), r.message.chars().take(400).collect::<String>().replace('\n', " "));
+    TaskResult { id, pass, hit, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
 }
 
 fn local() -> bool {
@@ -249,13 +321,19 @@ async fn benchmark_models() {
     let tag = std::env::var("WADDLE_BENCH_TAG").unwrap_or_default();
     std::fs::create_dir_all(bench_dir().join("results")).unwrap();
     let mut summary = vec![];
+    // New OpenRouter accounts get a low per-model requests-per-minute cap.
+    let limit = std::env::var("WADDLE_BENCH_CONCURRENCY").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+    let gate = Arc::new(tokio::sync::Semaphore::new(limit));
     for model in &models {
         // Tasks run concurrently (each has its own fake desktop) to keep the bench quick.
         let mut handles = vec![];
         for _ in 0..repeat {
             for task in suite.tasks.clone() {
-                let (model, suite, key) = (model.clone(), suite.clone(), key.clone());
-                let h = tokio::spawn(async move { run_task(&model, &task, &suite, &key).await });
+                let (model, suite, key, gate) = (model.clone(), suite.clone(), key.clone(), gate.clone());
+                let h = tokio::spawn(async move {
+                    let _permit = gate.acquire_owned().await.unwrap();
+                    run_task(&model, &task, &suite, &key).await
+                });
                 // A local server works through one request at a time; queueing would only add timeouts.
                 if local() {
                     let _ = h.await.map(|r| handles.push(tokio::spawn(async move { r })));
@@ -270,23 +348,24 @@ async fn benchmark_models() {
         }
         println!("\n### {model} {tag}");
         for r in &results {
-            println!("{} {:12} {:5.1}s ${:.5} {}", if r.pass { "PASS" } else { "FAIL" }, r.id, r.secs, r.cost, r.note);
+            println!("{} {:12} {:5.1}s ${:.5} {}", if r.pass { "PASS" } else if r.hit { "HIT " } else { "FAIL" }, r.id, r.secs, r.cost, r.note);
         }
         let n = results.len() as f64;
         let passed = results.iter().filter(|r| r.pass).count();
+        let hits = results.iter().filter(|r| r.hit).count();
         let secs = results.iter().map(|r| r.secs).sum::<f64>() / n;
         let cost = results.iter().map(|r| r.cost).sum::<f64>() / n;
         let tokens = results.iter().map(|r| r.tokens).sum::<u64>() as f64 / n;
         let steps = results.iter().map(|r| r.steps).sum::<usize>() as f64 / n;
-        let line = format!("{model:45} {tag:8} {passed:3}/{:<3} {secs:6.1}s/task ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
+        let line = format!("{model:45} {tag:8} {passed:3}/{:<3} hit {hits:3} {secs:6.1}s/task ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
         println!("{line}");
         summary.push(line);
         let file = bench_dir().join(format!("results/{}{}.json", model.replace('/', "__"), if tag.is_empty() { String::new() } else { format!("@{tag}") }));
         let rows: Vec<Value> = results
             .iter()
-            .map(|r| json!({ "id": r.id, "pass": r.pass, "secs": r.secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
+            .map(|r| json!({ "id": r.id, "pass": r.pass, "hit": r.hit, "secs": r.secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
             .collect();
-        std::fs::write(file, serde_json::to_string_pretty(&json!({ "model": model, "tag": tag, "passed": passed, "runs": results.len(), "secs": secs, "cost": cost, "results": rows })).unwrap()).unwrap();
+        std::fs::write(file, serde_json::to_string_pretty(&json!({ "model": model, "tag": tag, "passed": passed, "hits": hits, "runs": results.len(), "secs": secs, "cost": cost, "results": rows })).unwrap()).unwrap();
     }
     println!("\n## Summary");
     for l in summary {

@@ -82,6 +82,7 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
         workspace: workspace.clone(),
         settings,
         skills: None,
+        reminders: None,
         self_source: None,
     };
     let env = host.env();

@@ -36,14 +36,12 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - A Whisper-compatible backend is also available: Groq's free tier, OpenAI, or a local whisper server.
 - **Act.**
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
-  - Open apps, click, type, press shortcuts. Waddle walks to the target and stands beside it before each action.
+  - Open apps, click, type, press shortcuts, scroll and drag. Waddle walks to the target and stands beside it before each action.
   - Read and write files and run terminal commands in its workspace folder (`Documents\Waddle`).
-- **Play.**
-  - Say "let's play" (or pick **Play: wreck the desktop!** from the tray), and a frozen copy of your screen becomes a level, *Destroy Any Website*-style.
-  - Run and jump with A/D and Space; hold Space to flap. Aim and shoot with the mouse. Pick from seven duck weapons with 1–7 (pea shooter, crumb blaster, feather shotgun, egg bazooka, laser eyes, hot sauce, quack missiles); right-click throws an egg grenade.
-  - Windows crumble into debris and reveal a pixel-art pond underneath.
-  - Ask "you play" and Waddle wrecks it by itself, aiming at a window if you name one.
-  - Nothing real is touched. Esc (or the ✕) puts everything back.
+- **Assist.**
+  - "Where's the export button?" or "how do I turn on Night light?": Waddle walks over and circles the spot with a label instead of clicking, so you learn where it is.
+  - Reads what you copied ("summarise what I copied", "translate this") and puts results on your clipboard ("copy that address for me").
+  - Reminders: "remind me in 20 minutes to stretch", "remind me at 3pm to call Sam". The duck chimes and pops up when one is due, even after a restart, and says so if it came due while Waddle was closed.
 - **Improve itself, with your approval.**
   - Save "skills" (lessons it reads back at the start of every task) and change its own settings (model, wandering, safety countdown…).
   - Split big jobs into sub-tasks handled by nested copies of itself, up to 2 levels deep by default.
@@ -53,9 +51,9 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
 
 | Tier | What | What happens |
 |---|---|---|
-| 0 | Reading the screen | Runs silently |
-| 1 | Opening apps, reading the workspace, starting sub-tasks | Runs, logged |
-| 2 | Clicks, typing, new files, read-only commands (`dir`, `git status`…) | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
+| 0 | Reading the screen, pointing at things | Runs silently |
+| 1 | Opening apps, scrolling, reading the workspace or clipboard, reminders, starting sub-tasks | Runs, logged |
+| 2 | Clicks, typing, dragging, copying to the clipboard, new files, read-only commands (`dir`, `git status`…) | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
 | 3 | Deleting/overwriting, any other command, network, self-changes (skills, settings, own code) | Waddle turns red and **waits for your click** |
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
@@ -134,7 +132,6 @@ crates/waddle-core/   Brain, non-GUI Hands and safety (no OS code; fully unit-te
   src/tools/            tool schemas, coordinate conversion, workspace files, commands
 src-tauri/            Desktop shell: overlay, click-through, window tracking, input, UIA, voice, tray
 src/                  Overlay frontend: sprite renderer, palette maths, physics, pathfinding, UI
-src/play/             Play mode: destructible terrain, duck platformer physics, weapons, autoplay bot
 bench/                Model benchmark: realistic app screens rendered in Chrome + task checks
 training/             Synthetic click data, LoRA fine-tuning and GRPO scripts
 docs/ARCHITECTURE.md  How the blueprint maps to this MVP, what's deferred and why

@@ -47,8 +47,13 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
     let arg = |k: &str| call.arguments.get(k).and_then(Value::as_str).unwrap_or("");
     match call.name.as_str() {
         "list_windows" | "look_at_screen" | "find_elements" => assess(Tier::Passive, "reads the screen"),
+        "point_at" => assess(Tier::Passive, "points at the screen without touching it"),
+        "scroll" => assess(Tier::NonDestructive, "scrolls"),
+        "read_clipboard" => assess(Tier::NonDestructive, "reads the clipboard"),
+        "reminder" => assess(Tier::NonDestructive, "manages reminders"),
+        "copy_to_clipboard" => assess(Tier::ScopedMutation, "replaces what's on the clipboard"),
+        "drag" => assess(Tier::ScopedMutation, "drags in another application"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
-        "play" => assess(Tier::NonDestructive, "plays with a copy of the screen; nothing real changes"),
         "read_file" | "list_dir" => assess(Tier::NonDestructive, "reads the workspace"),
         "save_skill" | "forget_skill" => assess(Tier::Destructive, "changes Waddle's long-term memory (loaded into every task)"),
         "update_settings" => assess(Tier::Destructive, "changes Waddle's own settings"),
@@ -173,8 +178,12 @@ mod tests {
         assert_eq!(tier_of("look_at_screen", json!({}), false), Tier::Passive);
         assert_eq!(tier_of("find_elements", json!({}), false), Tier::Passive);
         assert_eq!(tier_of("open_app", json!({"name":"notepad"}), false), Tier::NonDestructive);
-        assert_eq!(tier_of("play", json!({"autoplay": true}), false), Tier::NonDestructive);
         assert_eq!(tier_of("read_file", json!({"path":"a"}), true), Tier::NonDestructive);
+        assert_eq!(tier_of("point_at", json!({"x":1,"y":2}), false), Tier::Passive);
+        assert_eq!(tier_of("scroll", json!({"direction":"down"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("reminder", json!({"action":"add"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("drag", json!({}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("copy_to_clipboard", json!({"text":"x"}), false), Tier::ScopedMutation);
     }
 
     #[test]

@@ -153,6 +153,9 @@ pub struct Settings {
     pub reasoning: Reasoning,
     /// Start every task with a screenshot (and the window list) attached to the request.
     pub look_first: bool,
+    /// Skip that opening screenshot when a quick check (TypeSafe Jev, on OpenRouter)
+    /// is confident the task doesn't need the screen: reminders, files, maths, writing.
+    pub smart_look: bool,
     /// Save each task (conversation and screenshots) on this computer as training data.
     pub record_traces: bool,
     pub tier2_mode: Tier2Mode,
@@ -178,11 +181,12 @@ impl Default for Settings {
         Self {
             provider: ProviderKind::OpenaiCompat,
             base_url: "https://openrouter.ai/api/v1".into(),
-            model: "qwen/qwen3-vl-8b-instruct".into(),
+            model: "openai/gpt-6-luna".into(),
             fast_model: "google/gemini-2.5-flash-lite".into(),
             coord_mode: CoordMode::Auto,
             reasoning: Reasoning::Default,
             look_first: true,
+            smart_look: true,
             record_traces: false,
             tier2_mode: Tier2Mode::Countdown,
             tier2_countdown_ms: 2000,
@@ -239,6 +243,7 @@ pub const SELF_EDITABLE: &[&str] = &[
     "coord_mode",
     "reasoning",
     "look_first",
+    "smart_look",
     "wander",
     "color",
     "tier2_mode",
@@ -275,6 +280,7 @@ pub fn apply_patch(base: &Settings, patch: &serde_json::Value) -> anyhow::Result
             "coord_mode" => next.coord_mode = parse_enum(k, v)?,
             "reasoning" => next.reasoning = parse_enum(k, v)?,
             "look_first" => next.look_first = v.as_bool().ok_or_else(|| anyhow::anyhow!("`look_first` must be true or false"))?,
+            "smart_look" => next.smart_look = v.as_bool().ok_or_else(|| anyhow::anyhow!("`smart_look` must be true or false"))?,
             "wander" => next.wander = v.as_bool().ok_or_else(|| anyhow::anyhow!("`wander` must be true or false"))?,
             "color" => next.character.color = text()?,
             "tier2_mode" => next.tier2_mode = parse_enum(k, v)?,

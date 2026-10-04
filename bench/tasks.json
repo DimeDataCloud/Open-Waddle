@@ -24,6 +24,12 @@
     { "id": "write-file", "goal": "Create a file named hello.txt that contains the text hi", "file": ["hello.txt", "hi"], "no_input": true },
     { "id": "a11y", "screen": "dialog", "goal": "Close Notepad without saving",
       "elements": [[1, "button", "Save", "save"], [2, "button", "Don't save", "dont-save"], [3, "button", "Cancel", "cancel"], [4, "edit", "Text editor", null]],
-      "expect": [[{ "element": 2 }, { "click": "dont-save" }]] }
+      "expect": [[{ "element": 2 }, { "click": "dont-save" }]] },
+    {"id": "where-toggle", "screen": "settings", "goal": "Where do I turn on Night light? Just show me, I'll do it myself.", "expect": [[{"point": "night-toggle"}, {"point": "night-row"}]], "no_input": true},
+    {"id": "where-compose", "screen": "inbox", "goal": "How do I start a new email? Show me where to click.", "expect": [[{"point": "compose"}]], "no_input": true},
+    {"id": "scroll", "screen": "video", "goal": "Scroll down so I can see more videos", "expect": [[{"scroll": "down"}]]},
+    {"id": "drag", "screen": "explorer", "goal": "Drag budget-2026.xlsx onto the Downloads folder in the sidebar", "expect": [[{"drag": "budget-2026", "to": "nav-downloads"}]]},
+    {"id": "copy", "screen": "inbox", "goal": "Copy the subject of the email I have open to my clipboard", "expect": [[{"clipboard": "offsite"}]]},
+    {"id": "remind", "goal": "Remind me in 20 minutes to stretch", "reminder": "stretch", "no_input": true}
   ]
 }

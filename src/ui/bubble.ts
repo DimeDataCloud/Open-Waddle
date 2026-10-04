@@ -2,10 +2,11 @@
 // and quick replies stream into their own lines; tool activity shows as a
 // status line with the latest output.
 
-export type LineKind = "planner" | "quick" | "user" | "tool" | "output" | "notice" | "error";
+export type LineKind = "planner" | "quick" | "user" | "tool" | "output" | "notice" | "error" | "reminder";
 
 const MAX_LINES = 5;
 const LINGER_MS = 9000;
+const REMINDER_LINGER_MS = 60_000;
 
 export class Bubble {
   private lines: HTMLElement;
@@ -24,10 +25,10 @@ export class Bubble {
     return !this.el.classList.contains("hidden");
   }
 
-  private show(): void {
+  private show(linger = LINGER_MS): void {
     this.el.classList.remove("hidden");
     window.clearTimeout(this.hideTimer);
-    if (!this.busy) this.hideTimer = window.setTimeout(() => this.hide(), LINGER_MS);
+    if (!this.busy) this.hideTimer = window.setTimeout(() => this.hide(), linger);
   }
 
   hide(): void {
@@ -48,7 +49,7 @@ export class Bubble {
     div.textContent = text;
     this.lines.appendChild(div);
     while (this.lines.children.length > MAX_LINES) this.lines.firstElementChild!.remove();
-    this.show();
+    this.show(kind === "reminder" ? REMINDER_LINGER_MS : LINGER_MS);
     return div;
   }
 

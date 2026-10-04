@@ -6,11 +6,11 @@ import { alarmPalette, buildPalette } from "./body/palette";
 import { standBeside } from "./body/pathfind";
 import { computeSegments, type Segment, type WinRect } from "./body/platforms";
 import { SpriteRenderer } from "./body/renderer";
-import { api, on, type Events, type HitRect, type Platform } from "./ipc";
-import { Game } from "./play/game";
+import { api, on, type HitRect, type Platform } from "./ipc";
 import { ApprovalCard } from "./ui/approval";
 import { Bubble } from "./ui/bubble";
 import { Chat } from "./ui/chat";
+import { chime, Pointer } from "./ui/pointer";
 
 const SCALE = 4; // sprite pixels → logical pixels (16x14 → 64x56)
 const IDLE_TICK_MS = 120;
@@ -33,12 +33,10 @@ let lastInteraction = performance.now();
 let lastRect: HitRect | null = null;
 let sentRects = "";
 let hoverTimer = 0;
-/** Play mode owns the screen while set; the normal duck and its UI step aside. */
-let game: Game | null = null;
-let playStarting = false;
 
 const duck = new Duck({ w: renderer.width, h: renderer.height }, screen.w * 0.7, screen.h * 0.4);
 
+const pointer = new Pointer();
 const bubble = new Bubble(document.getElementById("bubble")!, () => void api.halt());
 const approval = new ApprovalCard(document.getElementById("approval")!, (id, ok) => void api.answerApproval(id, ok));
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
@@ -96,11 +94,6 @@ let scheduled = false;
 
 function loop(now: number): void {
   scheduled = false;
-  if (game || playStarting) {
-    last = now;
-    schedule(now);
-    return;
-  }
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   duck.update(dt, segments, moved);
@@ -176,69 +169,6 @@ function layoutUi(): void {
   }
 }
 
-// ---------- play mode ----------
-
-const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-
-async function startPlay(req: Events["play:start"]): Promise<void> {
-  if (game || playStarting) return;
-  if (approval.visible) {
-    bubble.say("notice", "Let's finish this first: answer the card, then we can play.");
-    return;
-  }
-  playStarting = true;
-  touch();
-  chat.close();
-  // Step out of the picture so the copy shows only the user's windows.
-  for (const el of [bubble.el, chat.el]) el.style.visibility = "hidden";
-  ctx.clearRect(0, 0, screen.w, screen.h);
-  await nextFrame();
-  await nextFrame();
-  await new Promise((r) => window.setTimeout(r, 80));
-  try {
-    const image = await api.playSnapshot();
-    game = new Game({
-      image,
-      windows: windows.map(({ x, y, w, h }) => ({ x, y, w, h })),
-      duck: { x: duck.body.x, y: duck.body.y },
-      palette: buildPalette(baseColor),
-      autoplay: req.autoplay,
-      target: req.target ?? null,
-      weapon: req.weapon ?? null,
-      onExit: endPlay,
-    });
-    await api.playInput(true);
-    await game.start();
-  } catch (e) {
-    game = null;
-    void api.playInput(false);
-    bubble.say("error", `Couldn't start play mode: ${e}`);
-  } finally {
-    playStarting = false;
-    for (const el of [bubble.el, chat.el]) el.style.visibility = "";
-  }
-}
-
-function endPlay(feet: { x: number; y: number }, destroyed: number): void {
-  game = null;
-  void api.playInput(false);
-  // Drop back into the real desktop where the game left off.
-  duck.body.x = feet.x;
-  duck.body.y = feet.y;
-  duck.body.vy = 0;
-  duck.body.grounded = false;
-  duck.mode = "falling";
-  ctx.clearRect(0, 0, screen.w, screen.h);
-  lastRect = null;
-  sentRects = "";
-  touch();
-  const pct = Math.round(destroyed * 100);
-  bubble.say("planner", pct > 0 ? `Phew! ${pct}% wrecked, and it's all back: that was only a copy.` : "Okay, back to normal!");
-}
-
-void on("play:start", (req) => void startPlay(req));
-void on("play:stop", () => game?.stop());
-
 // ---------- pointer: click to chat, drag to carry, right-click for settings ----------
 
 let press: { x: number; y: number; dragging: boolean } | null = null;
@@ -309,6 +239,19 @@ void on("duck:move", ({ id, x, y, purpose }) => {
 void on("duck:act", ({ kind }) => {
   touch();
   duck.doAct(kind, performance.now(), kind === "type" ? 900 : 600);
+});
+
+void on("duck:point", ({ x, y, label }) => {
+  touch();
+  pointer.show(x, y, label, screen);
+  duck.doAct("look", performance.now(), 800);
+});
+
+void on("reminder", ({ text, late }) => {
+  touch();
+  chime();
+  duck.doAct("peck", performance.now(), 900);
+  bubble.say("reminder", `⏰ Reminder${late ? " (from while I was off)" : ""}: ${text}`);
 });
 
 void on("busy", (b) => {

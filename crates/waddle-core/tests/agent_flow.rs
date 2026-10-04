@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use waddle_core::agent::{promises_action, prune_images, Agent, AgentDeps, TaskStatus};
+use waddle_core::agent::{promises_action, prune_images, writes_tool_call, Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
@@ -32,7 +32,7 @@ struct Fixture {
 }
 
 fn session_config(f: &Fixture, provider: Arc<dyn Provider>) -> SessionConfig {
-    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, self_source: None, traces: None }
+    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, reminders: None, self_source: None, traces: None }
 }
 
 fn fixture() -> Fixture {
@@ -42,7 +42,7 @@ fn fixture() -> Fixture {
 }
 
 async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
-    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, self_source: None };
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, self_source: None };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -145,6 +145,7 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
         workspace: f.workspace.clone(),
         settings: Settings { model: "qwen/qwen3-vl-8b-instruct".into(), ..settings() },
         skills: None,
+        reminders: None,
         self_source: None,
     };
     let env = host.env();
@@ -387,7 +388,7 @@ async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
-    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, self_source }
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, self_source }
 }
 
 async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {
@@ -525,4 +526,82 @@ async fn click_element_trusts_the_name_when_the_id_is_off() {
 
     let clicked: Vec<u32> = host.gui_calls.lock().unwrap().iter().filter_map(|a| if let GuiAction::ClickElement { id } = a { Some(*id) } else { None }).collect();
     assert_eq!(clicked, vec![2, 3, 1], "wrong id + listed name → the named element; matching or unknown names → the id as given");
+}
+
+#[tokio::test]
+async fn pointing_and_reminders_need_no_approval() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Denied)));
+    let store = Arc::new(waddle_core::reminders::ReminderStore::new(f._dir.path().join("reminders.json")));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Here it is.", vec![call("point_at", json!({"x": 100, "y": 200, "label": "Night light"}))]),
+        reply("I'll remind you.", vec![call("reminder", json!({"action": "add", "text": "stretch", "in_minutes": 20}))]),
+        reply("Done: it's circled, and I'll remind you at the time.", vec![]),
+    ]));
+    let deps = AgentDeps { reminders: Some(store.clone()), ..deps_with(&f, host.clone(), provider, None, None) };
+    let r = run_with(&deps).await;
+    assert_eq!(r.outcome, Outcome::Done, "{}", r.message);
+    assert!(host.approvals.lock().unwrap().is_empty(), "tier 0/1 tools never ask");
+    assert!(matches!(host.gui_calls.lock().unwrap()[0], GuiAction::PointAt { .. }), "pointing needs no look first: it touches nothing");
+    assert_eq!(store.list().iter().map(|r| r.text.as_str()).collect::<Vec<_>>(), ["stretch"]);
+}
+
+#[tokio::test]
+async fn scrolling_counts_as_input_that_needs_a_look_first() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Scrolling down.", vec![call("scroll", json!({"direction": "down"}))]),
+        reply("Looking first.", vec![call("look_at_screen", json!({}))]),
+        reply("Scrolling down.", vec![call("scroll", json!({"direction": "down", "amount": 10}))]),
+        reply("There's more below now.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider, CancellationToken::new()).await;
+    let calls = host.gui_calls.lock().unwrap().clone();
+    assert_eq!(calls, vec![GuiAction::LookAtScreen, GuiAction::Scroll { dx: 0, dy: 10, at: None }]);
+}
+
+#[test]
+fn spots_tool_calls_written_as_text() {
+    let caps = waddle_core::tools::Capabilities { gui: true, ..Default::default() };
+    let coords = waddle_core::tools::Coords { mode: waddle_core::config::CoordMode::Norm1000, screen_w: 1440.0, screen_h: 960.0 };
+    let tools = waddle_core::tools::specs(caps, &coords);
+    assert!(writes_tool_call("I'll point you to it.  point_at(x=920, y=240, label=\"toggle\")", &tools));
+    assert!(writes_tool_call("Here.  point_at {\"x\": 920, \"y\": 242} </tool_call>", &tools));
+    assert!(writes_tool_call("click (500, 300)", &tools));
+    assert!(!writes_tool_call("I clicked Compose (the blue button) for you.", &tools));
+    assert!(!writes_tool_call("Double-click {the file} to open it.", &tools), "click inside another word doesn't count");
+    assert!(promises_action("I'll show you where it is."));
+}
+
+/// A scripted provider whose screen check answers `p`.
+struct ScreenCheck(Arc<MockProvider>, Option<f64>);
+
+#[async_trait]
+impl Provider for ScreenCheck {
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        self.0.chat(req, on_event).await
+    }
+    async fn needs_screen(&self, _goal: &str) -> Option<f64> {
+        self.1
+    }
+}
+
+#[tokio::test]
+async fn the_opening_look_is_skipped_only_when_the_screen_check_is_confident() {
+    for (p, looks) in [(Some(0.1), false), (Some(0.5), true), (None, true)] {
+        let f = fixture();
+        let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+        let mock = Arc::new(MockProvider::scripted(vec![reply("Done.", vec![])]));
+        let deps = AgentDeps {
+            settings: Settings { look_first: true, ..settings() },
+            ..deps_with(&f, host.clone(), mock.clone(), None, None)
+        };
+        let deps = AgentDeps { provider: Arc::new(ScreenCheck(mock.clone(), p)), ..deps };
+        run_with(&deps).await;
+        let looked = host.gui_calls.lock().unwrap().contains(&GuiAction::LookAtScreen);
+        assert_eq!(looked, looks, "screen check {p:?}");
+        let first = mock.requests.lock().unwrap()[0].last().unwrap().text.clone();
+        assert!(first.contains("It's "), "the time is always given: {first}");
+    }
 }

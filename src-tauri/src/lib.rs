@@ -21,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Webview
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
+use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
 use waddle_core::tools::fs::Workspace;
@@ -39,6 +40,7 @@ pub struct AppState {
     pub secrets: Secrets,
     pub recording: Mutex<Option<voice::Recording>>,
     pub skills: Arc<SkillStore>,
+    pub reminders: Arc<ReminderStore>,
     pub traces: Arc<TraceStore>,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
@@ -96,6 +98,7 @@ impl AppState {
             provider,
             workspace: workspace.clone(),
             skills: Some(self.skills.clone()),
+            reminders: Some(self.reminders.clone()),
             self_source,
             traces: Some(self.traces.clone()),
         });
@@ -170,11 +173,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let talk = MenuItem::with_id(app, "talk", "Talk to Waddle", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let wander = MenuItem::with_id(app, "wander", "Pause / resume wandering", true, None::<&str>)?;
-    let play = MenuItem::with_id(app, "play", "Play: wreck the desktop!", true, None::<&str>)?;
     let halt = MenuItem::with_id(app, "halt", "Halt current task", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Waddle", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&talk, &play, &settings, &wander, &halt, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&talk, &settings, &wander, &halt, &sep, &quit])?;
     let mut tray = TrayIconBuilder::with_id("waddle").tooltip("Project Waddle").menu(&menu);
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
@@ -185,9 +187,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": false }));
         }
         "settings" => open_settings_soon(app),
-        "play" => {
-            let _ = app.emit_to("overlay", "play:start", serde_json::json!({ "autoplay": false }));
-        }
         "wander" => {
             let _ = app.emit_to("overlay", "wander:toggle", ());
         }
@@ -195,7 +194,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             if let Some(state) = app.try_state::<AppState>() {
                 state.session.halt();
             }
-            let _ = app.emit_to("overlay", "play:stop", ());
         }
         "quit" => app.exit(0),
         _ => {}
@@ -229,6 +227,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let (provider, demo) = provider_for(&settings, &secrets);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
+    let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
         None
@@ -243,6 +242,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             provider,
             workspace: workspace.clone(),
             skills: Some(skills.clone()),
+            reminders: Some(reminders.clone()),
             self_source,
             traces: Some(traces.clone()),
         },
@@ -257,6 +257,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         secrets,
         recording: Mutex::default(),
         skills,
+        reminders: reminders.clone(),
         traces,
         settings_path,
         workspace: RwLock::new(workspace),
@@ -264,6 +265,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     });
 
     overlay::spawn_hit_test(handle.clone(), overlay);
+    bridge::spawn_reminder_clock(host.clone(), reminders);
     bridge::spawn_window_sampler(host);
     build_tray(&handle)?;
     {
@@ -307,8 +309,6 @@ pub fn run() {
             commands::duck_arrived,
             commands::set_hit_rects,
             commands::set_capture,
-            commands::play_snapshot,
-            commands::play_input,
             commands::bootstrap,
             commands::get_settings,
             commands::save_settings,

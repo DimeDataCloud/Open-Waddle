@@ -202,8 +202,36 @@ impl SseAccumulator {
     }
 }
 
+/// The question asked of TypeSafe's Jev decision model before a task (see `needs_screen`).
+fn screen_question(goal: &str) -> Value {
+    json!({
+        "model": "typesafe/jev-1.13",
+        "state": format!("User request to a desktop assistant: {goal}"),
+        "questions": { "needs_screen": {
+            "type": "noul",
+            "instructions": "Doing this request needs looking at or acting on what is on the user's screen",
+            "criteria": {
+                "true": "It refers to something visible (this, it, an open app, page, email, button, selection) or needs clicking, typing, scrolling or reading the screen",
+                "false": "It can be done without the screen: files, commands, reminders, the clipboard, maths, writing, or general knowledge"
+            }
+        }}
+    })
+}
+
 #[async_trait]
 impl Provider for OpenAiCompat {
+    /// OpenRouter only: one Jev call (about 0.3 s, $0.00002). Any error or a slow answer means "look".
+    async fn needs_screen(&self, goal: &str) -> Option<f64> {
+        let key = self.api_key.as_deref()?;
+        let origin = self.base_url.strip_suffix("/api/v1").filter(|o| o.contains("openrouter.ai"))?;
+        let send = self.http.post(format!("{origin}/api/alpha/decisions")).bearer_auth(key).json(&screen_question(goal)).send();
+        let res = tokio::time::timeout(std::time::Duration::from_secs(2), send).await.ok()?.ok()?;
+        let body: Value = tokio::time::timeout(std::time::Duration::from_secs(1), res.json()).await.ok()?.ok()?;
+        let p = body["answers"]["needs_screen"]["noul"].as_f64();
+        log::info!("screen check: {p:?} for {goal:?}");
+        p
+    }
+
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
         let url = format!("{}/chat/completions", self.base_url);
         let mut builder = self

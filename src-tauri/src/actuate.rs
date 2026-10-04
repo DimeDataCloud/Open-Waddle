@@ -3,7 +3,7 @@
 
 use anyhow::{anyhow, Context};
 use base64::Engine;
-use enigo::{Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
+use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use std::time::Duration;
 use waddle_core::llm::ImageData;
 use waddle_core::tools::MouseButton;
@@ -36,6 +36,74 @@ pub fn click(x: i32, y: i32, button: MouseButton, double: bool) -> anyhow::Resul
         std::thread::sleep(Duration::from_millis(40));
         let _ = e.move_mouse(hx, hy, Coordinate::Abs);
     }
+    Ok(())
+}
+
+/// Mouse-wheel notches at a point (or where the cursor is); positive = down / right.
+pub fn scroll(at: Option<(i32, i32)>, dx: i32, dy: i32) -> anyhow::Result<()> {
+    let mut e = enigo()?;
+    let home = e.location().ok();
+    if let Some((x, y)) = at {
+        e.move_mouse(x, y, Coordinate::Abs)?;
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    // A notch at a time reads as real scrolling to apps that smooth it.
+    for (n, axis) in [(dy, Axis::Vertical), (dx, Axis::Horizontal)] {
+        for _ in 0..n.unsigned_abs() {
+            e.scroll(n.signum(), axis)?;
+            std::thread::sleep(Duration::from_millis(15));
+        }
+    }
+    if let (Some(_), Some((hx, hy))) = (at, home) {
+        let _ = e.move_mouse(hx, hy, Coordinate::Abs);
+    }
+    Ok(())
+}
+
+/// Press, glide to the target in small steps (so apps register a drag), release.
+pub fn drag(from: (i32, i32), to: (i32, i32)) -> anyhow::Result<()> {
+    let mut e = enigo()?;
+    let home = e.location().ok();
+    e.move_mouse(from.0, from.1, Coordinate::Abs)?;
+    std::thread::sleep(Duration::from_millis(60));
+    e.button(Button::Left, Direction::Press)?;
+    let steps = 20;
+    let mut result = Ok(());
+    for i in 1..=steps {
+        let x = from.0 + (to.0 - from.0) * i / steps;
+        let y = from.1 + (to.1 - from.1) * i / steps;
+        if let Err(err) = e.move_mouse(x, y, Coordinate::Abs) {
+            result = Err(err);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    std::thread::sleep(Duration::from_millis(80));
+    let released = e.button(Button::Left, Direction::Release);
+    result?;
+    released?;
+    if let Some((hx, hy)) = home {
+        std::thread::sleep(Duration::from_millis(40));
+        let _ = e.move_mouse(hx, hy, Coordinate::Abs);
+    }
+    Ok(())
+}
+
+pub fn read_clipboard() -> anyhow::Result<String> {
+    let mut c = arboard::Clipboard::new().map_err(|e| anyhow!("clipboard unavailable: {e}"))?;
+    match c.get_text() {
+        Ok(t) => Ok(t),
+        Err(arboard::Error::ContentNotAvailable) => Ok(String::new()),
+        Err(e) => Err(anyhow!("couldn't read the clipboard: {e}")),
+    }
+}
+
+pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
+    let mut c = arboard::Clipboard::new().map_err(|e| anyhow!("clipboard unavailable: {e}"))?;
+    c.set_text(text.to_string()).map_err(|e| anyhow!("couldn't set the clipboard: {e}"))?;
+    // On Linux the clipboard lives in the process that set it; give managers a moment to take it.
+    #[cfg(target_os = "linux")]
+    std::thread::sleep(Duration::from_millis(100));
     Ok(())
 }
 
@@ -133,29 +201,6 @@ pub fn screenshot(logical_w: u32, logical_h: u32) -> anyhow::Result<(ImageData, 
     image::DynamicImage::ImageRgba8(img).to_rgb8().write_to(&mut png, image::ImageFormat::Png)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(png.into_inner());
     Ok((ImageData { mime: "image/png".into(), base64: b64 }, logical_w, logical_h))
-}
-
-/// Captures part of the primary monitor (physical pixels relative to the monitor)
-/// as a PNG data URL scaled to `out_w` x `out_h`, for play mode's copy of the screen.
-pub fn capture_area_data_url(x: u32, y: u32, w: u32, h: u32, out_w: u32, out_h: u32) -> anyhow::Result<String> {
-    let monitors = xcap::Monitor::all().context("listing monitors")?;
-    let monitor = monitors
-        .iter()
-        .find(|m| m.is_primary().unwrap_or(false))
-        .or_else(|| monitors.first())
-        .ok_or_else(|| anyhow!("no monitor found"))?;
-    let img = monitor.capture_image().context("screen capture failed (on macOS, grant Screen Recording permission)")?;
-    let (x, y) = (x.min(img.width().saturating_sub(1)), y.min(img.height().saturating_sub(1)));
-    let (w, h) = (w.min(img.width() - x).max(1), h.min(img.height() - y).max(1));
-    let area = image::imageops::crop_imm(&img, x, y, w, h).to_image();
-    let area = if (w, h) != (out_w, out_h) {
-        image::imageops::resize(&area, out_w.max(1), out_h.max(1), image::imageops::FilterType::Triangle)
-    } else {
-        area
-    };
-    let mut png = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(area).to_rgb8().write_to(&mut png, image::ImageFormat::Png)?;
-    Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png.into_inner())))
 }
 
 #[cfg(test)]
