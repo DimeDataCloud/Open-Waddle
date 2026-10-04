@@ -8,6 +8,13 @@
 //! Optional: WADDLE_BENCH_REPEAT (default 1), WADDLE_BENCH_ONLY=id,id,
 //! WADDLE_BENCH_REASONING=off|low|medium|high, WADDLE_BENCH_COORDS=pixels|norm1000
 //! (default: Waddle's own choice for the model). Results go to bench/results/.
+//!
+//! Training data: WADDLE_BENCH_TRACES=<dir> saves every passing run as a rated
+//! training trace (rejection sampling: a strong model's successes become
+//! examples for a small one). Use task sets other than these for training.
+//!
+//! Local models: WADDLE_BENCH_PROVIDER=ollama (WADDLE_OLLAMA_URL, default
+//! http://localhost:11434) runs the tasks one at a time with a longer timeout.
 
 mod common;
 
@@ -22,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 
 use waddle_core::agent::{Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
-use waddle_core::config::{CoordMode, Reasoning};
+use waddle_core::config::{CoordMode, ProviderKind, Reasoning};
 use waddle_core::llm::{build_provider, ImageData};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
@@ -144,6 +151,11 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     }
 
     let mut settings = Settings { model: model.into(), tier2_countdown_ms: 10, max_steps: 6, ..Settings::default() };
+    if local() {
+        settings.provider = ProviderKind::Ollama;
+        settings.base_url = std::env::var("WADDLE_OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+        settings.ollama.num_thread = std::thread::available_parallelism().ok().map(|n| n.get() as u32);
+    }
     match std::env::var("WADDLE_BENCH_REASONING").as_deref() {
         Ok("off") => settings.reasoning = Reasoning::Off,
         Ok("low") => settings.reasoning = Reasoning::Low,
@@ -170,7 +182,8 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let started = Instant::now();
     let goal = task["goal"].as_str().unwrap();
-    let r = match tokio::time::timeout(std::time::Duration::from_secs(120), agent.run(goal, &[], &mut rx)).await {
+    let limit = if local() { 900 } else { 120 };
+    let r = match tokio::time::timeout(std::time::Duration::from_secs(limit), agent.run(goal, &[], &mut rx)).await {
         Ok(r) => r,
         Err(_) => waddle_core::agent::RunResult { outcome: Outcome::TimedOut, message: "timed out".into() },
     };
@@ -193,6 +206,18 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         let body = std::fs::read_to_string(workspace.root().join(f[0].as_str().unwrap())).unwrap_or_default();
         pass &= body.trim().eq_ignore_ascii_case(f[1].as_str().unwrap());
     }
+    if let (true, Ok(dir)) = (pass, std::env::var("WADDLE_BENCH_TRACES")) {
+        let store = waddle_core::traces::TraceStore::new(dir.into());
+        let (messages, tools) = agent.transcript();
+        static RUN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = RUN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let tid = format!("{}_{}_{}_{n}", id.replace('-', "_"), model.replace(|c: char| !c.is_ascii_alphanumeric(), "_"), std::process::id());
+        let mut meta = waddle_core::traces::TraceMeta::new(&tid, goal, model, r.outcome, &r.message, usage);
+        meta.rating = Some(true);
+        if let Err(e) = store.save(&meta, &messages, &tools) {
+            eprintln!("couldn't save trace: {e:#}");
+        }
+    }
     let did: Vec<String> = actions
         .iter()
         .map(|a| match a {
@@ -210,10 +235,14 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     TaskResult { id, pass, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
 }
 
+fn local() -> bool {
+    std::env::var("WADDLE_BENCH_PROVIDER").is_ok_and(|v| v == "ollama")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore = "spends money: needs OPENROUTER_API_KEY and WADDLE_BENCH_MODELS"]
 async fn benchmark_models() {
-    let key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY");
+    let key = if local() { String::new() } else { std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY") };
     let models: Vec<String> = std::env::var("WADDLE_BENCH_MODELS").expect("WADDLE_BENCH_MODELS").split(',').map(|s| s.trim().to_string()).collect();
     let repeat: usize = std::env::var("WADDLE_BENCH_REPEAT").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
     let suite = Arc::new(load());
@@ -226,7 +255,13 @@ async fn benchmark_models() {
         for _ in 0..repeat {
             for task in suite.tasks.clone() {
                 let (model, suite, key) = (model.clone(), suite.clone(), key.clone());
-                handles.push(tokio::spawn(async move { run_task(&model, &task, &suite, &key).await }));
+                let h = tokio::spawn(async move { run_task(&model, &task, &suite, &key).await });
+                // A local server works through one request at a time; queueing would only add timeouts.
+                if local() {
+                    let _ = h.await.map(|r| handles.push(tokio::spawn(async move { r })));
+                } else {
+                    handles.push(h);
+                }
             }
         }
         let mut results = vec![];

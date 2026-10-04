@@ -360,6 +360,9 @@ void on("agent", (ev) => {
     case "notice":
       bubble.say("notice", ev.text);
       break;
+    case "trace_saved":
+      bubble.rate((good) => void api.rateTask(ev.task_id, good));
+      break;
     case "task_started":
     case "thinking":
       break;

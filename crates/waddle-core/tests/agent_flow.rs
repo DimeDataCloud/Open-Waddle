@@ -16,7 +16,7 @@ use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
 use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
 use waddle_core::tools::fs::Workspace;
-use waddle_core::tools::{GuiAction, WindowInfo};
+use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::skills::SkillStore;
 use waddle_core::{AgentEvent, Decision, Host, Lane, Outcome, Session, SessionConfig, Settings};
 
@@ -32,7 +32,7 @@ struct Fixture {
 }
 
 fn session_config(f: &Fixture, provider: Arc<dyn Provider>) -> SessionConfig {
-    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, self_source: None }
+    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, self_source: None, traces: None }
 }
 
 fn fixture() -> Fixture {
@@ -483,4 +483,46 @@ async fn self_source_is_reachable_with_approval_only() {
     assert_eq!(host.approvals.lock().unwrap()[0].tier, 3);
     let last = provider.requests.lock().unwrap().last().unwrap().clone();
     assert!(last.iter().any(|m| m.role == Role::Tool && m.text.contains("v2")));
+}
+
+#[tokio::test]
+async fn recorded_tasks_are_saved_for_training_and_offered_for_rating() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::traces::TraceStore::new(f._dir.path().join("traces")));
+    let provider = Arc::new(MockProvider::scripted(vec![reply("All done.", vec![]), reply("Done again.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let mut config = SessionConfig { traces: Some(store.clone()), ..session_config(&f, provider.clone()) };
+    // Off by default: nothing is saved.
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config.clone());
+    session.user_message("say hi".into());
+    wait_until(|| !session.is_busy() && host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    assert!(store.list().is_empty());
+
+    config.settings.record_traces = true;
+    session.configure(config);
+    session.user_message("say hi again".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TraceSaved { .. }))).await;
+    let saved = store.list();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].goal, "say hi again");
+    assert_eq!(saved[0].outcome, Outcome::Done);
+}
+
+#[tokio::test]
+async fn click_element_trusts_the_name_when_the_id_is_off() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Reading the dialog.", vec![call("find_elements", json!({}))]),
+        reply("Clicking Don't save.", vec![call("click_element", json!({"id": 1, "name": "Don't save"}))]),
+        reply("Clicking Cancel.", vec![call("click_element", json!({"id": 3, "name": "Cancel"}))]),
+        reply("Trying a name that isn't listed.", vec![call("click_element", json!({"id": 1, "name": "Close"}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let el = |id, name: &str| ElementInfo { id, role: "button".into(), name: name.into(), x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
+    *host.elements.lock().unwrap() = vec![el(1, "Save"), el(2, "Don't save"), el(3, "Cancel")];
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let clicked: Vec<u32> = host.gui_calls.lock().unwrap().iter().filter_map(|a| if let GuiAction::ClickElement { id } = a { Some(*id) } else { None }).collect();
+    assert_eq!(clicked, vec![2, 3, 1], "wrong id + listed name → the named element; matching or unknown names → the id as given");
 }

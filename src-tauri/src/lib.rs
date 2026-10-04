@@ -22,6 +22,7 @@ use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
 use waddle_core::skills::SkillStore;
+use waddle_core::traces::TraceStore;
 use waddle_core::tools::fs::Workspace;
 use waddle_core::{Session, SessionConfig, Settings};
 
@@ -38,6 +39,7 @@ pub struct AppState {
     pub secrets: Secrets,
     pub recording: Mutex<Option<voice::Recording>>,
     pub skills: Arc<SkillStore>,
+    pub traces: Arc<TraceStore>,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -95,6 +97,7 @@ impl AppState {
             workspace: workspace.clone(),
             skills: Some(self.skills.clone()),
             self_source,
+            traces: Some(self.traces.clone()),
         });
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
@@ -225,6 +228,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let host = TauriHost::new(handle.clone(), overlay.clone());
     let (provider, demo) = provider_for(&settings, &secrets);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
+    let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
         None
@@ -234,7 +238,14 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         rt,
         host.clone(),
         audit.clone(),
-        SessionConfig { settings: settings.clone(), provider, workspace: workspace.clone(), skills: Some(skills.clone()), self_source },
+        SessionConfig {
+            settings: settings.clone(),
+            provider,
+            workspace: workspace.clone(),
+            skills: Some(skills.clone()),
+            self_source,
+            traces: Some(traces.clone()),
+        },
     );
 
     app.manage(AppState {
@@ -246,6 +257,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         secrets,
         recording: Mutex::default(),
         skills,
+        traces,
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
@@ -307,6 +319,9 @@ pub fn run() {
             commands::clear_memory,
             commands::skills_list,
             commands::skill_forget,
+            commands::rate_task,
+            commands::traces_summary,
+            commands::export_traces,
             commands::voice_start,
             commands::voice_stop,
             commands::quit,

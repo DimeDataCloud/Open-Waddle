@@ -30,7 +30,7 @@ pub enum Lane {
     Quick,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Done,
@@ -61,6 +61,8 @@ pub enum AgentEvent {
     ApprovalResolved { id: String, decision: Decision },
     TaskFinished { task_id: String, outcome: Outcome, message: String },
     Notice { text: String },
+    /// The task was saved for training; the user may rate it.
+    TraceSaved { task_id: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,7 +138,8 @@ pub struct RunResult {
 
 pub fn system_prompt(env: &EnvInfo, coords: &Coords, workspace: &Path, extra: &[String]) -> String {
     const ON_SCREEN: &str = "- What the user mentions (a playlist, an email, a button) is on their screen: do it in the app that's showing instead of opening a new one. \
-If you haven't been shown the screen yet, look before acting. Never say you can't see or use it.";
+If you haven't been shown the screen yet, look before acting. Never say you can't see or use it. \
+The screenshot is context, not a to-do list: leave dialogs and windows the task doesn't mention alone.";
     let perception = if env.caps.accessibility {
         &*format!("{ON_SCREEN}\n- Prefer click_element on elements from find_elements: more precise than screenshot coordinates. Use the screenshot for anything not listed.")
     } else if env.caps.gui {
@@ -232,13 +235,17 @@ pub struct Agent<'a> {
     usage: Arc<Mutex<Usage>>,
     /// The last input action and how many times in a row it was asked for.
     repeats: Mutex<(String, u32)>,
+    /// The finished conversation and tool list, kept for training traces.
+    transcript: Mutex<(Vec<Message>, Vec<ToolSpec>)>,
+    /// Ids and names from the latest element list, to double-check click_element.
+    elements: Mutex<Vec<(u32, String)>>,
 }
 
 impl<'a> Agent<'a> {
     pub fn new(deps: &'a AgentDeps, task_id: String, cancel: CancellationToken, status: Arc<Mutex<TaskStatus>>, env: &EnvInfo) -> Self {
         let coords = Coords { mode: deps.settings.coord_mode(), screen_w: env.screen_w, screen_h: env.screen_h };
         let budget = deps.settings.max_steps * (1 + deps.settings.max_delegation_depth);
-        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false), usage: Arc::default(), repeats: Mutex::default() }
+        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false), usage: Arc::default(), repeats: Mutex::default(), transcript: Mutex::default(), elements: Mutex::default() }
     }
 
     fn capabilities(&self, env: &EnvInfo) -> Capabilities {
@@ -306,7 +313,29 @@ impl<'a> Agent<'a> {
     }
 
     pub async fn run(&self, goal: &str, memory: &[Message], steer: &mut UnboundedReceiver<String>) -> RunResult {
-        let (mut messages, tools) = self.opening(memory);
+        let mut messages = vec![];
+        let mut tools = vec![];
+        let result = self.run_in(&mut messages, &mut tools, goal, memory, steer).await;
+        *self.transcript.lock().unwrap() = (messages, tools);
+        result
+    }
+
+    /// The whole conversation of the finished task, and the tools it was offered.
+    pub fn transcript(&self) -> (Vec<Message>, Vec<ToolSpec>) {
+        self.transcript.lock().unwrap().clone()
+    }
+
+    async fn run_in(
+        &self,
+        messages: &mut Vec<Message>,
+        tools_out: &mut Vec<ToolSpec>,
+        goal: &str,
+        memory: &[Message],
+        steer: &mut UnboundedReceiver<String>,
+    ) -> RunResult {
+        let (opening, tools) = self.opening(memory);
+        *messages = opening;
+        *tools_out = tools.clone();
         messages.push(match self.observe().await {
             Some((seen, Some(image))) => Message::user_with_image(format!("{goal}\n\n{seen}"), image),
             Some((seen, None)) => Message::user(format!("{goal}\n\n{seen}")),
@@ -324,8 +353,8 @@ impl<'a> Agent<'a> {
             if !self.take_step() {
                 break;
             }
-            self.fold_in_steering(&mut messages, steer);
-            prune_images(&mut messages, self.deps.settings.image_budget());
+            self.fold_in_steering(messages, steer);
+            prune_images(messages, self.deps.settings.image_budget());
             if self.depth == 0 {
                 let mut st = self.status.lock().unwrap();
                 st.step = step + 1;
@@ -345,7 +374,7 @@ impl<'a> Agent<'a> {
                 };
                 let req = ChatRequest {
                     model: &self.deps.settings.model,
-                    messages: &messages,
+                    messages,
                     tools: &tools,
                     temperature: 0.2,
                     max_tokens: 1024,
@@ -440,6 +469,7 @@ impl<'a> Agent<'a> {
         for action in actions {
             match host.gui(action, &self.cancel).await {
                 Ok(r) => {
+                    self.remember_elements(&r);
                     let o = tools::format_gui_result(r, &self.coords);
                     if o.image.is_some() {
                         image = o.image;
@@ -460,6 +490,32 @@ impl<'a> Agent<'a> {
         }
         self.looked.store(true, Ordering::SeqCst);
         Some((parts.join("\n\n"), image))
+    }
+
+    fn remember_elements(&self, result: &GuiResult) {
+        if let GuiResult::Elements { elements, .. } = result {
+            *self.elements.lock().unwrap() = elements.iter().map(|e| (e.id, e.name.clone())).collect();
+        }
+    }
+
+    /// Small models often name the right element but give the wrong id (off by
+    /// one, or the window's list number). When the name they give belongs to
+    /// exactly one listed element, trust the name.
+    fn check_element(&self, action: GuiAction, call: &ToolCall) -> GuiAction {
+        let GuiAction::ClickElement { id } = action else { return action };
+        let Some(name) = call.arguments.get("name").and_then(|v| v.as_str()).map(|n| n.trim().to_lowercase()) else { return action };
+        let list = self.elements.lock().unwrap();
+        if name.is_empty() || list.iter().any(|(i, n)| *i == id && n.trim().to_lowercase() == name) {
+            return action;
+        }
+        let matches: Vec<u32> = list.iter().filter(|(_, n)| n.trim().to_lowercase() == name).map(|(i, _)| *i).collect();
+        match matches.as_slice() {
+            [right] => {
+                log::info!("click_element: id {id} doesn't match \"{name}\"; using element {right}");
+                GuiAction::ClickElement { id: *right }
+            }
+            _ => action,
+        }
     }
 
     /// Spends one step from the budget shared across the whole task tree.
@@ -545,7 +601,7 @@ impl<'a> Agent<'a> {
 
         let gui_action = if tools::is_gui_tool(&call.name) {
             match tools::parse_gui_action(call, &self.coords) {
-                Ok(a) => Some(a),
+                Ok(a) => Some(self.check_element(a, call)),
                 Err(e) => return (ToolOutcome::trusted(format!("Error: {e}")), false),
             }
         } else {
@@ -611,6 +667,9 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
                 if perceives && r.is_ok() {
                     self.looked.store(true, Ordering::SeqCst);
                 }
+                if let Ok(res) = &r {
+                    self.remember_elements(res);
+                }
                 r.map(|r| tools::format_gui_result(r, &self.coords))
             }
             None => self.run_core_tool(call).await,
@@ -668,6 +727,8 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
             sub_tasks: AtomicU32::new(0),
             looked: AtomicBool::new(false),
             repeats: Mutex::default(),
+            transcript: Mutex::default(),
+            elements: Mutex::default(),
             usage: self.usage.clone(),
         };
         let full_goal = if context.trim().is_empty() { goal.to_string() } else { format!("{goal}\n\nContext from the parent task:\n{context}") };

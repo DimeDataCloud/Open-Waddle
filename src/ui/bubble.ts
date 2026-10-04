@@ -52,6 +52,22 @@ export class Bubble {
     return div;
   }
 
+  /** Asks for a 👍/👎 on the task that just finished (only when tasks are being saved). */
+  rate(onRate: (good: boolean) => void): void {
+    const row = this.add("notice", "Did that work? ");
+    for (const [label, good] of [["👍", true], ["👎", false]] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rate";
+      b.textContent = label;
+      b.addEventListener("click", () => {
+        onRate(good);
+        row.textContent = good ? "Thanks! I'll learn from that." : "Noted. I'll learn from that too.";
+      });
+      row.appendChild(b);
+    }
+  }
+
   say(kind: LineKind, text: string): void {
     if (text.trim()) this.add(kind, text);
   }

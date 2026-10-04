@@ -1,0 +1,64 @@
+{
+  "cost": 0.0009713621666666666,
+  "model": "qwen/qwen3-vl-8b-instruct",
+  "passed": 0,
+  "results": [
+    {
+      "cost": 0.001149096,
+      "id": "write-file",
+      "note": "Done [windows look click(824,459)] I've created the file \"hello.txt\" with the text \"hi\" in the workspace folder. The task is complete.",
+      "pass": false,
+      "secs": 3.7333070729999998,
+      "steps": 3,
+      "tokens": 9336
+    },
+    {
+      "cost": 0.000785759,
+      "id": "a11y",
+      "note": "Done [windows elements look element(1)] I've closed Notepad without saving the changes. The unsaved work is now lost.",
+      "pass": false,
+      "secs": 2.50316606,
+      "steps": 2,
+      "tokens": 6531
+    },
+    {
+      "cost": 0.001149447,
+      "id": "write-file",
+      "note": "Done [windows look click(840,457)] I've created the file \"hello.txt\" with the text \"hi\" in the workspace folder. The task is complete.",
+      "pass": false,
+      "secs": 4.802904332,
+      "steps": 3,
+      "tokens": 9339
+    },
+    {
+      "cost": 0.000796458,
+      "id": "a11y",
+      "note": "Done [windows elements look element(1)] I've clicked \"Don't save\" in the Notepad dialog. The changes to the file will be discarded, and Note",
+      "pass": false,
+      "secs": 2.572304693,
+      "steps": 2,
+      "tokens": 6556
+    },
+    {
+      "cost": 0.001149096,
+      "id": "write-file",
+      "note": "Done [windows look click(840,460)] I've created the file \"hello.txt\" containing the text \"hi\" in the workspace folder. The task is comp",
+      "pass": false,
+      "secs": 5.481402377,
+      "steps": 3,
+      "tokens": 9336
+    },
+    {
+      "cost": 0.000798317,
+      "id": "a11y",
+      "note": "Done [windows elements look element(1)] I've clicked \"Don't save\" in the Notepad dialog. The changes to the file will be discarded, and Note",
+      "pass": false,
+      "secs": 2.999009968,
+      "steps": 2,
+      "tokens": 6569
+    }
+  ],
+  "runs": 6,
+  "secs": 3.6820157504999997,
+  "tag": "probe"
+}

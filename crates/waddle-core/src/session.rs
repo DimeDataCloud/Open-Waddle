@@ -12,6 +12,7 @@ use crate::agent::{self, Agent, AgentDeps, AgentEvent, Host, Lane, Outcome, RunR
 use crate::audit::{AuditEntry, AuditLog};
 use crate::config::Settings;
 use crate::skills::SkillStore;
+use crate::traces::{TraceMeta, TraceStore};
 use crate::llm::{ChatRequest, Message, Provider, StreamEvent};
 use crate::tools::fs::Workspace;
 
@@ -31,6 +32,8 @@ pub struct SessionConfig {
     pub workspace: Arc<Workspace>,
     pub skills: Option<Arc<SkillStore>>,
     pub self_source: Option<Arc<Workspace>>,
+    /// Where tasks are saved when `settings.record_traces` is on.
+    pub traces: Option<Arc<TraceStore>>,
 }
 
 pub struct Session {
@@ -178,6 +181,7 @@ impl Session {
             let _ = this.audit.append(AuditEntry { task_id: task_id.clone(), kind: "task_start".into(), detail: Some(goal.clone()), ..Default::default() });
 
             let timeout = Duration::from_secs(config.settings.task_timeout_secs);
+            let traces = config.traces.clone().filter(|_| config.settings.record_traces);
             let deps = this.deps(config);
             let memory = this.memory.lock().unwrap().clone();
             let env = host.env();
@@ -214,7 +218,15 @@ impl Session {
                 ..Default::default()
             });
             host.set_busy(false);
-            host.emit(AgentEvent::TaskFinished { task_id, outcome: result.outcome, message: result.message });
+            let saved = traces.and_then(|store| {
+                let (messages, tools) = agent.transcript();
+                let meta = TraceMeta::new(&task_id, &goal, &deps.settings.model, result.outcome, &result.message, usage);
+                store.save(&meta, &messages, &tools).map_err(|e| log::warn!("saving the training trace failed: {e:#}")).ok()
+            });
+            host.emit(AgentEvent::TaskFinished { task_id: task_id.clone(), outcome: result.outcome, message: result.message });
+            if saved.is_some() {
+                host.emit(AgentEvent::TraceSaved { task_id });
+            }
             if !leftover.is_empty() && result.outcome != Outcome::Halted {
                 this.start_task(leftover.join("\n"));
             }

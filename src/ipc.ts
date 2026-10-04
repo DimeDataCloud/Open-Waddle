@@ -17,7 +17,8 @@ export type AgentEvent =
   | { type: "tool_finished"; task_id: string; call_id: string; tool: string; ok: boolean; summary: string }
   | { type: "approval_resolved"; id: string; decision: Decision }
   | { type: "task_finished"; task_id: string; outcome: Outcome; message: string }
-  | { type: "notice"; text: string };
+  | { type: "notice"; text: string }
+  | { type: "trace_saved"; task_id: string };
 
 export interface ApprovalRequest {
   id: string;
@@ -64,6 +65,7 @@ export const api = {
   setHitRects: (rects: HitRect[]) => invoke<void>("set_hit_rects", { rects }),
   setCapture: (on: boolean) => invoke<void>("set_capture", { on }),
   playSnapshot: () => invoke<string>("play_snapshot"),
+  rateTask: (taskId: string, good: boolean) => invoke<void>("rate_task", { taskId, good }),
   playInput: (on: boolean) => invoke<void>("play_input", { on }),
   openSettings: () => invoke<void>("open_settings"),
   voiceStart: () => invoke<"system" | "recording">("voice_start"),

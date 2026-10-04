@@ -189,9 +189,9 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             ));
             v.push(spec(
                 "click_element",
-                "Click an element from the latest find_elements list.",
-                json!({ "id": { "type": "integer" } }),
-                &["id"],
+                "Click an element from the latest find_elements list. Give its id and its name exactly as listed.",
+                json!({ "id": { "type": "integer" }, "name": { "type": "string" } }),
+                &["id", "name"],
             ));
         }
         v.push(spec("look_at_screen", "Take a screenshot.", json!({}), &[]));

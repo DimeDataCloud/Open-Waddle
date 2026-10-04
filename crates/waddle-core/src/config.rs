@@ -153,6 +153,8 @@ pub struct Settings {
     pub reasoning: Reasoning,
     /// Start every task with a screenshot (and the window list) attached to the request.
     pub look_first: bool,
+    /// Save each task (conversation and screenshots) on this computer as training data.
+    pub record_traces: bool,
     pub tier2_mode: Tier2Mode,
     pub tier2_countdown_ms: u64,
     pub max_steps: u32,
@@ -181,6 +183,7 @@ impl Default for Settings {
             coord_mode: CoordMode::Auto,
             reasoning: Reasoning::Default,
             look_first: true,
+            record_traces: false,
             tier2_mode: Tier2Mode::Countdown,
             tier2_countdown_ms: 2000,
             max_steps: 20,

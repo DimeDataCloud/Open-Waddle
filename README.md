@@ -38,6 +38,12 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
   - Open apps, click, type, press shortcuts. Waddle walks to the target and stands beside it before each action.
   - Read and write files and run terminal commands in its workspace folder (`Documents\Waddle`).
+- **Play.**
+  - Say "let's play" (or pick **Play: wreck the desktop!** from the tray), and a frozen copy of your screen becomes a level, *Destroy Any Website*-style.
+  - Run and jump with A/D and Space; hold Space to flap. Aim and shoot with the mouse. Pick from seven duck weapons with 1–7 (pea shooter, crumb blaster, feather shotgun, egg bazooka, laser eyes, hot sauce, quack missiles); right-click throws an egg grenade.
+  - Windows crumble into debris and reveal a pixel-art pond underneath.
+  - Ask "you play" and Waddle wrecks it by itself, aiming at a window if you name one.
+  - Nothing real is touched. Esc (or the ✕) puts everything back.
 - **Improve itself, with your approval.**
   - Save "skills" (lessons it reads back at the start of every task) and change its own settings (model, wandering, safety countdown…).
   - Split big jobs into sub-tasks handled by nested copies of itself, up to 2 levels deep by default.
@@ -90,7 +96,7 @@ Right-click the duck → **Settings**:
 
 | Preset | Cost | Notes |
 |---|---|---|
-| **OpenRouter** (default) | ~$0.002–0.01 per task | Create a key at <https://openrouter.ai/keys>, add $5 credit, paste the key. Defaults: `qwen/qwen3-vl-8b-instruct` plans; `google/gemini-2.5-flash-lite` gives quick replies. Your PC does almost no work. |
+| **OpenRouter** (default) | ~$0.001 per task (measured, [docs/MODELS.md](docs/MODELS.md)) | Create a key at <https://openrouter.ai/keys>, add $5 credit, paste the key. Defaults: `qwen/qwen3-vl-8b-instruct` plans; `google/gemini-2.5-flash-lite` gives quick replies. Your PC does almost no work. |
 | **Ollama** (local) | Free | Install <https://ollama.com> (0.17.6 or newer), run `ollama pull qwen3.5:4b`. Waddle turns off the model's hidden "thinking", caps it to a third of your CPU cores and unloads it 30 s after each task. On Snapdragon it runs on the CPU only, so it's slow and keeps the machine busy while it thinks. `qwen3.5:2b` is faster; `qwen3.5:9b` is smarter if you have 32 GB of RAM. |
 | LM Studio / Foundry Local / custom | Free | Any OpenAI-compatible endpoint. LM Studio (`qwen3.5-4b`) runs Qwen3.5 faster than Ollama does. Foundry Local can use the Snapdragon NPU (text models only). |
 
@@ -128,7 +134,12 @@ crates/waddle-core/   Brain, non-GUI Hands and safety (no OS code; fully unit-te
   src/tools/            tool schemas, coordinate conversion, workspace files, commands
 src-tauri/            Desktop shell: overlay, click-through, window tracking, input, UIA, voice, tray
 src/                  Overlay frontend: sprite renderer, palette maths, physics, pathfinding, UI
+src/play/             Play mode: destructible terrain, duck platformer physics, weapons, autoplay bot
+bench/                Model benchmark: realistic app screens rendered in Chrome + task checks
+training/             Synthetic click data, LoRA fine-tuning and GRPO scripts
 docs/ARCHITECTURE.md  How the blueprint maps to this MVP, what's deferred and why
+docs/MODELS.md        Which model to use, with benchmark results
+docs/TRAINING.md      How to make the model better: harness, data, fine-tuning
 ```
 
 ## Development

@@ -13,6 +13,7 @@ interface Settings {
   command_timeout_secs: number;
   workspace_dir: string | null;
   wander: boolean;
+  record_traces: boolean;
   self_source_dir: string | null;
   max_delegation_depth: number;
   character: { id: string; color: string };
@@ -99,6 +100,7 @@ function fill(view: SettingsView): void {
   $("max_delegation_depth").value = String(s.max_delegation_depth);
   $("color").value = s.character.color;
   $("wander").checked = s.wander;
+  $("record_traces").checked = s.record_traces;
   $("mode").textContent = view.demo
     ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
     : `Using ${s.model}. Workspace: ${view.workspace}`;
@@ -124,6 +126,7 @@ function collect(): Settings {
     command_timeout_secs: num("command_timeout_secs", 60),
     workspace_dir: $("workspace_dir").value.trim() || null,
     wander: $("wander").checked,
+    record_traces: $("record_traces").checked,
     self_source_dir: $("self_source_dir").value.trim() || null,
     max_delegation_depth: num("max_delegation_depth", 2),
     character: { ...current.character, color: $("color").value },
@@ -270,7 +273,27 @@ $<HTMLFormElement>("form").addEventListener("submit", async (e) => {
   }
 });
 
+async function loadTraces(): Promise<void> {
+  try {
+    const t = await invoke<{ folder: string; total: number; good: number; bad: number }>("traces_summary");
+    $("traces").textContent = t.total
+      ? `${t.total} saved task(s): ${t.good} 👍, ${t.bad} 👎. Folder: ${t.folder}`
+      : "No saved tasks yet.";
+  } catch {
+    $("traces").textContent = "";
+  }
+}
+
+$("export-traces").addEventListener("click", async () => {
+  try {
+    $("traces").textContent = `Exported: ${await invoke<string>("export_traces")}. See docs/TRAINING.md for the next step.`;
+  } catch (err) {
+    $("traces").textContent = `Couldn't export: ${err}`;
+  }
+});
+
 void invoke<SettingsView>("get_settings").then(fill);
+void loadTraces();
 void loadAudit();
 void loadSkills();
 setInterval(() => {
