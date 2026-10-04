@@ -1,7 +1,8 @@
 # Choosing Waddle's brain (October 2026)
 
 Short version:
-- **Keep `qwen/qwen3-vl-8b-instruct` as the cloud default.** With the new harness it passes 93% of our desktop tasks at about $0.001 per task.
+- **Keep `qwen/qwen3-vl-8b-instruct` as the cloud default.** It passes about 90% of our 21 desktop and assistant tasks at about $0.001 per task, and none of the newer models tested beat it.
+- **Runner-up:** `qwen/qwen3.5-flash-02-23`, which hits the target as often but is slower (11 s per task) and re-checks more.
 - **The harness mattered far more than the model.** The same model scored 27% before.
 - Two moves are worth making next:
   - try the newer, cheaper Qwen Flash models (your OpenRouter guardrail blocks them for now)
@@ -78,9 +79,35 @@ Results land in `bench/results/*.json`, with every action each model took.
 | **No third identical click.** Re-clicking the same spot is refused with "try something else". | Stops loops where a model clicks a dead button until the step limit |
 | **"The screenshot is context, not a to-do list"** (prompt) | Didn't fix the file-task over-click; kept because it's cheap and right |
 
-## Candidates we couldn't test (yet)
+## Newer models (tested October 4, 2026)
 
-The OpenRouter key's guardrail only allows the two models above. Every other model returns "blocked by guardrail". These look most promising on paper; prices are per million input/output tokens from OpenRouter's model list, October 2026:
+The suite now has 21 tasks: the 15 above plus 6 assistant tasks (point at something without clicking, scroll, drag a file, copy to the clipboard, set a reminder, and a second "show me where"). 2 runs per task.
+
+- **Strict** means the task finished with the right actions.
+- **Hit** forgives a model that did the right thing, then kept re-checking the test screen until the step limit. The screen is a still image, so a careful model sees "nothing happened" after a correct click.
+
+| Model | Strict | Hit | Time per task | Cost per task | Notes |
+|---|---|---|---|---|---|
+| **qwen/qwen3-vl-8b-instruct** | **38/42** | **38/42** | **4.1 s** | $0.0011 | Default. Misses: the known file-task over-click, one copy done by typing and pressing Ctrl+C |
+| qwen/qwen3.5-flash-02-23 | 35/42 | 38/42 | 11.1 s | $0.0008 | As accurate; slower, re-checks more |
+| qwen/qwen3.7-flash | 14/42* | — | 29 s | $0.0005 | Answers in its own pixel space (a click at x=1714 on a 1440-wide screen); pixel mode didn't fix it (1/6). Thinks for a long time |
+| qwen/qwen3.8-flash | 14/42* | — | 22 s | $0.0013 | Same coordinate problem as 3.7 |
+| qwen/qwen3.8-27b | 18/42* | — | 15 s | $0.0024 | First clicks look right; then re-checks the static screen and re-clicks |
+| google/gemini-3.1-flash-lite | 6/42* | — | 8 s | $0.0038 | First clicks right (Night light, Delete, Compose), then re-clicks to the step limit; pricier than Qwen |
+| openai/gpt-6-luna | 20/42* | — | 2.7 s | $0.0002 | Most runs hit the new account's rate limit (429); its clicks that got through were right |
+| google/gemini-3.8-flash | 19/42* | — | 3.1 s | $0.0016 | Same rate limit |
+
+\* First run, before the hit score and the concurrency cap (`WADDLE_BENCH_CONCURRENCY=4`). Rate limits and re-checks count as failures here, so these numbers are a floor. **Worth a clean rerun:** GPT-6 Luna (fast and very cheap) and Gemini 3.8 Flash.
+
+To rerun:
+
+```bash
+WADDLE_BENCH_CONCURRENCY=4 WADDLE_BENCH_REPEAT=2 WADDLE_BENCH_MODELS=openai/gpt-6-luna,google/gemini-3.8-flash … cargo test -p waddle-core --test bench -- --ignored --nocapture
+```
+
+## Candidates (prices)
+
+Prices are per million input/output tokens, from OpenRouter's model list, October 2026:
 
 | Model | Price | Why it's interesting |
 |---|---|---|
@@ -92,11 +119,7 @@ The OpenRouter key's guardrail only allows the two models above. Every other mod
 | `qwen/qwen3.8-27b` | $0.42 / $3.00 | Open weights; reported 84% on OSWorld-Verified. A "hard task" tier. |
 | `google/gemini-3.8-flash` | $0.75 / $3.75 | Premium reference point |
 
-To test them:
-1. Allow them at openrouter.ai → Workspaces → Guardrails.
-2. Run the bench command above with `WADDLE_BENCH_MODELS` set to the list.
-
-Each model costs about $0.01–0.05 for a 15-task pass.
+Each model costs about $0.02–0.15 for a 21-task, 2-run pass.
 
 **Watch the coordinate convention.** Waddle tells the model which grid to use:
 - Qwen, Gemini and Gemma models get the 0–1000 grid.
