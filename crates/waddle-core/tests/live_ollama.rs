@@ -12,6 +12,7 @@ use base64::Engine;
 use common::FakeHost;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use waddle_core::agent::{Agent, AgentDeps, TaskStatus};
@@ -63,12 +64,39 @@ async fn run(goal: &str, setup: impl FnOnce(&FakeHost)) -> Run {
     let agent = Agent::new(&deps, "live".into(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let r = agent.run(goal, &[], &mut rx).await;
+    report(goal, &host, &r.outcome, &r.message);
+    Run { outcome: r.outcome, message: r.message, host, _dir: dir, workspace }
+}
+
+fn report(goal: &str, host: &FakeHost, outcome: &Outcome, message: &str) {
     println!("\n== {goal}");
     for (t, label) in host.timeline.lock().unwrap().iter() {
         println!("{t:7.1}s  {label}");
     }
-    println!("final: {:?} {}", r.outcome, r.message);
-    Run { outcome: r.outcome, message: r.message, host, _dir: dir, workspace }
+    println!("final: {outcome:?} {message}");
+}
+
+/// Asks Ollama to drop the model from memory, as happens 30 s after a task.
+async fn unload(settings: &Settings) {
+    let body = serde_json::json!({ "model": settings.model, "keep_alive": 0 });
+    let _ = reqwest::Client::new().post(format!("{}/api/generate", settings.base_url)).json(&body).send().await;
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+}
+
+fn clicks(host: &FakeHost) -> Vec<(f64, f64)> {
+    host.gui_calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|c| match c {
+            GuiAction::Click { x, y, .. } => Some((*x, *y)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn inside((x, y): (f64, f64), (x0, y0, x1, y1): (f64, f64, f64, f64)) -> bool {
+    (x0..=x1).contains(&x) && (y0..=y1).contains(&y)
 }
 
 fn narration(host: &FakeHost) -> String {
@@ -139,4 +167,36 @@ async fn clicks_what_it_sees_in_a_screenshot() {
     });
     let (x, y) = click.unwrap_or_else(|| panic!("no click, calls: {calls:?}"));
     assert!((1000.0..=1240.0).contains(&x) && (700.0..=780.0).contains(&y), "clicked ({x}, {y}), red button is (1000-1240, 700-780)");
+}
+
+#[tokio::test]
+#[ignore = "needs a local Ollama server with the model pulled"]
+async fn two_screenshots_keep_the_cache() {
+    // Watch the server log while this runs: the second look_at_screen step should
+    // restore the previous checkpoint instead of "erased invalidated context checkpoint".
+    let r = run("Look at the screen and click the blue button. Then look at the screen again and click the red button.", desktop).await;
+    let clicks = clicks(&r.host);
+    assert!(clicks.iter().any(|c| inside(*c, (220.0, 300.0, 460.0, 380.0))), "no click on the blue button: {clicks:?}");
+    assert!(clicks.iter().any(|c| inside(*c, (1000.0, 700.0, 1240.0, 780.0))), "no click on the red button: {clicks:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs a local Ollama server with the model pulled"]
+async fn warm_up_hides_the_model_load() {
+    let settings = live_settings();
+    let first_step = |r: &Run| r.host.timeline.lock().unwrap().get(1).map(|(t, _)| *t).unwrap_or(f64::NAN);
+
+    unload(&settings).await;
+    let cold = run("Create a file named cold.txt that contains the text cold", |_| {}).await;
+
+    unload(&settings).await;
+    let started = Instant::now();
+    build_provider(&settings, None).warm(&settings.model).await;
+    let warm_secs = started.elapsed().as_secs_f64();
+    let warm = run("Create a file named warm.txt that contains the text warm", |_| {}).await;
+
+    println!("\nwarm-up call: {warm_secs:.1}s (hidden while the user types)");
+    println!("first step after idle: cold {:.1}s, warmed {:.1}s", first_step(&cold), first_step(&warm));
+    assert_eq!(warm.outcome, Outcome::Done, "{}", warm.message);
+    assert!(first_step(&warm) < first_step(&cold), "warming should shorten the first step");
 }

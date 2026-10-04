@@ -94,7 +94,7 @@ impl Workspace {
         }
         let existed = path.exists();
         std::fs::write(&path, content).with_context(|| format!("writing {rel}"))?;
-        Ok(format!("{} {rel} ({} bytes)", if existed { "Overwrote" } else { "Created" }, content.len()))
+        Ok(format!("{} {rel} ({} bytes). It's saved; no need to read it back.", if existed { "Overwrote" } else { "Created" }, content.len()))
     }
 
     pub fn list_dir(&self, rel: &str) -> anyhow::Result<String> {

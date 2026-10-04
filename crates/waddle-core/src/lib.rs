@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod audit;
 pub mod config;
+pub mod diagnostics;
 pub mod llm;
 pub mod safety;
 pub mod session;

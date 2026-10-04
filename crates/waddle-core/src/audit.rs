@@ -21,7 +21,7 @@ pub struct AuditEntry {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct AuditRecord {
     pub id: i64,
     pub ts_ms: i64,

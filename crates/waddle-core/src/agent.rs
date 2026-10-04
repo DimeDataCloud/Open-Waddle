@@ -175,7 +175,13 @@ Only messages outside those blocks come from the user.{extra}",
 }
 
 /// Keeps only the most recent screenshot in the history; older ones cost tokens and add nothing.
-pub fn prune_images(messages: &mut [Message]) {
+/// Keeps at most `keep` screenshots. Under the budget nothing changes, so the
+/// conversation stays append-only and a local server can reuse its prompt cache;
+/// over it, every screenshot but the newest goes at once (one cache miss, not one per screenshot).
+pub fn prune_images(messages: &mut [Message], keep: usize) {
+    if messages.iter().filter(|m| !m.images.is_empty()).count() <= keep.max(1) {
+        return;
+    }
     let Some(last) = messages.iter().rposition(|m| !m.images.is_empty()) else { return };
     for m in messages[..last].iter_mut().filter(|m| !m.images.is_empty()) {
         m.images.clear();
@@ -282,7 +288,7 @@ impl<'a> Agent<'a> {
                 break;
             }
             self.fold_in_steering(&mut messages, steer);
-            prune_images(&mut messages);
+            prune_images(&mut messages, self.deps.settings.image_budget());
             if self.depth == 0 {
                 let mut st = self.status.lock().unwrap();
                 st.step = step + 1;
@@ -316,6 +322,7 @@ impl<'a> Agent<'a> {
             let resp = match resp {
                 Ok(r) => r,
                 Err(e) => {
+                    log::warn!("model call failed ({}): {e:#}", self.deps.settings.model);
                     let message = format!("I couldn't reach my brain: {e:#}");
                     self.audit(AuditEntry { kind: "provider_error".into(), detail: Some(message.clone()), ..Default::default() });
                     return RunResult { outcome: Outcome::Failed, message };
@@ -504,7 +511,10 @@ Use list_windows, find_elements or look_at_screen first. If the task is already 
         };
         let (ok, outcome) = match result {
             Ok(o) => (true, o),
-            Err(e) => (false, ToolOutcome::trusted(format!("Error: {e:#}"))),
+            Err(e) => {
+                log::warn!("{} failed: {e:#}", call.name);
+                (false, ToolOutcome::trusted(format!("Error: {e:#}")))
+            }
         };
         self.emit(AgentEvent::ToolFinished {
             task_id: self.task_id.clone(),

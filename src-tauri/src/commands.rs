@@ -56,6 +56,11 @@ pub fn send_message(state: State<'_, AppState>, text: String) {
 }
 
 #[tauri::command]
+pub fn warm_up(state: State<'_, AppState>) {
+    state.session.warm();
+}
+
+#[tauri::command]
 pub fn halt(state: State<'_, AppState>) -> bool {
     state.session.halt()
 }
@@ -216,6 +221,19 @@ pub async fn voice_stop(state: State<'_, AppState>) -> CmdResult<Option<String>>
         .await
         .map_err(err)?;
     Ok(if text.is_empty() { None } else { Some(text) })
+}
+
+#[derive(Serialize)]
+pub struct SelfTestView {
+    pub checks: Vec<waddle_core::diagnostics::Check>,
+    pub report: String,
+}
+
+/// Runs every check (including one small model call) and saves the report in the workspace.
+#[tauri::command]
+pub async fn run_self_test(app: AppHandle) -> CmdResult<SelfTestView> {
+    let (checks, path) = crate::selftest::report(&app).await.map_err(err)?;
+    Ok(SelfTestView { checks, report: path.display().to_string() })
 }
 
 #[tauri::command]

@@ -171,6 +171,14 @@ impl TauriHost {
         ((px - g.screen_x as f64) / g.scale, (py - g.screen_y as f64) / g.scale)
     }
 
+    /// Self-test: the app in front and how many accessible controls it exposes.
+    #[cfg(windows)]
+    pub async fn probe_accessibility(&self) -> anyhow::Result<(String, usize)> {
+        let target = self.target_window(None).ok_or_else(|| anyhow::anyhow!("no other window is open to inspect"))?;
+        let elements = self.uia.find(target.id as isize).await?;
+        Ok((target.app, elements.len()))
+    }
+
     #[cfg(windows)]
     fn target_window(&self, filter: Option<&str>) -> Option<DesktopWindow> {
         let list = self.windows.read().unwrap().clone();

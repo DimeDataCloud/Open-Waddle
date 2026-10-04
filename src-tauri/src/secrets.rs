@@ -77,6 +77,16 @@ impl Secrets {
         }
     }
 
+    /// Self-test: whether the OS keychain can store, read and delete an entry.
+    pub fn probe_keychain() -> anyhow::Result<()> {
+        let entry = keyring::Entry::new(SERVICE, "selftest")?;
+        entry.set_password("ok")?;
+        let back = entry.get_password()?;
+        let _ = entry.delete_credential();
+        anyhow::ensure!(back == "ok", "keychain returned a different value");
+        Ok(())
+    }
+
     fn read_file(&self) -> serde_json::Map<String, serde_json::Value> {
         std::fs::read_to_string(&self.fallback_file)
             .ok()

@@ -78,6 +78,7 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
   - the same message is folded into the planner at the next step, with a note that it was already answered
 - **Halt phrases** ("stop", "wait", "cancel"…) are matched by fixed rules and stop the task without any model call.
 - **Conversation memory:** the last 10 exchanges carry over between tasks.
+- **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model, so it loads while the user types.
 
 ### Self-modification and recursion
 

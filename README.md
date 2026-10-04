@@ -108,6 +108,13 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 8. Press **Escape** mid-task → it stops.
 9. Settings → Activity log shows each step; *Verify integrity* reports the log intact.
 
+## Something not working?
+
+Right-click the duck → **Settings** → **Diagnostics** → **Run self-test**.
+- It checks the display, window tracking, accessibility, screenshots, mouse and keyboard, key storage, the workspace, commands, the activity log, the talk shortcut, the microphone, and the model (one small call).
+- It saves `waddle-report-<time>.txt` in your workspace folder. Send that file. It leaves out keys, file contents, window titles and what you've typed.
+- Waddle also keeps a log at `%LOCALAPPDATA%\dev.waddle.app\logs\waddle.log` (macOS: `~/Library/Logs/dev.waddle.app/`, Linux: `~/.local/share/dev.waddle.app/logs/`). The report includes its last lines.
+
 ## Project layout
 
 ```

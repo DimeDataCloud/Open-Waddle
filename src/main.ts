@@ -42,6 +42,8 @@ const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
     bubble.say("user", text);
     void api.sendMessage(text);
   },
+  // A local model loads while the user types.
+  opened: () => void api.warmUp(),
   voiceStart: () => api.voiceStart(),
   voiceStop: () => api.voiceStop(),
   error: (m) => bubble.say("error", m),
