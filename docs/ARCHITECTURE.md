@@ -78,7 +78,7 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
   - the same message is folded into the planner at the next step, with a note that it was already answered
 - **Halt phrases** ("stop", "wait", "cancel"…) are matched by fixed rules and stop the task without any model call.
 - **Conversation memory:** the last 10 exchanges carry over between tasks.
-- **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model, so it loads while the user types.
+- **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model: it loads and reads the system prompt, tools and conversation so far while the user types, so the first step only reads their message (36.6 s → 6.8 s here on a 4-core CPU). The warm-up asks Ollama for thinking on, because the empty think block that `think: false` appends ends the prompt past Qwen3.5's last cache checkpoint.
 
 ### Self-modification and recursion
 

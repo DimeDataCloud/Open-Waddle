@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
-use waddle_core::llm::{build_provider, ImageData};
+use waddle_core::llm::{build_provider, ChatRequest, ImageData};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::{AgentEvent, Decision, Host, Outcome, Settings};
@@ -46,6 +46,11 @@ struct Run {
 }
 
 async fn run(goal: &str, setup: impl FnOnce(&FakeHost)) -> Run {
+    run_with(goal, setup, false).await
+}
+
+/// `warm`: first send what the app sends while the user types (see `Session::warm`).
+async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run {
     let dir = tempfile::tempdir().unwrap();
     let workspace = Arc::new(Workspace::new(dir.path().join("ws")).unwrap());
     let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
@@ -62,6 +67,12 @@ async fn run(goal: &str, setup: impl FnOnce(&FakeHost)) -> Run {
     };
     let env = host.env();
     let agent = Agent::new(&deps, "live".into(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);
+    if warm {
+        let started = Instant::now();
+        let (messages, tools) = agent.opening(&[]);
+        deps.provider.warm(ChatRequest { model: &deps.settings.model, messages: &messages, tools: &tools, temperature: 0.2, max_tokens: 1 }).await;
+        println!("\nwarm-up took {:.1}s (hidden while the user types)", started.elapsed().as_secs_f64());
+    }
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let r = agent.run(goal, &[], &mut rx).await;
     report(goal, &host, &r.outcome, &r.message);
@@ -182,21 +193,24 @@ async fn two_screenshots_keep_the_cache() {
 
 #[tokio::test]
 #[ignore = "needs a local Ollama server with the model pulled"]
-async fn warm_up_hides_the_model_load() {
+async fn warm_up_hides_the_model_load_and_the_prompt() {
     let settings = live_settings();
-    let first_step = |r: &Run| r.host.timeline.lock().unwrap().get(1).map(|(t, _)| *t).unwrap_or(f64::NAN);
+    // From the first model call to the first tool: what the user waits for after Enter.
+    let first_step = |r: &Run| {
+        let t = r.host.timeline.lock().unwrap();
+        match (t.first(), t.get(1)) {
+            (Some(a), Some(b)) => b.0 - a.0,
+            _ => f64::NAN,
+        }
+    };
 
     unload(&settings).await;
-    let cold = run("Create a file named cold.txt that contains the text cold", |_| {}).await;
+    let cold = run("Create a file named cold.txt that contains the text cold", desktop).await;
 
     unload(&settings).await;
-    let started = Instant::now();
-    build_provider(&settings, None).warm(&settings.model).await;
-    let warm_secs = started.elapsed().as_secs_f64();
-    let warm = run("Create a file named warm.txt that contains the text warm", |_| {}).await;
+    let warm = run_with("Create a file named warm.txt that contains the text warm", desktop, true).await;
 
-    println!("\nwarm-up call: {warm_secs:.1}s (hidden while the user types)");
-    println!("first step after idle: cold {:.1}s, warmed {:.1}s", first_step(&cold), first_step(&warm));
+    println!("\nfirst step after idle: cold {:.1}s, warmed {:.1}s", first_step(&cold), first_step(&warm));
     assert_eq!(warm.outcome, Outcome::Done, "{}", warm.message);
-    assert!(first_step(&warm) < first_step(&cold), "warming should shorten the first step");
+    assert!(first_step(&warm) < first_step(&cold) / 2.0, "warming should at least halve the first step");
 }

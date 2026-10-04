@@ -80,6 +80,7 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
+#[derive(Clone, Copy)]
 pub struct ChatRequest<'a> {
     pub model: &'a str,
     pub messages: &'a [Message],
@@ -107,8 +108,15 @@ pub trait Provider: Send + Sync {
     /// as they arrive; the full response (including tool calls) is returned at the end.
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse>;
 
-    /// Gets the model ready ahead of a request (a local server loads it into memory).
-    async fn warm(&self, _model: &str) {}
+    /// Sends the start of a conversation ahead of time and discards the answer,
+    /// so a local server has the model loaded and the prompt cached when the
+    /// real request arrives. Only worth calling on local servers: a hosted API
+    /// would bill for it.
+    async fn warm(&self, req: ChatRequest<'_>) {
+        if let Err(e) = self.chat(ChatRequest { max_tokens: 1, ..req }, &mut |_| {}).await {
+            log::debug!("warm-up failed: {e:#}");
+        }
+    }
 }
 
 /// Builds the provider described by `settings`.

@@ -114,17 +114,32 @@ pub(crate) fn apply_line(
     Ok(v.get("done").and_then(Value::as_bool).unwrap_or(false))
 }
 
-pub(crate) fn warm_body(model: &str, opts: &OllamaSettings) -> Value {
-    // A generate request without a prompt only loads the model.
-    json!({ "model": model, "keep_alive": opts.keep_alive })
+/// The warm-up request: the real request's opening, one token, thinking on.
+/// With thinking off the chat template ends in an empty think block, six tokens
+/// past the point where the real request diverges; the server's last checkpoint
+/// sits four tokens from the end, so a hybrid model like Qwen3.5 couldn't resume
+/// from it. With thinking on the tail is short enough.
+pub(crate) fn warm_body(req: &ChatRequest<'_>, opts: &OllamaSettings, think: bool) -> Value {
+    let mut body = request_body(&ChatRequest { max_tokens: 1, ..*req }, opts);
+    body["stream"] = json!(false);
+    body["think"] = json!(think);
+    body
 }
 
 #[async_trait]
 impl Provider for Ollama {
-    async fn warm(&self, model: &str) {
-        let url = format!("{}/api/generate", self.base_url);
-        if let Err(e) = self.http.post(&url).json(&warm_body(model, &self.opts)).send().await {
-            log::debug!("warm-up failed: {e}");
+    async fn warm(&self, req: ChatRequest<'_>) {
+        let url = format!("{}/api/chat", self.base_url);
+        // Models without a thinking mode reject `think: true`; their template has no think block anyway.
+        for think in [true, false] {
+            match self.http.post(&url).json(&warm_body(&req, &self.opts, think)).send().await {
+                Ok(r) if r.status().is_success() => {
+                    let _ = r.bytes().await;
+                    return;
+                }
+                Ok(r) => log::debug!("warm-up (think {think}): {}", r.status()),
+                Err(e) => return log::debug!("warm-up failed: {e}"),
+            }
         }
     }
 
@@ -208,10 +223,16 @@ mod tests {
     }
 
     #[test]
-    fn warm_up_loads_without_generating() {
+    fn warm_up_reads_the_prompt_without_streaming_an_answer() {
         let opts = OllamaSettings { num_thread: None, keep_alive: "30s".into(), num_ctx: 8192 };
-        let body = warm_body("qwen3.5:4b", &opts);
-        assert_eq!(body, json!({ "model": "qwen3.5:4b", "keep_alive": "30s" }));
+        let msgs = vec![Message::system("You are Waddle.")];
+        let req = ChatRequest { model: "qwen3.5:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 1024 };
+        let body = warm_body(&req, &opts, true);
+        assert_eq!((body["think"].clone(), body["stream"].clone()), (json!(true), json!(false)));
+        assert_eq!(body["options"]["num_predict"], 1);
+        // Same context size as real requests, or Ollama would reload the model.
+        assert_eq!(body["options"]["num_ctx"], 8192);
+        assert_eq!(body["messages"], request_body(&req, &opts)["messages"]);
     }
 
     #[test]

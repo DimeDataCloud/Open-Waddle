@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use waddle_core::agent::{prune_images, Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
+use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
 use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
 use waddle_core::tools::fs::Workspace;
@@ -280,6 +281,35 @@ async fn follow_up_tasks_see_conversation_memory() {
     wait_until(|| provider.request_count() == 2).await;
     let second = provider.requests.lock().unwrap()[1].clone();
     assert!(second.iter().any(|m| m.role == Role::Assistant && m.text == "Hi there!"));
+}
+
+#[tokio::test]
+async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Hi there!", vec![]), reply("Sure.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+    session.warm();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(provider.warmups.lock().unwrap().is_empty(), "a hosted API was warmed (and would bill for it)");
+
+    let mut local = session_config(&f, provider.clone());
+    local.settings.provider = ProviderKind::Ollama;
+    session.configure(local);
+    session.user_message("hello".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    wait_until(|| !session.is_busy()).await;
+    session.warm();
+    wait_until(|| provider.warmups.lock().unwrap().len() == 1).await;
+    session.user_message("and again".into());
+    wait_until(|| provider.request_count() == 2).await;
+
+    // The warm-up is exactly the next request minus the user's new message,
+    // so a local server can reuse everything it read while the user typed.
+    let warm = provider.warmups.lock().unwrap()[0].clone();
+    let next = provider.requests.lock().unwrap()[1].clone();
+    assert_eq!(warm.as_slice(), &next[..next.len() - 1]);
+    assert!(warm.iter().any(|m| m.text == "Hi there!"), "memory missing from the warm-up");
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {

@@ -102,18 +102,39 @@ impl Session {
         self.memory.lock().unwrap().clear();
     }
 
-    /// Called when the user starts talking: a local model loads while they type
-    /// instead of after they press Enter. Hosted APIs need nothing.
-    pub fn warm(&self) {
+    /// Called when the user starts talking. A local model loads and reads the
+    /// system prompt, tools and conversation so far while they type, so the
+    /// first step after Enter only has to read their message. Hosted APIs would
+    /// bill for this, so they are left alone.
+    pub fn warm(self: &Arc<Self>) {
         if self.is_busy() {
             return;
         }
-        let (local, model, provider) = {
-            let c = self.config.read().unwrap();
-            (c.settings.is_local(), c.settings.model.clone(), c.provider.clone())
-        };
-        if local {
-            self.rt.spawn(async move { provider.warm(&model).await });
+        let config = self.config.read().unwrap().clone();
+        if !config.settings.is_local() {
+            return;
+        }
+        let this = self.clone();
+        self.rt.spawn(async move {
+            let deps = this.deps(config);
+            let memory = this.memory.lock().unwrap().clone();
+            let env = this.host.env();
+            let agent = Agent::new(&deps, String::new(), CancellationToken::new(), Arc::default(), &env);
+            let (messages, tools) = agent.opening(&memory);
+            let req = ChatRequest { model: &deps.settings.model, messages: &messages, tools: &tools, temperature: 0.2, max_tokens: 1 };
+            deps.provider.warm(req).await;
+        });
+    }
+
+    fn deps(&self, config: SessionConfig) -> AgentDeps {
+        AgentDeps {
+            provider: config.provider,
+            host: self.host.clone(),
+            audit: self.audit.clone(),
+            workspace: config.workspace,
+            settings: config.settings,
+            skills: config.skills,
+            self_source: config.self_source,
         }
     }
 
@@ -157,15 +178,7 @@ impl Session {
             let _ = this.audit.append(AuditEntry { task_id: task_id.clone(), kind: "task_start".into(), detail: Some(goal.clone()), ..Default::default() });
 
             let timeout = Duration::from_secs(config.settings.task_timeout_secs);
-            let deps = AgentDeps {
-                provider: config.provider,
-                host: host.clone(),
-                audit: this.audit.clone(),
-                workspace: config.workspace,
-                settings: config.settings,
-                skills: config.skills,
-                self_source: config.self_source,
-            };
+            let deps = this.deps(config);
             let memory = this.memory.lock().unwrap().clone();
             let env = host.env();
             let agent = Agent::new(&deps, task_id.clone(), cancel.clone(), status, &env);
