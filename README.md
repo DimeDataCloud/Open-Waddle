@@ -2,7 +2,14 @@
 
 Project Waddle is a desktop AI agent you can watch. Waddle is a 16×14 pixel-art duck who lives on a transparent overlay above your windows. It walks along title bars to whatever it's about to touch. It says what it's doing in a speech bubble as it works, and it asks before anything risky. You can talk to it, by typing or by voice, while it's working.
 
-This repo is the MVP foundation. It runs on your own machine. Apart from cheap cloud model calls (optional), it costs nothing.
+Version 0.2 makes it a real assistant:
+- It works with your Gmail, Google Calendar, Contacts and Drive.
+- It taps you on the shoulder before meetings and when important mail arrives.
+- It reads and acts on web pages in Chrome through its extension.
+- It finds and reads your documents.
+- It sorts each message into a quick chat, a cited research answer or a task.
+
+It runs on your own machine. Apart from cheap cloud model calls (optional; a busy day costs a few cents), it costs nothing.
 
 ```
             ┌──────────────────────────── Brain (waddle-core) ───────────────────────────┐
@@ -98,7 +105,7 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
 
 ### Option A: install a build
 
-1. Download `Waddle_0.1.0_arm64-setup.exe` from the latest CI run's artifacts (or the file shared with you).
+1. Download `Waddle_0.2.0_arm64-setup.exe` from the latest CI run's artifacts (or the file shared with you).
 2. It isn't code-signed yet, so Windows SmartScreen will warn you. Click **More info → Run anyway**.
 3. Waddle appears at the bottom of your screen in **demo mode** (no AI). Click the duck and type anything to see the full flow.
 
@@ -126,11 +133,17 @@ Right-click the duck → **Settings**:
 
 | Preset | Cost | Notes |
 |---|---|---|
-| **OpenRouter** (default) | ~$0.001 per task (measured, [docs/MODELS.md](docs/MODELS.md)) | Create a key at <https://openrouter.ai/keys>, add $5 credit, paste the key. Defaults: `qwen/qwen3-vl-8b-instruct` plans; `google/gemini-2.5-flash-lite` gives quick replies. Your PC does almost no work. |
+| **OpenRouter** (default) | ~$0.0005–0.001 per task (measured, [docs/MODELS.md](docs/MODELS.md)) | Create a key at <https://openrouter.ai/keys>, add $5 credit, paste the key. Defaults: `openai/gpt-6-luna` plans; `google/gemini-2.5-flash-lite` chats and researches; TypeSafe's Jev makes the split-second decisions. Your PC does almost no work. |
 | **Ollama** (local) | Free | Install <https://ollama.com> (0.17.6 or newer), run `ollama pull qwen3.5:4b`. Waddle turns off the model's hidden "thinking", caps it to a third of your CPU cores and unloads it 30 s after each task. On Snapdragon it runs on the CPU only, so it's slow and keeps the machine busy while it thinks. `qwen3.5:2b` is faster; `qwen3.5:9b` is smarter if you have 32 GB of RAM. |
 | LM Studio / Foundry Local / custom | Free | Any OpenAI-compatible endpoint. LM Studio (`qwen3.5-4b`) runs Qwen3.5 faster than Ollama does. Foundry Local can use the Snapdragon NPU (text models only). |
 
 API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Secret Service), not in files. For development, `OPENROUTER_API_KEY` or `WADDLE_API_KEY` env vars also work. `WADDLE_PROVIDER=mock` forces demo mode.
+
+### Connect Google and Chrome (optional, 5 minutes each)
+
+- **Google** (Gmail, Calendar, Contacts, Drive): follow [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md). You create your own OAuth client, paste it into Settings → Google account, and press **Connect**.
+- **Chrome:** Settings → Chrome → **Set up Chrome extension**. Then in Chrome open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the folder that opened. See [extension/README.md](extension/README.md).
+- **Files:** Settings → Files. Waddle can read your user folders. Add the folders it may also change.
 
 ## Try it: on-device checklist
 
@@ -179,13 +192,17 @@ crates/waddle-core/   Brain, non-GUI Hands and safety (no OS code; fully unit-te
   src/safety.rs         deterministic permission tiers
   src/skills.rs         long-term skill memory (self-improvement)
   src/audit.rs          append-only, hash-chained SQLite log
-  src/tools/            tool schemas, coordinate conversion, workspace files, commands
+  src/tools/            tool schemas, coordinate conversion, scoped files, documents, browser tools, commands
+  src/google/           Google sign-in (PKCE), Gmail, Calendar, Contacts, Drive
+  src/nudges.rs         when to nudge: meetings, important mail, the morning brief
 src-tauri/            Desktop shell: overlay, click-through, window tracking, input, UIA, voice, tray
 src/                  Overlay frontend: sprite renderer, palette maths, physics, pathfinding, UI
 bench/                Model benchmark: realistic app screens rendered in Chrome + task checks
+extension/            Waddle for Chrome (MV3): reads pages and acts on elements via native messaging
 training/             Synthetic click data, LoRA fine-tuning and GRPO scripts
 docs/ARCHITECTURE.md  How the blueprint maps to this MVP, what's deferred and why
-docs/MODELS.md        Which model to use, with benchmark results
+docs/MODELS.md        Which model to use, with benchmark results (screen tasks and assistant tasks)
+docs/GOOGLE_SETUP.md  Connecting Gmail, Calendar, Contacts and Drive
 docs/TRAINING.md      How to make the model better: harness, data, fine-tuning
 ```
 
@@ -193,7 +210,8 @@ docs/TRAINING.md      How to make the model better: harness, data, fine-tuning
 
 ```bash
 cargo test --workspace      # core + app unit tests, agent/session integration tests
-npm test                    # frontend: palette, platforms, physics, pathfinding, behaviour
+npm test                    # frontend and the Chrome extension's page code (jsdom)
+npm run build:extension     # rebuild the extension (its built files are committed and embedded in the app)
 npm run typecheck
 npm run tauri dev
 ```
@@ -202,7 +220,10 @@ Linux build dependencies: `libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatan
 
 ## Roadmap
 
-Next up is v0.2 (Gmail, Calendar, Chrome, files, nudges, memory): see [docs/ROADMAP.md](docs/ROADMAP.md). Later:
+v0.2 (Gmail, Calendar, Chrome, files, nudges, memory) is done: see [docs/ROADMAP.md](docs/ROADMAP.md) for what it covered. Next:
+
+- Spoken replies and the visual FX layer (both deferred from v0.2).
+- A signed installer, and the Chrome extension published to the Chrome Web Store so it doesn't need Developer mode.
 
 - macOS: Accessibility and Screen Recording permission prompts, the macOS accessibility fast path, Apple Silicon build.
 - Multiple monitors and mixed display scaling.

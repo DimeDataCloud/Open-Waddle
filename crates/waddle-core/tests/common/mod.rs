@@ -45,6 +45,8 @@ pub struct FakeHost {
     /// Answers from the Chrome extension by command; any entry means it's connected.
     pub browser_replies: Mutex<std::collections::HashMap<String, serde_json::Value>>,
     pub browser_calls: Mutex<Vec<(String, serde_json::Value)>>,
+    /// Whether the screen tools exist (off for text-only benchmarks).
+    pub gui: Mutex<bool>,
     started: Instant,
 }
 
@@ -68,6 +70,7 @@ impl FakeHost {
             undo_offers: Mutex::default(),
             browser_replies: Mutex::default(),
             browser_calls: Mutex::default(),
+            gui: Mutex::new(true),
             started: Instant::now(),
         })
     }
@@ -94,7 +97,7 @@ impl Host for FakeHost {
         // Like Windows: the accessibility fast path exists when there are elements to list.
         let accessibility = !self.elements.lock().unwrap().is_empty();
         let browser = !self.browser_replies.lock().unwrap().is_empty();
-        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, accessibility, browser, ..Default::default() } }
+        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: *self.gui.lock().unwrap(), accessibility, browser, ..Default::default() } }
     }
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {
         self.approvals.lock().unwrap().push(req.clone());
@@ -110,8 +113,11 @@ impl Host for FakeHost {
         (decision, self.draft_edit.lock().unwrap().clone().or(shown))
     }
     async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        // A reply for this command and mode ("read:text") wins over one for the command alone.
+        let mode = args.get("mode").and_then(|m| m.as_str()).map(|m| format!("{cmd}:{m}"));
         self.browser_calls.lock().unwrap().push((cmd.to_string(), args));
-        self.browser_replies.lock().unwrap().get(cmd).cloned().ok_or_else(|| anyhow::anyhow!("the page didn't answer `{cmd}`"))
+        let replies = self.browser_replies.lock().unwrap();
+        mode.and_then(|m| replies.get(&m).cloned()).or_else(|| replies.get(cmd).cloned()).ok_or_else(|| anyhow::anyhow!("the page didn't answer `{cmd}`"))
     }
     async fn offer_undo(&self, _id: &str, secs: u64) -> bool {
         self.undo_offers.lock().unwrap().push(secs);

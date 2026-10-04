@@ -36,6 +36,7 @@ fn live_settings() -> Settings {
         let defaults = Settings::default();
         return Settings {
             model: std::env::var("WADDLE_LIVE_MODEL").unwrap_or(defaults.model.clone()),
+            fast_model: std::env::var("WADDLE_LIVE_FAST_MODEL").unwrap_or(defaults.fast_model.clone()),
             tier2_countdown_ms: 20,
             max_steps: 6,
             ..defaults
@@ -382,4 +383,21 @@ async fn mail_importance_on_the_labelled_set() {
     }
     println!("{right}/{} at {}", set.len(), waddle_core::nudges::IMPORTANT_ABOVE);
     assert!(right * 10 >= set.len() * 8, "at least 80% right");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.01 per fast model)"]
+async fn chat_and_research_with_the_fast_model() {
+    assert!(openrouter(), "needs Jev on OpenRouter");
+    println!("fast model: {}", live_settings().fast_model);
+    for msg in [
+        "thanks, you're a star!",
+        "what's the capital of Australia?",
+        "who won the most recent Formula 1 race?",
+        "research the best way to season and clean a cast iron pan",
+    ] {
+        let (h, first, total) = route_live(msg).await;
+        assert!(!h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })), "{msg}: answered without a task");
+        assert!(first.is_finite() && total < 30.0, "{msg}: {first:.1}s to first words, {total:.1}s in all");
+    }
 }

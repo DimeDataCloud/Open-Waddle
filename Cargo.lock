@@ -6644,7 +6644,7 @@ dependencies = [
 
 [[package]]
 name = "waddle"
-version = "0.1.13"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6674,7 +6674,7 @@ dependencies = [
 
 [[package]]
 name = "waddle-core"
-version = "0.1.13"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",

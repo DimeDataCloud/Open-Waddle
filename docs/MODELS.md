@@ -8,6 +8,10 @@ Short version:
 - **Fallback: `qwen/qwen3-vl-8b-instruct`**, the previous default, which is still solid. Set it as the model in Settings to switch back.
 - **Before each task on OpenRouter, TypeSafe's Jev decision model** checks whether the screen is needed at all, and skips the screenshot when it isn't (see below).
 - **The harness mattered far more than the model.** The same model scored 27% before.
+- **v0.2 picks (October 4, 2026), all confirmed by testing:**
+  - **Planner:** `openai/gpt-6-luna`. 12/12 on the new assistant bench in both passes, at about $0.0005 a task. That's the cheapest of the models that passed everything.
+  - **Chat and research:** `google/gemini-2.5-flash-lite`. Replies take 1–1.6 s, and a cited research summary takes 4.5 s.
+  - **Decisions** (routing, the screen check, mail importance): Jev 1.13, at about $0.00002 each.
 - Two moves are worth making next:
   - try the newer, cheaper Qwen Flash models (your OpenRouter guardrail blocks them for now)
   - fine-tune a 4B model for the local, free brain ([TRAINING.md](TRAINING.md))
@@ -117,6 +121,42 @@ Real Google Chrome, the real app, the real model, one run each:
 |---|---|---|---|
 | openai/gpt-6-luna | 3/3 | 24 s | $0.0010 |
 | qwen/qwen3-vl-8b-instruct | 2/3 (answered without acting on Hacker News) | 16 s | $0.0021 |
+
+## v0.2 bake-off: assistant tasks (October 4, 2026)
+
+`crates/waddle-core/tests/assist.rs` runs 12 text-only jobs against a fake Google, a temporary folder and a fake Chrome extension, using the app's real prompt, tools and tiers. Each check looks at what happened, not just the reply. For example:
+- **reply:** an email went to Ana, in her thread, and says Thursday
+- **book:** an event with Sam at 14:00 that has a Meet link
+- **signup:** typed into field e1 and clicked e3
+- **delete_guard:** asked before deleting, and kept the file when the user said no
+
+Running out of steps or hitting a provider error counts as a failure.
+
+The 12 jobs:
+
+| Area | Jobs |
+|---|---|
+| Calendar | next meeting, booking with a contact and a Meet link |
+| Mail | important unread mail, threaded reply, archiving |
+| Files | rent from a PDF, a figure from an XLSX, making a spreadsheet, a refused delete |
+| Chrome | filling a form, a web search |
+| Memory | remembering a fact |
+
+| Model | Passed | Time per task | Cost per task | Notes |
+|---|---|---|---|---|
+| **openai/gpt-6-luna** | **36/36** (3 passes) | 5.7 s (when not rate-limited) | **$0.0005** | **Keep as the default.** Short, correct answers. |
+| openai/gpt-6-luna-pro | 12/12 | 10–14 s (partly rate-limit waits) | $0.0015 | As accurate, 3× the cost and slower. Lists every unread email when asked for important ones. |
+| xiaomi/mimo-v2.6-flash | 12/12 | 6.1 s | $0.0019 | Accurate and quick, 4× the cost. Writes Markdown, which the bubble strips. **The best alternative.** |
+| qwen/qwen3-vl-8b-instruct | 9/12 | 3.8 s | $0.0019 | Saved a draft instead of sending, missed the urgent email, and ran out of steps on the form. |
+
+New accounts are limited to 20 requests a minute per model, so the bench retries after a 429. Times above leave those waits out. The whole bake-off, with reruns, cost about $0.2.
+
+**Chat and research models (one pass each):**
+- `google/gemini-2.5-flash-lite`:
+  - small talk and a knowledge question: 1.0–1.6 s
+  - a current-facts question with web search: 3.2 s
+  - a research summary: first words in 2.0 s, done in 4.5 s
+- `inception/mercury-2.5`: 4.9 s for a "thanks", and it handed small talk off to a task. Not used.
 
 ## Jev and Laya (decision models)
 

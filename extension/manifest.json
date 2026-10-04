@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Waddle",
   "description": "Lets Waddle, your desktop duck, read and use web pages in Chrome when you ask it to.",
-  "version": "0.1.13",
+  "version": "0.2.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1c02btZTuJpLEXvt6EoFzqVEGh9VHTBD0Gfo4I9BHTs6pGTaHbmei0s0dxBSnMYXgRyxNln06ljiwN1rPKuK3rm4VEwfjWsWPdGPvExYXVN5xS7ZAY3EPNwOdoyb0EDNT+VrHmI7B5jVSGrEqq6MtVikqu/Hs1/swdt8s8I02jnxQ2IUKaHnQaCPW4IVUvDO8uYl48VU1agYYXcUUriql2O1BB+pXBgeobtBxUCSA0Zz0clUxOZ8SXuV1FbdTTpRIVHMCePfoBLbOdvvljni0pBErWC9aK1z90N9og9qu7EkL6f3YCxn0+3e9NiantoVCkzXyszrNWanKCHKKCb63QIDAQAB",
   "minimum_chrome_version": "116",
   "permissions": ["nativeMessaging", "tabs", "scripting", "alarms"],
