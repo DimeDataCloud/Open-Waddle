@@ -109,7 +109,7 @@ Each model costs about $0.01–0.05 for a 15-task pass.
 
 | Model | Notes |
 |---|---|
-| `qwen3.5:4b` (current default) | Benchmark result in this container (4 x86 cores, CPU only): see `bench/results/qwen3.5_4b@local-cpu.json`. Each screenshot step takes about 60 s here; a Snapdragon X runs roughly 2–3× faster. |
+| `qwen3.5:4b` (current default) | **5/15 strict** in this container (4 x86 cores, CPU only), 190 s per task. In 6 of the failed tasks it clicked the right target, then kept re-checking (the test screen never changes) until the step limit. Its clicks are good. Its judgement is weak: it presses Enter after clicks, opens Notepad mid-task, and looks seven times instead of answering. Those are exactly what training on rated tasks fixes. A Snapdragon X should be roughly 2–3× faster. |
 | Holo3.1-4B (H Company) | Qwen3.5-4B fine-tuned for computer use, sold on GUI grounding. GGUF with the vision projector bundled, on Ollama as a community upload (`ahmadwaqar/holo-3.1`). **The next local model to benchmark.** |
 | Qwen3.8-Flash-Next | Newer Qwen with an Ollama library tag. Check its size: anything over about 5 GB hurts on a 16 GB Surface. |
 | Fine-tuned Waddle model | See [TRAINING.md](TRAINING.md). A 4B model trained on your own rated tasks plus synthetic click data is the realistic way to make the free brain good. |
