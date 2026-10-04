@@ -1,8 +1,12 @@
 # Choosing Waddle's brain (October 2026)
 
 Short version:
-- **Keep `qwen/qwen3-vl-8b-instruct` as the cloud default.** It passes about 90% of our 21 desktop and assistant tasks at about $0.001 per task, and none of the newer models tested beat it.
-- **Runner-up:** `qwen/qwen3.5-flash-02-23`, which hits the target as often but is slower (11 s per task) and re-checks more.
+- **New cloud default: `openai/gpt-6-luna`.**
+  - It did the right thing in 41 of 42 benchmark runs, against 38 for Qwen3-VL-8B.
+  - It went 3 for 3 on live tasks on real websites, against 2 for 3 for Qwen.
+  - It costs about half as much per task (~$0.001).
+- **Fallback: `qwen/qwen3-vl-8b-instruct`**, the previous default, which is still solid. Set it as the model in Settings to switch back.
+- **Before each task on OpenRouter, TypeSafe's Jev decision model** checks whether the screen is needed at all, and skips the screenshot when it isn't (see below).
 - **The harness mattered far more than the model.** The same model scored 27% before.
 - Two moves are worth making next:
   - try the newer, cheaper Qwen Flash models (your OpenRouter guardrail blocks them for now)
@@ -88,16 +92,51 @@ The suite now has 21 tasks: the 15 above plus 6 assistant tasks (point at someth
 
 | Model | Strict | Hit | Time per task | Cost per task | Notes |
 |---|---|---|---|---|---|
-| **qwen/qwen3-vl-8b-instruct** | **38/42** | **38/42** | **4.1 s** | $0.0011 | Default. Misses: the known file-task over-click, one copy done by typing and pressing Ctrl+C |
+| **openai/gpt-6-luna** | 15/42 | **41/42** | 11 s† | $0.0009† | **New default.** Right action almost every time, then re-checks the static screen. Pixel coordinates. New accounts: 20 requests/min per model |
+| qwen/qwen3-vl-8b-instruct | 38/42 | 38/42 | 4.1 s | $0.0011 | Previous default. Misses: the known file-task over-click, one copy done by typing and pressing Ctrl+C |
+| google/gemini-3.8-flash | 17/42 | 41/42 | 17 s† | $0.0135† | As accurate as Luna but 13× the price |
 | qwen/qwen3.5-flash-02-23 | 35/42 | 38/42 | 11.1 s | $0.0008 | As accurate; slower, re-checks more |
 | qwen/qwen3.7-flash | 14/42* | — | 29 s | $0.0005 | Answers in its own pixel space (a click at x=1714 on a 1440-wide screen); pixel mode didn't fix it (1/6). Thinks for a long time |
 | qwen/qwen3.8-flash | 14/42* | — | 22 s | $0.0013 | Same coordinate problem as 3.7 |
 | qwen/qwen3.8-27b | 18/42* | — | 15 s | $0.0024 | First clicks look right; then re-checks the static screen and re-clicks |
 | google/gemini-3.1-flash-lite | 6/42* | — | 8 s | $0.0038 | First clicks right (Night light, Delete, Compose), then re-clicks to the step limit; pricier than Qwen |
-| openai/gpt-6-luna | 20/42* | — | 2.7 s | $0.0002 | Most runs hit the new account's rate limit (429); its clicks that got through were right |
-| google/gemini-3.8-flash | 19/42* | — | 3.1 s | $0.0016 | Same rate limit |
 
-\* First run, before the hit score and the concurrency cap (`WADDLE_BENCH_CONCURRENCY=4`). Rate limits and re-checks count as failures here, so these numbers are a floor. **Worth a clean rerun:** GPT-6 Luna (fast and very cheap) and Gemini 3.8 Flash.
+\* First run, before the hit score and the concurrency cap. Rate limits and re-checks count as failures, so these numbers are a floor.
+† Includes the wasted re-check steps on the static screen; on real pages, where the screen changes, Luna needs fewer steps (below).
+
+### Live check on real websites (screens that change)
+
+Real Google Chrome, the real app, the real model, one run each:
+- "Search Wikipedia for rubber duck debugging"
+- "Open the newest stories page" (Hacker News)
+- "Use the site search to find the CSS grid layout guide and open it" (MDN)
+
+| Model | Passed | Time per task | Cost per task |
+|---|---|---|---|
+| openai/gpt-6-luna | 3/3 | 24 s | $0.0010 |
+| qwen/qwen3-vl-8b-instruct | 2/3 (answered without acting on Hacker News) | 16 s | $0.0021 |
+
+## Jev and Laya (decision models)
+
+These are "System One" models: one quick pass that returns a yes/no probability, a choice or a score, not text. They suit small decisions around the main model, not acting.
+
+| | Jev 1.13 (TypeSafe) | Laya (Convai, Apache-2.0) |
+|---|---|---|
+| Where it runs | OpenRouter, `POST /api/alpha/decisions` (works with Waddle's key) | Local ONNX (`onnxruntime`), 421M parameters, ~1.2 GB int8 |
+| Speed | 0.3 s median, 0.4 s at p90 (measured) | 150–460 ms on CPU (model card); x86_64 builds only so far |
+| Cost | ~$0.000015 per decision (input tokens only) | free, but ~1.2 GB of RAM while loaded |
+| Tools or images | no | no |
+
+**In use now: "does this task need the screen?"** (`smart_look`, on by default with OpenRouter).
+- Jev scored 28/32 on sample requests, and every miss was on the safe side (it looked when it didn't need to).
+- Below 0.3 the opening screenshot is skipped. That would have skipped 8 of the 12 tasks that didn't need the screen (reminders, files, maths, writing), with no wrong skips. Every task that needed the screen scored 0.5 or more.
+- Any error, or an answer slower than 2 s, means "look".
+
+**Jev Router (`typesafe/jev-router`)** is a different product: it picks a chat model for each request. It isn't tested here, because its per-request model choice makes cost unpredictable.
+
+**Laya: later, for the local brain.**
+- The same screen check, run locally, would save the local model about 55 s per text-only task. But it needs about 1.2 GB of RAM and an ARM64 onnxruntime build, and it has no GGUF version, so Ollama and LM Studio can't load it.
+- Worth trying when local mode matters; the `Provider::needs_screen` hook is where it plugs in.
 
 To rerun:
 

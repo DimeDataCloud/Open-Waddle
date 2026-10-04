@@ -181,7 +181,7 @@ impl Default for Settings {
         Self {
             provider: ProviderKind::OpenaiCompat,
             base_url: "https://openrouter.ai/api/v1".into(),
-            model: "qwen/qwen3-vl-8b-instruct".into(),
+            model: "openai/gpt-6-luna".into(),
             fast_model: "google/gemini-2.5-flash-lite".into(),
             coord_mode: CoordMode::Auto,
             reasoning: Reasoning::Default,

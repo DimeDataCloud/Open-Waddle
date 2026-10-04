@@ -93,6 +93,7 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 | `reminder` | 1 | add / list / cancel, stored in `reminders.json` in the app data folder (`reminders.rs`). A thread checks every 5 s and emits `reminder`; the overlay chimes and pins the bubble for a minute. Reminders that came due while the app was closed pop up at start, marked as missed. |
 
 - **Text tool calls:** Qwen sometimes writes a call as text (`point_at(x=920, y=240)`, `</tool_call>`) instead of making it. `writes_tool_call` spots an offered tool name followed by `(` or `{`, and the model gets one nudge to make the real call.
+- **Screen check (`smart_look`):** on OpenRouter, TypeSafe's Jev decision model is asked first whether the task needs the screen (`Provider::needs_screen`). Below 0.3 the opening screenshot is skipped; the model can still look itself, and blind input stays blocked until it does.
 - **Time:** the opening observation starts with the local date and time, so "at 3pm" and "what time is it" work without changing the cached system prompt.
 
 ### Self-modification and recursion

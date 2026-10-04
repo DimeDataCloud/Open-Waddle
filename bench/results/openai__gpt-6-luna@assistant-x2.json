@@ -1,0 +1,431 @@
+{
+  "cost": 0.0009350155952380952,
+  "hits": 41,
+  "model": "openai/gpt-6-luna",
+  "passed": 15,
+  "results": [
+    {
+      "cost": 0.001164185,
+      "hit": true,
+      "id": "playlist",
+      "note": "StepLimit [windows look click(599,615) look click(600,614) look click(598,614) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.270289380999998,
+      "steps": 6,
+      "tokens": 18893
+    },
+    {
+      "cost": 0.0009214550000000001,
+      "hit": true,
+      "id": "search",
+      "note": "StepLimit [windows look click(667,28) type(\"rubber duck debugging\" @624,28) keys(enter) look click(654,28) type(\"rubber duck debugging\" @630,28)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 12.942585784999991,
+      "steps": 6,
+      "tokens": 18704
+    },
+    {
+      "cost": 0.00118314,
+      "hit": true,
+      "id": "open-email",
+      "note": "StepLimit [windows look click(530,336) look click(528,335) look click(525,336) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.515587633999992,
+      "steps": 6,
+      "tokens": 18950
+    },
+    {
+      "cost": 0.0011719999999999999,
+      "hit": true,
+      "id": "compose",
+      "note": "StepLimit [windows look click(73,101) look click(74,100) look click(73,101) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 12.392921196000003,
+      "steps": 6,
+      "tokens": 18890
+    },
+    {
+      "cost": 0.0014722049999999999,
+      "hit": true,
+      "id": "delete-icon",
+      "note": "StepLimit [windows look click(936,90) look click(936,90) look click(286,144)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 19.122352094999997,
+      "steps": 6,
+      "tokens": 19541
+    },
+    {
+      "cost": 0.0012324449999999998,
+      "hit": true,
+      "id": "toggle",
+      "note": "StepLimit [windows look click(1340,231) look click(1340,231) look click(535,231)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.312561799999997,
+      "steps": 6,
+      "tokens": 19024
+    },
+    {
+      "cost": 0.0011567200000000002,
+      "hit": true,
+      "id": "nav",
+      "note": "StepLimit [windows look click(107,242) look click(108,243) look click(105,243) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 12.865502751000008,
+      "steps": 6,
+      "tokens": 18852
+    },
+    {
+      "cost": 0.001160195,
+      "hit": true,
+      "id": "bold",
+      "note": "Done [windows look keys(ctrl+b) look click(122,120) look] Done—the selected text is bold.",
+      "pass": true,
+      "secs": 12.226711138999995,
+      "steps": 5,
+      "tokens": 15647
+    },
+    {
+      "cost": 0.000441085,
+      "hit": true,
+      "id": "dialog",
+      "note": "Done [windows look click(732,460)] Notepad is closed without saving.",
+      "pass": true,
+      "secs": 4.120356733000001,
+      "steps": 2,
+      "tokens": 5971
+    },
+    {
+      "cost": 0.0011907800000000002,
+      "hit": true,
+      "id": "file-row",
+      "note": "StepLimit [windows look click(340,290) look click(329,290) look click(329,290) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.631997737999995,
+      "steps": 6,
+      "tokens": 18932
+    },
+    {
+      "cost": 0.00117753,
+      "hit": true,
+      "id": "sidebar",
+      "note": "StepLimit [windows look click(65,306) look click(62,305) look click(65,305) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 12.634155949999993,
+      "steps": 6,
+      "tokens": 18901
+    },
+    {
+      "cost": 0.00093285,
+      "hit": false,
+      "id": "form",
+      "note": "StepLimit [windows look click(423,357) type(\"Ada\" @425,357) look click(421,357) type(\"Ada\" @421,357) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 10.985888945,
+      "steps": 6,
+      "tokens": 18796
+    },
+    {
+      "cost": 0.0003973,
+      "hit": true,
+      "id": "just-answer",
+      "note": "Done [windows look] The subject is **“Offsite agenda.”**",
+      "pass": true,
+      "secs": 2.771815449,
+      "steps": 1,
+      "tokens": 2987
+    },
+    {
+      "cost": 0.00046405,
+      "hit": true,
+      "id": "write-file",
+      "note": "Done [windows look] Created `hello.txt` in the workspace with the text `hi`.",
+      "pass": true,
+      "secs": 4.677357573999998,
+      "steps": 2,
+      "tokens": 6055
+    },
+    {
+      "cost": 0.0010035999999999999,
+      "hit": true,
+      "id": "a11y",
+      "note": "StepLimit [windows elements look element(2) look elements element(2) windows click(734,460)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 12.694810277000002,
+      "steps": 6,
+      "tokens": 20197
+    },
+    {
+      "cost": 0.00044663499999999997,
+      "hit": true,
+      "id": "where-toggle",
+      "note": "Done [windows look PointAt { x: 1340.0, y: 231.0, label: \"Night light switch\" }] The Night light switch is on the right side of the “Night light” row. Click it to turn it on.",
+      "pass": true,
+      "secs": 3.376520963000001,
+      "steps": 2,
+      "tokens": 5996
+    },
+    {
+      "cost": 0.00045590500000000005,
+      "hit": true,
+      "id": "where-compose",
+      "note": "Done [windows look PointAt { x: 72.0, y: 100.0, label: \"Compose\" }] Click **Compose** in the upper-left of Gmail to start a new email.",
+      "pass": true,
+      "secs": 4.3530784160000024,
+      "steps": 2,
+      "tokens": 6015
+    },
+    {
+      "cost": 0.001203815,
+      "hit": true,
+      "id": "scroll",
+      "note": "StepLimit [windows look Scroll { dx: 0, dy: 5, at: Some((1090.0, 780.0)) } look Scroll { dx: 0, dy: 7, at: Some((700.0, 700.0)) } look Scroll { dx: 0, dy: 9, at: Some((1220.0, 850.0)) } look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.662082602999988,
+      "steps": 6,
+      "tokens": 18997
+    },
+    {
+      "cost": 0.001301235,
+      "hit": true,
+      "id": "drag",
+      "note": "StepLimit [windows look Drag { from: (331.0, 290.0), to: (69.0, 305.0) } look Drag { from: (331.0, 290.0), to: (72.0, 304.0) } look click(337,289) keys(ctrl+x)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 14.151398459000006,
+      "steps": 6,
+      "tokens": 19234
+    },
+    {
+      "cost": 0.00043252000000000004,
+      "hit": true,
+      "id": "copy",
+      "note": "Done [windows look WriteClipboard { text: \"Offsite agenda\" }] Copied “Offsite agenda” to your clipboard.",
+      "pass": true,
+      "secs": 2.9184483330000006,
+      "steps": 2,
+      "tokens": 5962
+    },
+    {
+      "cost": 0.000510865,
+      "hit": true,
+      "id": "remind",
+      "note": "Done [windows look] The reminder is already set for 06:01: stretch.",
+      "pass": true,
+      "secs": 8.255309975000003,
+      "steps": 3,
+      "tokens": 9108
+    },
+    {
+      "cost": 0.0011832099999999999,
+      "hit": true,
+      "id": "playlist",
+      "note": "StepLimit [windows look click(599,613) look click(600,615) look click(597,615) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.550996330000004,
+      "steps": 6,
+      "tokens": 18910
+    },
+    {
+      "cost": 0.000930695,
+      "hit": true,
+      "id": "search",
+      "note": "StepLimit [windows look click(642,28) type(\"rubber duck debugging\" @608,28) keys(enter) look click(636,28) type(\"rubber duck debugging\" @636,28)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 14.139684790999993,
+      "steps": 6,
+      "tokens": 18688
+    },
+    {
+      "cost": 0.00115896,
+      "hit": true,
+      "id": "open-email",
+      "note": "StepLimit [windows look click(532,336) look click(520,335) look click(529,335) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 11.206382520999995,
+      "steps": 6,
+      "tokens": 18916
+    },
+    {
+      "cost": 0.00120067,
+      "hit": true,
+      "id": "compose",
+      "note": "StepLimit [windows look click(69,101) look click(70,99) look click(71,100) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 15.634708188000005,
+      "steps": 6,
+      "tokens": 18932
+    },
+    {
+      "cost": 0.00135462,
+      "hit": true,
+      "id": "delete-icon",
+      "note": "StepLimit [windows look click(936,90) look click(936,90) look click(270,143)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 19.549926628999998,
+      "steps": 6,
+      "tokens": 19271
+    },
+    {
+      "cost": 0.0012069299999999997,
+      "hit": true,
+      "id": "toggle",
+      "note": "StepLimit [windows look click(1340,231) look click(1340,231) look click(438,229)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.663022461000004,
+      "steps": 6,
+      "tokens": 18983
+    },
+    {
+      "cost": 0.00117479,
+      "hit": true,
+      "id": "nav",
+      "note": "StepLimit [windows look click(109,242) look click(104,244) look click(105,244) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 14.07655826700001,
+      "steps": 6,
+      "tokens": 18863
+    },
+    {
+      "cost": 0.0007412650000000001,
+      "hit": true,
+      "id": "bold",
+      "note": "Done [windows look keys(ctrl+b) look] The selected text is now bold.",
+      "pass": true,
+      "secs": 7.475380398000006,
+      "steps": 3,
+      "tokens": 9122
+    },
+    {
+      "cost": 0.001238205,
+      "hit": true,
+      "id": "dialog",
+      "note": "StepLimit [windows look click(732,459) look click(732,460) look keys(tab) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.73222254800001,
+      "steps": 6,
+      "tokens": 19090
+    },
+    {
+      "cost": 0.001178305,
+      "hit": true,
+      "id": "file-row",
+      "note": "StepLimit [windows look click(335,290) look click(324,290) look click(328,290) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 14.22812701800001,
+      "steps": 6,
+      "tokens": 18901
+    },
+    {
+      "cost": 0.0011656000000000001,
+      "hit": true,
+      "id": "sidebar",
+      "note": "StepLimit [windows look click(74,305) look click(70,304) look click(61,305) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 13.171573428000002,
+      "steps": 6,
+      "tokens": 18849
+    },
+    {
+      "cost": 0.00094487,
+      "hit": true,
+      "id": "form",
+      "note": "StepLimit [windows look click(417,357) type(\"Ada\" @419,358) click(444,431) look click(421,358) type(\"Ada\" @421,358)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 14.352385800000008,
+      "steps": 6,
+      "tokens": 18763
+    },
+    {
+      "cost": 0.000386925,
+      "hit": true,
+      "id": "just-answer",
+      "note": "Done [windows look] The subject is “Offsite agenda.”",
+      "pass": true,
+      "secs": 2.6528473000000012,
+      "steps": 1,
+      "tokens": 2970
+    },
+    {
+      "cost": 0.00047739500000000003,
+      "hit": true,
+      "id": "write-file",
+      "note": "Done [windows look] Created `hello.txt` in the workspace containing `hi`.",
+      "pass": true,
+      "secs": 4.5396766689999986,
+      "steps": 2,
+      "tokens": 6078
+    },
+    {
+      "cost": 0.00102881,
+      "hit": true,
+      "id": "a11y",
+      "note": "StepLimit [windows elements look element(2) windows look click(732,459) windows elements] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 15.606429981000005,
+      "steps": 6,
+      "tokens": 20193
+    },
+    {
+      "cost": 0.00047158,
+      "hit": true,
+      "id": "where-toggle",
+      "note": "Done [windows look PointAt { x: 1340.0, y: 231.0, label: \"Night light switch\" }] Night light is on the **System > Display** page. Its switch is at the far right of the Night light row.",
+      "pass": true,
+      "secs": 5.254281201000001,
+      "steps": 2,
+      "tokens": 6055
+    },
+    {
+      "cost": 0.00045450000000000004,
+      "hit": true,
+      "id": "where-compose",
+      "note": "Done [windows look PointAt { x: 72.0, y: 100.0, label: \"Compose\" }] Click **Compose** in the upper-left corner to start a new email.",
+      "pass": true,
+      "secs": 5.924401687,
+      "steps": 2,
+      "tokens": 6007
+    },
+    {
+      "cost": 0.0013138,
+      "hit": true,
+      "id": "scroll",
+      "note": "StepLimit [windows look Scroll { dx: 0, dy: 5, at: Some((1100.0, 800.0)) } look Scroll { dx: 0, dy: 6, at: Some((700.0, 600.0)) } look Scroll { dx: 0, dy: 10, at: Some((1290.0, 850.0)) } look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 16.30706937,
+      "steps": 6,
+      "tokens": 19192
+    },
+    {
+      "cost": 0.001258685,
+      "hit": true,
+      "id": "drag",
+      "note": "StepLimit [windows look Drag { from: (327.0, 290.0), to: (67.0, 305.0) } look Drag { from: (331.0, 290.0), to: (69.0, 304.0) } look Drag { from: (264.0, 289.0), to: (68.0, 304.0) } look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 16.885781830000006,
+      "steps": 6,
+      "tokens": 19138
+    },
+    {
+      "cost": 0.000447845,
+      "hit": true,
+      "id": "copy",
+      "note": "Done [windows look WriteClipboard { text: \"Offsite agenda\" }] Copied “Offsite agenda” to your clipboard.",
+      "pass": true,
+      "secs": 5.714751721999999,
+      "steps": 2,
+      "tokens": 5984
+    },
+    {
+      "cost": 0.00053248,
+      "hit": true,
+      "id": "remind",
+      "note": "Done [windows look] Your reminder to stretch is set for 20 minutes from when you asked.",
+      "pass": true,
+      "secs": 7.482519631999999,
+      "steps": 3,
+      "tokens": 9148
+    }
+  ],
+  "runs": 42,
+  "secs": 11.024534784928571,
+  "tag": "assistant-x2"
+}
