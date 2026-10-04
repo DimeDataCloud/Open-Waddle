@@ -1,0 +1,266 @@
+:root {
+  --ink: #2a1e14;
+  --paper: #fffdf6;
+  --muted: #7a6a58;
+  --quick: #2f6fdf;
+  --error: #c0392b;
+  --tier2: #e6a700;
+  --tier3: #e0453a;
+  --ok: #2e9d57;
+  --shadow: 0 2px 0 var(--ink), 0 6px 18px rgba(0, 0, 0, 0.25);
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font: 13px/1.35 "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.bubble,
+.card,
+.chat {
+  position: fixed;
+  left: 0;
+  top: 0;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  will-change: transform;
+}
+
+.bubble {
+  max-width: 300px;
+  min-width: 120px;
+  padding: 8px 10px;
+}
+
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: var(--tail-x, 50%);
+  bottom: -9px;
+  width: 12px;
+  height: 12px;
+  background: var(--paper);
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.bubble.below::after {
+  top: -9px;
+  bottom: auto;
+  transform: translateX(-50%) rotate(225deg);
+}
+
+.lines > div {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lines > div + div {
+  margin-top: 4px;
+}
+
+.line-user {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.line-quick {
+  color: var(--quick);
+}
+
+.line-tool {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.line-tool code,
+.line-output {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.line-output {
+  color: var(--muted);
+  max-height: 3.2em;
+  overflow: hidden;
+}
+
+.line-error {
+  color: var(--error);
+}
+
+.line-notice {
+  font-weight: 600;
+}
+
+.typing::after {
+  content: "▍";
+  animation: blink 0.9s steps(2) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.stop {
+  margin-top: 6px;
+  font: inherit;
+  font-size: 12px;
+  border: 1.5px solid var(--ink);
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.chat {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  width: 300px;
+}
+
+.chat input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  background: transparent;
+  padding: 4px 6px;
+  user-select: text;
+}
+
+.chat button {
+  border: none;
+  background: #f1e6c8;
+  border-radius: 6px;
+  width: 30px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.chat button.live {
+  background: var(--tier3);
+  color: #fff;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.card {
+  width: 320px;
+  padding: 10px 12px;
+}
+
+.card.tier3 {
+  border-color: var(--tier3);
+}
+
+.card.tier2 {
+  border-color: var(--tier2);
+}
+
+.card h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.card.tier3 h3 {
+  color: var(--tier3);
+}
+
+.card.tier2 h3 {
+  color: #9a7000;
+}
+
+.card .summary {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.card .reason {
+  color: var(--muted);
+  margin: 2px 0 6px;
+}
+
+.card details pre {
+  max-height: 120px;
+  overflow: auto;
+  background: #f6f0e1;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.card .actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.card button {
+  font: inherit;
+  font-weight: 600;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.card button.approve {
+  background: var(--ok);
+  color: #fff;
+}
+
+.card .bar {
+  height: 4px;
+  background: #f1e6c8;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.card .bar > div {
+  height: 100%;
+  background: var(--tier2);
+  transform-origin: left;
+}

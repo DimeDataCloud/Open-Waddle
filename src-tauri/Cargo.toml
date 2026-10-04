@@ -1,0 +1,47 @@
+[package]
+name = "waddle"
+description = "Project Waddle desktop companion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "waddle"
+
+[lib]
+name = "waddle_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+waddle-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+log.workspace = true
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-global-shortcut = "2.4"
+enigo = "0.6"
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["png"] }
+keyring = "4"
+cpal = "0.18"
+
+[target.'cfg(not(windows))'.dependencies]
+x-win = "5.8"
+
+[target.'cfg(windows)'.dependencies]
+uiautomation = { version = "0.25", features = ["pattern"] }
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }

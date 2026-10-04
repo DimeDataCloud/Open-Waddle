@@ -1,0 +1,273 @@
+//! User-editable settings. API keys are deliberately not stored here; the app
+//! keeps them in the OS keychain and passes them in when building providers.
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    /// Any OpenAI-compatible endpoint: OpenRouter, OpenAI, LM Studio, llama.cpp, Foundry Local.
+    OpenaiCompat,
+    /// Native Ollama API, which exposes the resource controls we need for local mode.
+    Ollama,
+    /// Scripted provider for demos and tests. Never calls the network.
+    Mock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoordMode {
+    /// Pick from the model name.
+    Auto,
+    /// x,y are pixels of the latest screenshot (screenshots are taken at logical screen size).
+    Pixels,
+    /// x,y are normalised 0..1000 across the screen (Qwen-VL, Gemini, Gemma families).
+    Norm1000,
+}
+
+impl CoordMode {
+    pub fn resolve(self, model: &str) -> CoordMode {
+        match self {
+            CoordMode::Auto => {
+                let m = model.to_ascii_lowercase();
+                if ["qwen", "gemini", "gemma"].iter().any(|k| m.contains(k)) {
+                    CoordMode::Norm1000
+                } else {
+                    CoordMode::Pixels
+                }
+            }
+            other => other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier2Mode {
+    /// Show the action with a short cancel window, then proceed.
+    Countdown,
+    /// Always wait for an explicit click, like tier 3.
+    Ask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceBackend {
+    /// The OS dictation feature types into the chat box (Windows voice typing, Win+H).
+    System,
+    /// Record in-app and send to an OpenAI-compatible /audio/transcriptions endpoint.
+    WhisperApi,
+    Off,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct OllamaSettings {
+    /// CPU threads for inference. None = a third of the cores, leaving room for other work.
+    pub num_thread: Option<u32>,
+    /// How long the model stays in memory after a request ("30s", "5m", "0").
+    pub keep_alive: String,
+    pub num_ctx: u32,
+}
+
+impl Default for OllamaSettings {
+    fn default() -> Self {
+        Self { num_thread: None, keep_alive: "30s".into(), num_ctx: 8192 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceSettings {
+    pub backend: VoiceBackend,
+    pub base_url: String,
+    pub model: String,
+    pub language: Option<String>,
+}
+
+impl Default for VoiceSettings {
+    fn default() -> Self {
+        Self {
+            backend: if cfg!(windows) { VoiceBackend::System } else { VoiceBackend::WhisperApi },
+            base_url: "https://api.groq.com/openai/v1".into(),
+            model: "whisper-large-v3-turbo".into(),
+            language: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CharacterSettings {
+    pub id: String,
+    /// Base body colour; shading is derived from it at runtime.
+    pub color: String,
+}
+
+impl Default for CharacterSettings {
+    fn default() -> Self {
+        Self { id: "waddle".into(), color: "#FFD23F".into() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Settings {
+    pub provider: ProviderKind,
+    pub base_url: String,
+    /// Planner model (System 2): reasons and calls tools.
+    pub model: String,
+    /// Quick-reply model (System 1 lane): answers while a task is running. Empty = same as `model`.
+    pub fast_model: String,
+    pub coord_mode: CoordMode,
+    pub tier2_mode: Tier2Mode,
+    pub tier2_countdown_ms: u64,
+    pub max_steps: u32,
+    pub task_timeout_secs: u64,
+    pub command_timeout_secs: u64,
+    /// None = Documents/Waddle.
+    pub workspace_dir: Option<PathBuf>,
+    pub wander: bool,
+    /// Folder holding Waddle's own source code. When set, Waddle can read it
+    /// (as `self/...`) and edit it with approval. None = self-editing off.
+    pub self_source_dir: Option<PathBuf>,
+    /// How deep `delegate` may nest sub-tasks. 0 disables delegation.
+    pub max_delegation_depth: u32,
+    pub character: CharacterSettings,
+    pub ollama: OllamaSettings,
+    pub voice: VoiceSettings,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            provider: ProviderKind::OpenaiCompat,
+            base_url: "https://openrouter.ai/api/v1".into(),
+            model: "qwen/qwen3-vl-8b-instruct".into(),
+            fast_model: "google/gemini-2.5-flash-lite".into(),
+            coord_mode: CoordMode::Auto,
+            tier2_mode: Tier2Mode::Countdown,
+            tier2_countdown_ms: 2000,
+            max_steps: 20,
+            task_timeout_secs: 300,
+            command_timeout_secs: 60,
+            workspace_dir: None,
+            wander: true,
+            self_source_dir: None,
+            max_delegation_depth: 2,
+            character: CharacterSettings::default(),
+            ollama: OllamaSettings::default(),
+            voice: VoiceSettings::default(),
+        }
+    }
+}
+
+impl Settings {
+    pub fn fast_model(&self) -> &str {
+        if self.fast_model.trim().is_empty() {
+            &self.model
+        } else {
+            &self.fast_model
+        }
+    }
+
+    pub fn coord_mode(&self) -> CoordMode {
+        self.coord_mode.resolve(&self.model)
+    }
+}
+
+/// Settings Waddle may change about itself (with approval). Endpoints, keys,
+/// folders and the self-editing switch stay user-only, so a compromised task
+/// can't redirect traffic or widen its own reach.
+pub const SELF_EDITABLE: &[&str] = &[
+    "model",
+    "fast_model",
+    "coord_mode",
+    "wander",
+    "color",
+    "tier2_mode",
+    "tier2_countdown_ms",
+    "max_steps",
+    "command_timeout_secs",
+    "voice_backend",
+];
+
+fn parse_enum<T: serde::de::DeserializeOwned>(key: &str, v: &serde_json::Value) -> anyhow::Result<T> {
+    serde_json::from_value(v.clone()).map_err(|e| anyhow::anyhow!("`{key}`: {e}"))
+}
+
+/// Applies a flat patch like `{"model": "...", "wander": false}` to a copy of `base`.
+/// Returns the new settings and the keys that changed.
+pub fn apply_patch(base: &Settings, patch: &serde_json::Value) -> anyhow::Result<(Settings, Vec<String>)> {
+    let obj = patch.as_object().ok_or_else(|| anyhow::anyhow!("`changes` must be an object"))?;
+    if obj.is_empty() {
+        anyhow::bail!("no changes given");
+    }
+    let mut next = base.clone();
+    let mut changed = vec![];
+    for (k, v) in obj {
+        if !SELF_EDITABLE.contains(&k.as_str()) {
+            anyhow::bail!("`{k}` can only be changed by the user in Settings. Editable: {}", SELF_EDITABLE.join(", "));
+        }
+        let text = || v.as_str().map(str::to_string).ok_or_else(|| anyhow::anyhow!("`{k}` must be a string"));
+        let num = |lo: u64, hi: u64| {
+            v.as_u64().filter(|n| (lo..=hi).contains(n)).ok_or_else(|| anyhow::anyhow!("`{k}` must be a number from {lo} to {hi}"))
+        };
+        match k.as_str() {
+            "model" => next.model = text()?,
+            "fast_model" => next.fast_model = text()?,
+            "coord_mode" => next.coord_mode = parse_enum(k, v)?,
+            "wander" => next.wander = v.as_bool().ok_or_else(|| anyhow::anyhow!("`wander` must be true or false"))?,
+            "color" => next.character.color = text()?,
+            "tier2_mode" => next.tier2_mode = parse_enum(k, v)?,
+            "tier2_countdown_ms" => next.tier2_countdown_ms = num(500, 10_000)?,
+            "max_steps" => next.max_steps = num(1, 50)? as u32,
+            "command_timeout_secs" => next.command_timeout_secs = num(5, 600)?,
+            "voice_backend" => next.voice.backend = parse_enum(k, v)?,
+            _ => unreachable!(),
+        }
+        changed.push(k.clone());
+    }
+    Ok((next, changed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patches_only_whitelisted_settings() {
+        let base = Settings::default();
+        let (next, changed) = apply_patch(&base, &serde_json::json!({"model": "x/y", "wander": false, "tier2_mode": "ask"})).unwrap();
+        assert_eq!((next.model.as_str(), next.wander, next.tier2_mode), ("x/y", false, Tier2Mode::Ask));
+        assert_eq!(changed.len(), 3);
+        for bad in [
+            serde_json::json!({"base_url": "https://evil.example"}),
+            serde_json::json!({"self_source_dir": "/"}),
+            serde_json::json!({"max_steps": 500}),
+            serde_json::json!({"tier2_mode": "never"}),
+            serde_json::json!({}),
+        ] {
+            assert!(apply_patch(&base, &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn coord_mode_auto_follows_model_family() {
+        assert_eq!(CoordMode::Auto.resolve("qwen/qwen3-vl-8b-instruct"), CoordMode::Norm1000);
+        assert_eq!(CoordMode::Auto.resolve("google/gemini-2.5-flash-lite"), CoordMode::Norm1000);
+        assert_eq!(CoordMode::Auto.resolve("anthropic/claude-haiku-4.5"), CoordMode::Pixels);
+        assert_eq!(CoordMode::Pixels.resolve("qwen3-vl:4b"), CoordMode::Pixels);
+    }
+
+    #[test]
+    fn partial_settings_json_fills_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"model":"qwen3-vl:4b","provider":"ollama"}"#).unwrap();
+        assert_eq!(s.provider, ProviderKind::Ollama);
+        assert_eq!(s.max_steps, 20);
+        assert_eq!(s.fast_model(), "google/gemini-2.5-flash-lite");
+        let s2 = Settings { fast_model: String::new(), ..s };
+        assert_eq!(s2.fast_model(), "qwen3-vl:4b");
+    }
+}

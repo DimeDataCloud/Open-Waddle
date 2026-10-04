@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Waddle</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="bubble" class="bubble hidden" aria-live="polite">
+      <div class="lines"></div>
+      <button class="stop hidden" title="Stop (Esc)">■ Stop</button>
+    </div>
+    <div id="approval" class="card hidden" role="dialog" aria-label="Approval needed"></div>
+    <form id="chat" class="chat hidden" autocomplete="off">
+      <input id="chat-input" type="text" placeholder="Ask Waddle…" spellcheck="true" />
+      <button type="button" id="mic" title="Talk (Ctrl+Alt+Space)">🎙</button>
+      <button type="submit" id="send" title="Send">➤</button>
+    </form>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

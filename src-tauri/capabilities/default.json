@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Waddle's own windows: event listening and the app's commands.",
+  "windows": ["overlay", "settings"],
+  "permissions": ["core:default"]
+}
