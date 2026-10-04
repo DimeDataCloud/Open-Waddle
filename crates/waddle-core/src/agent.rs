@@ -17,6 +17,7 @@ use crate::audit::{AuditEntry, AuditLog};
 use crate::config::{Settings, Tier2Mode};
 use crate::llm::{ChatRequest, ImageData, Message, Provider, StreamEvent, ToolCall, ToolSpec, Usage};
 use crate::safety::{self, Assessment, Tier};
+use crate::reminders::ReminderStore;
 use crate::skills::SkillStore;
 use crate::tools::{self, fs::Workspace, shell, Capabilities, Coords, GuiAction, GuiResult, ToolOutcome};
 use crate::untrusted;
@@ -127,6 +128,8 @@ pub struct AgentDeps {
     pub settings: Settings,
     /// Long-term skill memory (self-improvement). None = off.
     pub skills: Option<Arc<SkillStore>>,
+    /// Reminders the app pops up when due. None = off.
+    pub reminders: Option<Arc<ReminderStore>>,
     /// Waddle's own source folder, reachable as `self/...`. None = off.
     pub self_source: Option<Arc<Workspace>>,
 }
@@ -139,7 +142,8 @@ pub struct RunResult {
 pub fn system_prompt(env: &EnvInfo, coords: &Coords, workspace: &Path, extra: &[String]) -> String {
     const ON_SCREEN: &str = "- What the user mentions (a playlist, an email, a button) is on their screen: do it in the app that's showing instead of opening a new one. \
 If you haven't been shown the screen yet, look before acting. Never say you can't see or use it. \
-The screenshot is context, not a to-do list: leave dialogs and windows the task doesn't mention alone.";
+The screenshot is context, not a to-do list: leave dialogs and windows the task doesn't mention alone.
+- When the user asks where something is or how to do something, point_at it and explain, instead of doing it for them. Scroll to reach what's off-screen. To copy text for the user, pass it to copy_to_clipboard; never type it on screen to copy it.";
     let perception = if env.caps.accessibility {
         &*format!("{ON_SCREEN}\n- Prefer click_element on elements from find_elements: more precise than screenshot coordinates. Use the screenshot for anything not listed.")
     } else if env.caps.gui {
@@ -188,14 +192,32 @@ pub fn prune_images(messages: &mut [Message], keep: usize) {
 /// Told to the model when it announces an action but doesn't take it.
 const NUDGE: &str = "You said you'd do something but didn't call a tool, so nothing happened. Call the tool now. If the task is already finished, just give your final reply.";
 
+/// Told to the model when it writes a tool call as plain text.
+const NUDGE_TEXT_CALL: &str = "You wrote the tool call as text, so nothing happened. Make it a real tool call now.";
+
+/// Whether a reply writes out a tool call as text ("point_at(x=920, y=240)",
+/// "<tool_call>…") instead of calling it; Qwen models do this now and then.
+pub fn writes_tool_call(text: &str, tools: &[ToolSpec]) -> bool {
+    if text.contains("<tool_call>") || text.contains("</tool_call>") {
+        return true;
+    }
+    tools.iter().any(|t| {
+        text.match_indices(t.name.as_str()).any(|(i, _)| {
+            let before_ok = !text[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-');
+            before_ok && text[i + t.name.len()..].trim_start().starts_with(['(', '{'])
+        })
+    })
+}
+
 /// Whether a reply without tool calls announces an action ("I'll click it for you.").
 /// Small models sometimes stop there, which would end the task with nothing done.
 pub fn promises_action(text: &str) -> bool {
     const MARKERS: [&str; 5] = ["i'll ", "i will ", "let me ", "i'm going to ", "i am going to "];
     const FILLER: [&str; 8] = ["now", "first", "just", "quickly", "go", "ahead", "and", "then"];
-    const VERBS: [&str; 30] = [
+    const VERBS: [&str; 34] = [
         "click", "press", "tap", "type", "enter", "open", "launch", "start", "close", "take", "look", "check", "see", "find", "search",
         "read", "write", "create", "save", "delete", "run", "list", "select", "scroll", "drag", "fill", "grab", "capture", "try", "do",
+        "show", "point", "copy", "remind",
     ];
     let text = text.to_lowercase().replace('\u{2019}', "'");
     text.split(['.', '!', '?', '\n']).any(|sentence| {
@@ -253,6 +275,7 @@ impl<'a> Agent<'a> {
             self_edit: self.deps.self_source.is_some(),
             delegation: self.depth < self.deps.settings.max_delegation_depth,
             self_improve: self.deps.skills.is_some(),
+            reminders: self.deps.reminders.is_some(),
             ..env.caps
         }
     }
@@ -399,6 +422,11 @@ impl<'a> Agent<'a> {
             };
             messages.push(Message::assistant(resp.text.clone(), resp.tool_calls.clone()));
             if resp.tool_calls.is_empty() {
+                if !nudged && writes_tool_call(&resp.text, &tools) {
+                    nudged = true;
+                    messages.push(Message::user(NUDGE_TEXT_CALL));
+                    continue;
+                }
                 if !nudged && promises_action(&resp.text) {
                     nudged = true;
                     messages.push(Message::user(NUDGE));
@@ -459,7 +487,10 @@ impl<'a> Agent<'a> {
             summary: "Looking at your screen".into(),
             tier: 0,
         });
-        let mut parts = vec!["This is your screen as the user asked (it changes as you act; look again when you need to):".to_string()];
+        let mut parts = vec![format!(
+            "It's {}. This is your screen as the user asked (it changes as you act; look again when you need to):",
+            crate::reminders::now_line()
+        )];
         let mut image = None;
         let mut actions = vec![GuiAction::ListWindows];
         if env.caps.accessibility {
@@ -757,6 +788,10 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
                 Ok(ToolOutcome::trusted(fs.write_file(rel, &arg("content"))?))
             }
             "delegate" => self.delegate(&arg("goal"), &arg("context")).await,
+            "reminder" => {
+                let store = self.deps.reminders.as_ref().ok_or_else(|| anyhow::anyhow!("reminders are off"))?;
+                Ok(ToolOutcome::trusted(store.handle(&call.arguments, chrono::Local::now())?))
+            }
             "save_skill" | "forget_skill" => {
                 let store = self.deps.skills.as_ref().ok_or_else(|| anyhow::anyhow!("skill memory is off"))?;
                 let msg = if call.name == "save_skill" { store.save(&arg("name"), &arg("instructions"))? } else { store.forget(&arg("name"))? };

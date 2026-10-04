@@ -179,6 +179,7 @@ impl TauriHost {
         Ok((target.app, elements.len()))
     }
 
+    #[cfg(windows)]
     fn target_window(&self, filter: Option<&str>) -> Option<DesktopWindow> {
         let list = self.windows.read().unwrap().clone();
         match filter {
@@ -330,19 +331,50 @@ impl Host for TauriHost {
                 Self::blocking(move || actuate::type_text(&text)).await?;
                 Ok(GuiResult::Done(format!("Typed {n} characters.")))
             }
-            GuiAction::Play { autoplay, target, weapon } => {
-                let rect = target.as_deref().and_then(|t| self.target_window(Some(t))).map(|w| {
-                    let (x, y, ww, hh) = self.to_logical(&w);
-                    let (ox, oy) = g.screen_to_overlay(x, y);
-                    json!({ "x": ox, "y": oy, "w": ww, "h": hh })
-                });
-                let aimed = rect.is_some();
-                self.emit_overlay("play:start", json!({ "autoplay": autoplay, "weapon": weapon, "target": rect }));
-                let mut msg = String::from("Play mode started on a copy of the screen. The user ends it with Esc.");
-                if target.is_some() && !aimed {
-                    msg.push_str(" (No window matched the target, so the whole screen is the playground.)");
-                }
-                Ok(GuiResult::Done(msg))
+            GuiAction::Scroll { dx, dy, at } => {
+                let at = match at {
+                    Some((x, y)) => {
+                        self.move_to(x, y, "act", cancel).await;
+                        Some(g.screen_to_physical(x, y))
+                    }
+                    None => {
+                        desktop::restore_foreground();
+                        None
+                    }
+                };
+                self.act("peck");
+                let window = self.app.get_webview_window(OVERLAY);
+                let _guard = window.as_ref().map(|w| self.overlay.force_passthrough(w));
+                Self::blocking(move || actuate::scroll(at, dx, dy)).await?;
+                let dir = match (dx.signum(), dy.signum()) {
+                    (_, 1) => "down",
+                    (_, -1) => "up",
+                    (1, _) => "right",
+                    _ => "left",
+                };
+                Ok(GuiResult::Done(format!("Scrolled {dir} {} notches.", dx.abs().max(dy.abs()))))
+            }
+            GuiAction::Drag { from, to } => {
+                self.move_to(from.0, from.1, "act", cancel).await;
+                self.act("peck");
+                let (a, b) = (g.screen_to_physical(from.0, from.1), g.screen_to_physical(to.0, to.1));
+                let window = self.app.get_webview_window(OVERLAY);
+                let _guard = window.as_ref().map(|w| self.overlay.force_passthrough(w));
+                Self::blocking(move || actuate::drag(a, b)).await?;
+                self.move_to(to.0, to.1, "act", cancel).await;
+                Ok(GuiResult::Done("Dragged.".into()))
+            }
+            GuiAction::PointAt { x, y, label } => {
+                self.move_to(x, y, "approach", cancel).await;
+                let (ox, oy) = g.screen_to_overlay(x, y);
+                self.emit_overlay("duck:point", json!({ "x": ox, "y": oy, "label": label }));
+                Ok(GuiResult::Done("Pointing at it for the user. Tell them what it is or what to do there.".into()))
+            }
+            GuiAction::ReadClipboard => Ok(GuiResult::Clipboard(Self::blocking(actuate::read_clipboard).await?)),
+            GuiAction::WriteClipboard { text } => {
+                let n = text.chars().count();
+                Self::blocking(move || actuate::copy_to_clipboard(&text)).await?;
+                Ok(GuiResult::Done(format!("Copied {n} characters to the clipboard.")))
             }
             GuiAction::PressKeys { keys } => {
                 let combo = actuate::parse_combo(&keys)?;
@@ -379,6 +411,25 @@ impl Host for TauriHost {
         }
         self.emit_overlay("busy", busy);
     }
+}
+
+/// Pops up reminders when they're due, including ones that came due while Waddle was closed.
+pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::reminders::ReminderStore>) {
+    std::thread::Builder::new()
+        .name("waddle-reminders".into())
+        .spawn(move || {
+            // Let the overlay load before the first pop-up.
+            std::thread::sleep(Duration::from_secs(3));
+            loop {
+                let now = now_ms() as i64;
+                for r in store.take_due(now) {
+                    let late = now - r.due_ms > 120_000;
+                    host.emit_overlay("reminder", json!({ "text": r.text, "late": late }));
+                }
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        })
+        .expect("reminder thread");
 }
 
 /// Samples window geometry ten times a second for the duck's platforms.

@@ -82,24 +82,18 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 - **Conversation memory:** the last 10 exchanges carry over between tasks.
 - **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model: it loads and reads the system prompt, tools and conversation so far while the user types, so the first step only reads their message (36.6 s → 6.8 s here on a 4-core CPU). The warm-up asks Ollama for thinking on, because the empty think block that `think: false` appends ends the prompt past Qwen3.5's last cache checkpoint.
 
-### Play mode (`src/play/*`)
+### Assistant tools
 
-- **Level:** play mode snapshots the overlay's work area (`play_snapshot`) and turns it into a level.
-  - Window rectangles become solid 4-px cells.
-  - The wallpaper is open air.
-  - With no windows known, the lower 70% of the screen is solid.
-- **Layers:** three canvases.
-  - Bottom: a pixel-art pond drawn at quarter resolution.
-  - Middle: the screen copy. Blasted cells are cleared, and scorch marks are clipped to the windows.
-  - Top: the duck, projectiles, debris and HUD.
-- **Duck physics:** the duck is a platformer body that moves one pixel at a time, so it never tunnels through terrain. It steps up small ledges and flaps on a stamina bar.
-- **Debris:** takes its colour from the original pixels and settles on what's left of the windows.
-- **Autoplay:** the bot picks spots inside the window the AI aimed at, gets in range, and fires.
-- **Ending it:**
-  - While playing, the overlay captures all input, and Escape is a global hotkey, so the game ends even when Windows refuses the overlay keyboard focus.
-  - The ✕ button and the tray's Halt item also work.
-  - Autoplay closes itself after 25 s with nobody at the keyboard.
-- **The agent's side:** the `play` tool (tier 1) only emits an event. Nothing on the real desktop changes.
+| Tool | Tier | What happens |
+|---|---|---|
+| `point_at` | 0 | The duck walks to the spot and the overlay draws a pulsing ring with a label for 8 s. The ring never takes clicks. Prompted for "where is…" and "how do I…" questions. |
+| `scroll` | 1 | Mouse-wheel notches at a point or under the cursor, one notch at a time so apps that smooth scrolling see real scrolling. Counts as blind input, so it needs a look first. |
+| `drag` | 2 | Press, glide in 20 steps, release, so apps register a drag (files, sliders, windows). |
+| `read_clipboard` / `copy_to_clipboard` | 1 / 2 | `arboard`. Clipboard text is wrapped as untrusted, since a web page can put text there. |
+| `reminder` | 1 | add / list / cancel, stored in `reminders.json` in the app data folder (`reminders.rs`). A thread checks every 5 s and emits `reminder`; the overlay chimes and pins the bubble for a minute. Reminders that came due while the app was closed pop up at start, marked as missed. |
+
+- **Text tool calls:** Qwen sometimes writes a call as text (`point_at(x=920, y=240)`, `</tool_call>`) instead of making it. `writes_tool_call` spots an offered tool name followed by `(` or `{`, and the model gets one nudge to make the real call.
+- **Time:** the opening observation starts with the local date and time, so "at 3pm" and "what time is it" work without changing the cached system prompt.
 
 ### Self-modification and recursion
 

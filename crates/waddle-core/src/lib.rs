@@ -15,6 +15,7 @@ pub mod session;
 pub mod skills;
 pub mod stt;
 pub mod tools;
+pub mod reminders;
 pub mod traces;
 pub mod untrusted;
 

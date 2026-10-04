@@ -97,6 +97,19 @@ fn satisfies(alt: &Value, action: &GuiAction, focus: Option<(f64, f64)>, boxes: 
             alt["keys"] == "enter" && text.ends_with('\n')
         }
         GuiAction::PressKeys { keys } => alt["keys"].as_str().is_some_and(|k| norm_keys(keys) == norm_keys(k)),
+        GuiAction::PointAt { x, y, .. } => bx("point").is_some_and(|b| inside((*x, *y), b)),
+        GuiAction::Scroll { dx, dy, at } => {
+            let dir_ok = match alt["scroll"].as_str() {
+                Some("down") => *dy > 0,
+                Some("up") => *dy < 0,
+                Some("right") => *dx > 0,
+                Some("left") => *dx < 0,
+                _ => false,
+            };
+            dir_ok && bx("at").is_none_or(|b| at.is_none_or(|p| inside(p, b)))
+        }
+        GuiAction::Drag { from, to } => bx("drag").is_some_and(|b| inside(*from, b)) && bx("to").is_some_and(|b| inside(*to, b)),
+        GuiAction::WriteClipboard { text } => alt["clipboard"].as_str().is_some_and(|w| text.to_lowercase().contains(&w.to_lowercase())),
         _ => false,
     }
 }
@@ -130,6 +143,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     let id = task["id"].as_str().unwrap().to_string();
     let dir = tempfile::tempdir().unwrap();
     let workspace = Arc::new(Workspace::new(dir.path().join("ws")).unwrap());
+    let reminders = Arc::new(waddle_core::reminders::ReminderStore::new(dir.path().join("reminders.json")));
     let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
     *host.os.lock().unwrap() = "windows".into();
     let screen_name = task["screen"].as_str().unwrap_or("dialog");
@@ -175,6 +189,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         workspace: workspace.clone(),
         settings,
         skills: None,
+        reminders: Some(reminders.clone()),
         self_source: None,
     };
     let env = host.env();
@@ -198,6 +213,9 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     }
     if let Some(want) = task["answer"].as_str() {
         pass &= r.message.to_lowercase().contains(want);
+    }
+    if let Some(want) = task["reminder"].as_str() {
+        pass &= reminders.list().iter().any(|r| r.text.to_lowercase().contains(want));
     }
     if task["no_input"] == true {
         pass &= !actions.iter().any(GuiAction::is_blind_input);
@@ -231,7 +249,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
             other => format!("{other:?}"),
         })
         .collect();
-    let note = format!("{:?} [{}] {}", r.outcome, did.join(" "), r.message.chars().take(100).collect::<String>().replace('\n', " "));
+    let note = format!("{:?} [{}] {}", r.outcome, did.join(" "), r.message.chars().take(400).collect::<String>().replace('\n', " "));
     TaskResult { id, pass, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
 }
 

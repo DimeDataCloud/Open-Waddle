@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::{self, Agent, AgentDeps, AgentEvent, Host, Lane, Outcome, RunResult, TaskStatus};
 use crate::audit::{AuditEntry, AuditLog};
 use crate::config::Settings;
+use crate::reminders::ReminderStore;
 use crate::skills::SkillStore;
 use crate::traces::{TraceMeta, TraceStore};
 use crate::llm::{ChatRequest, Message, Provider, StreamEvent};
@@ -31,6 +32,7 @@ pub struct SessionConfig {
     pub provider: Arc<dyn Provider>,
     pub workspace: Arc<Workspace>,
     pub skills: Option<Arc<SkillStore>>,
+    pub reminders: Option<Arc<ReminderStore>>,
     pub self_source: Option<Arc<Workspace>>,
     /// Where tasks are saved when `settings.record_traces` is on.
     pub traces: Option<Arc<TraceStore>>,
@@ -137,6 +139,7 @@ impl Session {
             workspace: config.workspace,
             settings: config.settings,
             skills: config.skills,
+            reminders: config.reminders,
             self_source: config.self_source,
         }
     }
