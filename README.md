@@ -153,6 +153,8 @@ Linux build dependencies: `libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatan
 
 ## Roadmap
 
+Next up is v0.2 (Gmail, Calendar, Chrome, files, nudges, memory): see [docs/ROADMAP.md](docs/ROADMAP.md). Later:
+
 - macOS: Accessibility and Screen Recording permission prompts, the macOS accessibility fast path, Apple Silicon build.
 - Multiple monitors and mixed display scaling.
 - OmniParser as an optional local vision service. Its detector is AGPL-licensed; keep it separate from paid tiers.
