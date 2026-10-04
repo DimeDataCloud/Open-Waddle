@@ -4,8 +4,12 @@
 //   it goes quiet.
 // - "recording": Waddle records; the second press transcribes and sends.
 
+import type { SelectionPreview } from "../ipc";
+
 export interface ChatHandlers {
-  send(text: string): void;
+  /** `selection`: the text grabbed with Ctrl+Alt+A goes along with this message. */
+  send(text: string, selection: boolean): void;
+  dropSelection(): void;
   /** The box opened: the user is about to say something. */
   opened(): void;
   voiceStart(): Promise<"system" | "recording">;
@@ -22,10 +26,18 @@ export class Chat {
   private voice: "off" | "system" | "recording" = "off";
   private quietTimer = 0;
   private closeTimer = 0;
+  private chip: HTMLElement;
+  private selection: SelectionPreview | null = null;
 
   constructor(readonly el: HTMLFormElement, private h: ChatHandlers) {
     this.input = el.querySelector("input")!;
     this.mic = el.querySelector("#mic")!;
+    this.chip = el.querySelector(".chip")!;
+    this.chip.querySelector("button")!.addEventListener("click", () => {
+      this.setSelection(null);
+      this.h.dropSelection();
+      this.input.focus();
+    });
     el.addEventListener("submit", (e) => {
       e.preventDefault();
       this.submit();
@@ -54,7 +66,26 @@ export class Chat {
     this.bumpClose();
   }
 
+  /** Shows (or clears) the "selected text" chip above the input. */
+  setSelection(sel: SelectionPreview | null): void {
+    this.selection = sel;
+    this.chip.classList.toggle("hidden", !sel);
+    this.el.classList.toggle("with-chip", !!sel);
+    if (sel) {
+      const label = this.chip.querySelector("span")!;
+      const from = sel.app ? ` from ${sel.app}` : "";
+      label.textContent = `📎 ${sel.chars} characters${from}: “${sel.preview}${sel.chars > sel.preview.length ? "…" : ""}”`;
+      this.input.placeholder = "What should I do with it?";
+    } else {
+      this.input.placeholder = "Ask Waddle…";
+    }
+  }
+
   close(): void {
+    if (this.selection) {
+      this.setSelection(null);
+      this.h.dropSelection();
+    }
     if (this.voice !== "off") void this.stopVoice(false);
     this.el.classList.add("hidden");
     window.clearTimeout(this.closeTimer);
@@ -74,9 +105,10 @@ export class Chat {
 
   private submit(): void {
     const text = this.input.value.trim();
-    if (!text) return;
+    if (!text && !this.selection) return;
     this.input.value = "";
-    this.h.send(text);
+    this.h.send(text, !!this.selection);
+    this.setSelection(null);
     this.bumpClose();
   }
 

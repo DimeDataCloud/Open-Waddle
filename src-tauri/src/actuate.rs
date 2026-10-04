@@ -107,6 +107,41 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Copies the front app's selection by pressing Ctrl+C, reads it, and puts the
+/// clipboard back as it was. Text only: an image on the clipboard is lost.
+pub fn copy_selection() -> anyhow::Result<String> {
+    let mut c = arboard::Clipboard::new().map_err(|e| anyhow!("clipboard unavailable: {e}"))?;
+    let saved = c.get_text().ok();
+    let _ = c.clear();
+    // The hotkey's Ctrl+Alt may still be held; Alt+Ctrl+C would do something else.
+    let _ = enigo()?.key(Key::Alt, Direction::Release);
+    press_combo(&[Key::Control, Key::Unicode('c')])?;
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let text = c.get_text().unwrap_or_default();
+    restore_clipboard(&mut c, saved);
+    Ok(text)
+}
+
+/// Pastes text over the selection in the focused app, then restores the clipboard.
+pub fn paste_text(text: &str) -> anyhow::Result<()> {
+    let mut c = arboard::Clipboard::new().map_err(|e| anyhow!("clipboard unavailable: {e}"))?;
+    let saved = c.get_text().ok();
+    c.set_text(text.to_string()).map_err(|e| anyhow!("couldn't set the clipboard: {e}"))?;
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    press_combo(&[Key::Control, Key::Unicode('v')])?;
+    // The app reads the clipboard when it handles the keystroke; give it time before restoring.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    restore_clipboard(&mut c, saved);
+    Ok(())
+}
+
+fn restore_clipboard(c: &mut arboard::Clipboard, saved: Option<String>) {
+    let _ = match saved {
+        Some(t) => c.set_text(t),
+        None => c.clear(),
+    };
+}
+
 pub fn type_text(text: &str) -> anyhow::Result<()> {
     let mut e = enigo()?;
     e.text(text).context("typing failed")?;

@@ -167,6 +167,8 @@ pub struct Settings {
     pub ambient_brain: bool,
     /// Save each task (conversation and screenshots) on this computer as training data.
     pub record_traces: bool,
+    /// On OpenRouter, use only providers that don't store or train on what Waddle sends.
+    pub no_training: bool,
     pub tier2_mode: Tier2Mode,
     pub tier2_countdown_ms: u64,
     pub max_steps: u32,
@@ -183,6 +185,29 @@ pub struct Settings {
     pub character: CharacterSettings,
     pub ollama: OllamaSettings,
     pub voice: VoiceSettings,
+    /// OAuth client ID of the user's Google Cloud project (Desktop app type). Empty = Google off.
+    pub google_client_id: String,
+    /// Hours (local, 24h) that `calendar_free` proposes meetings in, on weekdays.
+    pub working_hours: (u32, u32),
+    /// After Send on the send card, how long Undo stays available before the email goes.
+    pub send_undo_secs: u64,
+    /// Tap the user on the shoulder five minutes before a meeting (needs Google).
+    pub meeting_nudges: bool,
+    /// Tell the user about important new email as it arrives (needs Google).
+    pub mail_nudges: bool,
+    /// Offer a morning brief on the first activity after 06:00 (needs Google).
+    pub morning_brief: bool,
+    /// Senders never nudged about: addresses, or whole domains as `@example.com`.
+    pub muted_senders: Vec<String>,
+    /// Start Waddle when the user signs in to Windows.
+    pub autostart: bool,
+    /// Let Waddle read the user's own folders (Documents, Downloads, Desktop,
+    /// Pictures, Music, Videos) and Drive for desktop.
+    pub read_user_folders: bool,
+    /// More folders Waddle may read in.
+    pub read_folders: Vec<PathBuf>,
+    /// Folders Waddle may create, change, move and rename files in, besides its workspace.
+    pub write_folders: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -200,6 +225,7 @@ impl Default for Settings {
             quick_chat: true,
             ambient_brain: true,
             record_traces: false,
+            no_training: true,
             tier2_mode: Tier2Mode::Countdown,
             tier2_countdown_ms: 2000,
             max_steps: 20,
@@ -212,6 +238,17 @@ impl Default for Settings {
             character: CharacterSettings::default(),
             ollama: OllamaSettings::default(),
             voice: VoiceSettings::default(),
+            google_client_id: String::new(),
+            working_hours: (9, 17),
+            send_undo_secs: 10,
+            meeting_nudges: true,
+            mail_nudges: true,
+            morning_brief: true,
+            muted_senders: vec![],
+            autostart: true,
+            read_user_folders: true,
+            read_folders: vec![],
+            write_folders: vec![],
         }
     }
 }
@@ -232,6 +269,10 @@ impl Settings {
     /// The model runs on this machine (Ollama, or an OpenAI-compatible server on localhost).
     pub fn is_local(&self) -> bool {
         self.provider == ProviderKind::Ollama || ["://localhost", "://127.0.0.1", "://[::1]"].iter().any(|h| self.base_url.contains(h))
+    }
+
+    pub fn is_openrouter(&self) -> bool {
+        self.provider == ProviderKind::OpenaiCompat && self.base_url.contains("openrouter.ai")
     }
 
     /// How many screenshots a task keeps in its conversation before older ones are dropped.

@@ -184,10 +184,10 @@ impl Provider for Ollama {
         if calls.is_empty() {
             let (cleaned, extracted) = textcalls::extract(&text);
             if !extracted.is_empty() {
-                return Ok(ChatResponse { text: cleaned, tool_calls: extracted, usage });
+                return Ok(ChatResponse { text: cleaned, tool_calls: extracted, usage, ..Default::default() });
             }
         }
-        Ok(ChatResponse { text, tool_calls: calls, usage })
+        Ok(ChatResponse { text, tool_calls: calls, usage, ..Default::default() })
     }
 }
 
@@ -223,7 +223,7 @@ mod tests {
     fn body_carries_resource_caps() {
         let opts = OllamaSettings { num_thread: Some(3), keep_alive: "30s".into(), num_ctx: 4096 };
         let msgs = vec![Message::user("hi")];
-        let body = request_body(&ChatRequest { model: "qwen3.5:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 64 }, &opts);
+        let body = request_body(&ChatRequest { model: "qwen3.5:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 64, web: None }, &opts);
         assert_eq!(body["think"], false);
         assert_eq!(body["options"]["num_thread"], 3);
         assert_eq!(body["options"]["num_ctx"], 4096);
@@ -235,7 +235,7 @@ mod tests {
     fn warm_up_reads_the_prompt_without_streaming_an_answer() {
         let opts = OllamaSettings { num_thread: None, keep_alive: "30s".into(), num_ctx: 8192 };
         let msgs = vec![Message::system("You are Waddle.")];
-        let req = ChatRequest { model: "qwen3.5:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 1024 };
+        let req = ChatRequest { model: "qwen3.5:4b", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 1024, web: None };
         let body = warm_body(&req, &opts, true);
         assert_eq!((body["think"].clone(), body["stream"].clone()), (json!(true), json!(false)));
         assert_eq!(body["options"]["num_predict"], 1);

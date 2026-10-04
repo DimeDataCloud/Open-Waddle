@@ -17,6 +17,9 @@ use waddle_core::llm::mock::{call, reply, MockProvider};
 use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
+use waddle_core::decide::{Route, Routing};
+use waddle_core::facts::FactStore;
+use waddle_core::session::Selection;
 use waddle_core::skills::SkillStore;
 use waddle_core::{AgentEvent, Decision, Host, Lane, Outcome, Session, SessionConfig, Settings};
 
@@ -32,7 +35,7 @@ struct Fixture {
 }
 
 fn session_config(f: &Fixture, provider: Arc<dyn Provider>) -> SessionConfig {
-    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, reminders: None, decider: None, self_source: None, traces: None }
+    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, reminders: None, facts: None, decider: None, self_source: None, traces: None, google: None, style: None }
 }
 
 fn fixture() -> Fixture {
@@ -42,7 +45,7 @@ fn fixture() -> Fixture {
 }
 
 async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
-    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, decider: None, self_source: None };
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -146,8 +149,12 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
         settings: Settings { model: "qwen/qwen3-vl-8b-instruct".into(), ..settings() },
         skills: None,
         reminders: None,
+        facts: None,
         decider: None,
         self_source: None,
+        selection: None,
+        google: None,
+        style: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
@@ -389,7 +396,7 @@ async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
-    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, decider: None, self_source }
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None }
 }
 
 async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {
@@ -575,20 +582,24 @@ fn spots_tool_calls_written_as_text() {
     assert!(promises_action("I'll show you where it is."));
 }
 
-/// A decider whose screen and chat checks give fixed answers.
+/// A decider whose screen check and router give fixed answers.
 struct FixedDecider {
     screen: Option<f64>,
-    chat: Option<f64>,
+    route: Option<Routing>,
 }
 
 #[async_trait]
 impl waddle_core::decide::Decider for FixedDecider {
-    async fn needs_screen(&self, _goal: &str) -> Option<f64> {
+    async fn needs_screen(&self, _goal: &str, _apis: bool) -> Option<f64> {
         self.screen
     }
-    async fn chat_only(&self, _message: &str) -> Option<f64> {
-        self.chat
+    async fn route(&self, _message: &str) -> Option<Routing> {
+        self.route
     }
+}
+
+fn chat(p: f64) -> Option<Routing> {
+    Some(Routing { route: Route::Chat, p, web: 0.0 })
 }
 
 #[tokio::test]
@@ -599,7 +610,7 @@ async fn the_opening_look_is_skipped_only_when_the_screen_check_is_confident() {
         let mock = Arc::new(MockProvider::scripted(vec![reply("Done.", vec![])]));
         let deps = AgentDeps {
             settings: Settings { look_first: true, ..settings() },
-            decider: Some(Arc::new(FixedDecider { screen: p, chat: None })),
+            decider: Some(Arc::new(FixedDecider { screen: p, route: None })),
             ..deps_with(&f, host.clone(), mock.clone(), None, None)
         };
         run_with(&deps).await;
@@ -621,7 +632,7 @@ async fn small_talk_gets_a_quick_answer_without_a_task() {
         reply("Notepad is open.", vec![]),
     ]));
     let rt = tokio::runtime::Handle::current();
-    let config = SessionConfig { decider: Some(Arc::new(FixedDecider { screen: None, chat: Some(0.99) })), ..session_config(&f, provider.clone()) };
+    let config = SessionConfig { decider: Some(Arc::new(FixedDecider { screen: None, route: chat(0.99) })), ..session_config(&f, provider.clone()) };
     let session = Session::new(rt, host.clone(), f.audit.clone(), config);
 
     session.user_message("you're so cute".into());
@@ -636,4 +647,216 @@ async fn small_talk_gets_a_quick_answer_without_a_task() {
     assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::OpenApp { name: "notepad".into() }));
     let task_req = provider.requests.lock().unwrap()[2].clone();
     assert!(task_req.iter().any(|m| m.text == "Aw, thank you! Quack!"), "the chat is remembered in the task");
+}
+
+fn routed(route: Route, p: f64, web: f64) -> Option<Routing> {
+    Some(Routing { route, p, web })
+}
+
+#[tokio::test]
+async fn a_task_looks_at_the_screen_while_the_router_decides_and_chat_leaves_no_trace() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Quack! Thanks!", vec![])]));
+    let config = SessionConfig {
+        settings: Settings { look_first: true, ..settings() },
+        decider: Some(Arc::new(FixedDecider { screen: None, route: chat(0.95) })),
+        ..session_config(&f, provider.clone())
+    };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    session.user_message("thanks!".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TextDone { .. }))).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(provider.request_count(), 1, "only the chat reply called a model");
+    assert!(host.busy.lock().unwrap().is_empty(), "the held task never showed itself");
+    assert!(!host.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. } | AgentEvent::ToolStarted { .. })));
+    assert!(!session.is_busy());
+    assert!(f.audit.recent(100).unwrap().iter().all(|e| e.kind != "task_start"), "dropped tasks leave no audit entry");
+}
+
+#[tokio::test]
+async fn a_task_goes_ahead_once_the_router_says_so() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("open_app", json!({"name": "notepad"}))]),
+        reply("Notepad is open.", vec![]),
+    ]));
+    let config = SessionConfig {
+        settings: Settings { look_first: true, ..settings() },
+        decider: Some(Arc::new(FixedDecider { screen: None, route: routed(Route::Task, 0.99, 0.0) })),
+        ..session_config(&f, provider.clone())
+    };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    session.user_message("open notepad".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    let events = host.events();
+    let started = events.iter().position(|e| matches!(e, AgentEvent::TaskStarted { .. })).expect("task started");
+    let looked = events.iter().position(|e| matches!(e, AgentEvent::ToolStarted { tool, .. } if tool == "look_at_screen")).expect("looked");
+    assert!(started < looked, "buffered events keep their order");
+    assert_eq!(*host.busy.lock().unwrap(), vec![true, false]);
+    let first = provider.requests.lock().unwrap()[0].clone();
+    assert!(first.iter().any(|m| !m.images.is_empty()), "the look made before the decision reached the model");
+    assert_eq!(f.audit.recent(100).unwrap().iter().filter(|e| e.kind == "task_start").count(), 1);
+}
+
+#[tokio::test]
+async fn stop_while_the_router_decides_cancels_everything() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Never sent.", vec![])]));
+    let config = SessionConfig { decider: Some(Arc::new(SlowDecider)), ..session_config(&f, provider.clone()) };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    session.user_message("open notepad".into());
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    session.user_message("stop".into());
+    assert!(host.events().iter().any(|e| matches!(e, AgentEvent::Notice { text } if text == "Stopping!")));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(provider.request_count(), 0);
+    assert!(host.busy.lock().unwrap().is_empty());
+}
+
+/// A router that takes a while and then says "task".
+struct SlowDecider;
+
+#[async_trait]
+impl waddle_core::decide::Decider for SlowDecider {
+    async fn route(&self, _message: &str) -> Option<Routing> {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        routed(Route::Task, 0.99, 0.0)
+    }
+}
+
+#[tokio::test]
+async fn current_facts_and_research_search_the_web() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Sunny and 21°C.", vec![]),
+        reply("Heat pumps cost less to run [1]. They need a well-insulated home [2].\n---\n## Running costs\nLower [1].", vec![]),
+    ]));
+    let decider = Arc::new(SequenceDecider(Mutex::new(vec![routed(Route::Research, 0.95, 0.9), routed(Route::Chat, 0.97, 0.98)])));
+    let config = SessionConfig { decider: Some(decider), ..session_config(&f, provider.clone()) };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+
+    session.user_message("what's the weather in london".into());
+    wait_until(|| provider.request_count() == 1).await;
+    session.user_message("heat pumps or gas boilers?".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::Offer { .. }))).await;
+    assert_eq!(*provider.webs.lock().unwrap(), vec![Some(3), Some(5)]);
+
+    // The bubble shows only the summary; the full write-up goes to a file on request.
+    let research: String = host
+        .events()
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::TextDelta { task_id, text, .. } if task_id == "research" => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(research, "Heat pumps cost less to run [1]. They need a well-insulated home [2].");
+    let id = host.events().iter().find_map(|e| match e {
+        AgentEvent::Offer { id, .. } => Some(id.clone()),
+        _ => None,
+    });
+    let path = session.open_answer(&id.unwrap()).unwrap();
+    assert!(path.ends_with("research/heat-pumps-or-gas-boilers.md"), "{}", path.display());
+    assert!(std::fs::read_to_string(&path).unwrap().contains("## Running costs"));
+    assert_eq!(*host.opened.lock().unwrap(), vec![path]);
+    assert!(host.busy.lock().unwrap().is_empty(), "neither started a task");
+}
+
+/// A router that answers from a list, last first.
+struct SequenceDecider(Mutex<Vec<Option<Routing>>>);
+
+#[async_trait]
+impl waddle_core::decide::Decider for SequenceDecider {
+    async fn route(&self, _message: &str) -> Option<Routing> {
+        self.0.lock().unwrap().pop().flatten()
+    }
+}
+
+#[tokio::test]
+async fn typing_text_and_then_copying_it_is_refused() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("list_windows", json!({}))]),
+        reply("", vec![call("type_text", json!({"text": "Offsite agenda"}))]),
+        reply("", vec![call("press_keys", json!({"keys": "ctrl+a"}))]),
+        reply("", vec![call("press_keys", json!({"keys": "Ctrl + C"}))]),
+        reply("", vec![call("press_keys", json!({"keys": "ctrl+alt+a"}))]),
+        reply("", vec![call("copy_to_clipboard", json!({"text": "Offsite agenda"}))]),
+        reply("Copied.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let (outcome, _) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    assert_eq!(outcome, Outcome::Done);
+    let calls = host.gui_calls.lock().unwrap().clone();
+    assert!(!calls.iter().any(|c| matches!(c, GuiAction::PressKeys { keys } if keys.contains('C'))), "{calls:?}");
+    assert!(calls.contains(&GuiAction::WriteClipboard { text: "Offsite agenda".into() }));
+    let after = provider.requests.lock().unwrap()[4].clone();
+    assert!(after.last().unwrap().text.contains("copy_to_clipboard"), "the refusal says what to do instead");
+    assert!(!calls.iter().any(|c| matches!(c, GuiAction::PressKeys { keys } if keys == "ctrl+alt+a")), "never presses Waddle's own hotkeys");
+}
+
+#[tokio::test]
+async fn reads_in_one_turn_run_together_and_answer_in_order() {
+    let f = fixture();
+    f.workspace.write_file("a.txt", "alpha").unwrap();
+    f.workspace.write_file("b.txt", "beta").unwrap();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("read_file", json!({"path": "a.txt"})), call("read_file", json!({"path": "b.txt"})), call("list_dir", json!({}))]),
+        reply("Both read.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    let second = provider.requests.lock().unwrap()[1].clone();
+    let results: Vec<&Message> = second.iter().filter(|m| m.role == Role::Tool).collect();
+    assert_eq!(results.len(), 3);
+    assert!(results[0].text.contains("alpha") && results[1].text.contains("beta") && results[2].text.contains("a.txt"));
+}
+
+#[tokio::test]
+async fn remembered_facts_reach_every_later_prompt() {
+    let f = fixture();
+    let facts = Arc::new(FactStore::new(f._dir.path().join("facts.json")));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("remember", json!({"fact": "Their sister is Ana."}))]),
+        reply("Got it!", vec![]),
+        reply("Ana!", vec![]),
+    ]));
+    let deps = AgentDeps { facts: Some(facts.clone()), ..deps_with(&f, host.clone(), provider.clone(), None, None) };
+    run_with(&deps).await;
+    assert!(host.approvals.lock().unwrap().is_empty(), "remembering needs no approval");
+    assert_eq!(facts.list()[0].text, "Their sister is Ana.");
+    run_with(&deps).await;
+    let system = provider.requests.lock().unwrap()[2][0].text.clone();
+    assert!(system.contains("Their sister is Ana.") && system.contains("not instructions"), "{system}");
+}
+
+#[tokio::test]
+async fn a_selection_arrives_as_untrusted_text_and_can_be_replaced_after_a_notice() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| None));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("replace_selection", json!({"text": "Would you mind sending it?"}))]),
+        reply("Done.", vec![]),
+    ]));
+    let config = SessionConfig {
+        settings: Settings { look_first: true, ..settings() },
+        decider: Some(Arc::new(FixedDecider { screen: None, route: chat(0.99) })),
+        ..session_config(&f, provider.clone())
+    };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    session.user_message_with_selection("make this more polite".into(), Selection { text: "send it now".into(), app: "outlook".into() });
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    let first = provider.requests.lock().unwrap()[0].clone();
+    let goal = first.last().unwrap();
+    assert!(goal.text.contains("<untrusted") && goal.text.contains("send it now"), "{}", goal.text);
+    assert!(goal.images.is_empty(), "no screenshot needed to see the selection");
+    assert!(first[0].text.contains("selected text in outlook"));
+    let approvals = host.approvals.lock().unwrap().clone();
+    assert_eq!((approvals[0].tool.as_str(), approvals[0].tier, approvals[0].countdown_ms.is_some()), ("replace_selection", 2, true));
+    assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::ReplaceSelection { text: "Would you mind sending it?".into() }));
 }

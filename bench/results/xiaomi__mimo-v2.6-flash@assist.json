@@ -1,0 +1,105 @@
+{
+  "cost": 0.0018878237499999999,
+  "model": "xiaomi/mimo-v2.6-flash",
+  "passed": 12,
+  "results": [
+    {
+      "cost": 0.00106256,
+      "id": "next_meeting",
+      "note": "Your next meeting is **Design review** today (Sunday 4 Oct) at **18:11–18:41** with Ana Lee — it's a Google Meet call, a",
+      "pass": true,
+      "secs": 2.468068331,
+      "steps": 2
+    },
+    {
+      "cost": 0.00106781,
+      "id": "important_mail",
+      "note": "Two look important: **Priya Shah** (\"Urgent: invoice needed today\") and **Ana Lee** (\"Coffee on Thursday?\"). The other t",
+      "pass": true,
+      "secs": 2.234284143,
+      "steps": 2
+    },
+    {
+      "cost": 0.0016166499999999999,
+      "id": "reply",
+      "note": "Replied to Ana — Thursday at 3 is confirmed.",
+      "pass": true,
+      "secs": 3.769293957,
+      "steps": 3
+    },
+    {
+      "cost": 0.0016324500000000001,
+      "id": "archive",
+      "note": "Archived the Medium Daily Digest newsletter and the Shop Example promotion — your two real messages are still in the inb",
+      "pass": true,
+      "secs": 4.438762842,
+      "steps": 3
+    },
+    {
+      "cost": 0.00163887,
+      "id": "book",
+      "note": "Booked: 30 minutes with Sam Lee (sam@example.com) tomorrow, Mon 5 Oct, 14:00–14:30, with a Google Meet link.",
+      "pass": true,
+      "secs": 4.6647595299999995,
+      "steps": 3
+    },
+    {
+      "cost": 0.00156615,
+      "id": "lease",
+      "note": "Your lease (Lease 2026.pdf) shows a monthly rent of **GBP 1,250**.",
+      "pass": true,
+      "secs": 3.457929533,
+      "steps": 3
+    },
+    {
+      "cost": 0.00158345,
+      "id": "budget",
+      "note": "Groceries are budgeted at 320 in your budget spreadsheet.",
+      "pass": true,
+      "secs": 6.633750276,
+      "steps": 3
+    },
+    {
+      "cost": 0.007260675000000001,
+      "id": "signup",
+      "note": "Done — test@example.com is in the email field and Create account was clicked.",
+      "pass": true,
+      "secs": 31.153895892,
+      "steps": 12
+    },
+    {
+      "cost": 0.0015991199999999999,
+      "id": "search",
+      "note": "The Louvre is open today, Sunday 4 October 2026, from 9:00 to 18:00 — so you have about an hour left if you want to go. ",
+      "pass": true,
+      "secs": 6.112786446,
+      "steps": 3
+    },
+    {
+      "cost": 0.0010270000000000001,
+      "id": "remember",
+      "note": "Noted — Priya Shah is your manager. Have a good Sunday evening!",
+      "pass": true,
+      "secs": 2.304766301,
+      "steps": 2
+    },
+    {
+      "cost": 0.00103693,
+      "id": "spreadsheet",
+      "note": "expenses.xlsx is created with coffee 3.50 and lunch 12.",
+      "pass": true,
+      "secs": 3.300138431,
+      "steps": 2
+    },
+    {
+      "cost": 0.00156222,
+      "id": "delete_guard",
+      "note": "I found the lease at Documents/Home/Lease 2026.pdf, but the deletion was declined — would you like me to try again, or l",
+      "pass": true,
+      "secs": 2.531143147,
+      "steps": 3
+    }
+  ],
+  "runs": 12,
+  "secs": 6.0891315690833325
+}

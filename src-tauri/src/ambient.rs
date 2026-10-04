@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager};
 use waddle_core::decide::Situation;
 
 use crate::bridge::TauriHost;
+use crate::presence::Presence;
 use crate::AppState;
 
 const TICK: Duration = Duration::from_secs(4);
@@ -26,30 +27,9 @@ fn idle_level(secs: u64) -> u8 {
     }
 }
 
-/// Seconds since the last keyboard or mouse input, where the OS tells us.
-#[cfg(windows)]
-fn os_idle_secs() -> Option<u64> {
-    use windows::Win32::System::SystemInformation::GetTickCount;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
-    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
-    // SAFETY: plain Win32 calls on a correctly sized struct.
-    unsafe {
-        if !GetLastInputInfo(&mut info).as_bool() {
-            return None;
-        }
-        Some(u64::from(GetTickCount().wrapping_sub(info.dwTime)) / 1000)
-    }
-}
-
-#[cfg(not(windows))]
-fn os_idle_secs() -> Option<u64> {
-    None
-}
-
 pub fn spawn(app: AppHandle, host: Arc<TauriHost>) {
     tauri::async_runtime::spawn(async move {
-        let mut last_cursor = (0.0, 0.0);
-        let mut last_input = Instant::now();
+        let mut presence = Presence::new();
         let mut app_since = Instant::now();
         let mut front = String::new();
         let mut previous: Option<String> = None;
@@ -61,21 +41,13 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>) {
                 let s = state.settings.read().unwrap();
                 (s.ambient_brain && s.wander, state.decider.read().unwrap().clone())
             };
-            if let Ok(p) = app.cursor_position() {
-                if (p.x, p.y) != last_cursor {
-                    last_cursor = (p.x, p.y);
-                    last_input = Instant::now();
-                }
-            }
-            let window = host.front_window();
-            let app_name = window.as_ref().map(|w| w.0.clone()).unwrap_or_default();
-            if app_name != front {
-                previous = Some(std::mem::replace(&mut front, app_name.clone())).filter(|p| !p.is_empty());
+            let now = presence.sample(&app, &host);
+            if now.app != front {
+                previous = Some(std::mem::replace(&mut front, now.app.clone())).filter(|p| !p.is_empty());
                 app_since = Instant::now();
             }
             let Some(decider) = decider.filter(|_| on && !host.is_busy()) else { continue };
-            let idle = os_idle_secs().unwrap_or(u64::MAX).min(last_input.elapsed().as_secs());
-            let fullscreen = window.as_ref().is_some_and(|w| w.2);
+            let (idle, fullscreen, app_name) = (now.idle_secs, now.fullscreen, now.app.clone());
             let changed = match &asked {
                 None => true,
                 Some((at, a, f, lvl)) => {
@@ -97,10 +69,10 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>) {
             };
             let Some((intent, p)) = decider.duck_intent(&situation).await else { continue };
             log::info!("duck intent: {intent:?} ({p:.2})");
-            let cursor = host.physical_to_overlay(last_cursor.0, last_cursor.1);
+            let cursor = host.physical_to_overlay(now.cursor.0, now.cursor.1);
             host.emit_overlay(
                 "duck:intent",
-                json!({ "intent": intent, "window": window.map(|w| w.1), "cursor": { "x": cursor.0, "y": cursor.1 } }),
+                json!({ "intent": intent, "window": now.window, "cursor": { "x": cursor.0, "y": cursor.1 } }),
             );
         }
     });

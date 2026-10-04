@@ -1,13 +1,13 @@
 // Overlay entry point: the render/behaviour loop and the wiring between the
 // duck, its UI, and the backend's events.
 
-import { Duck, pickWanderTarget } from "./body/behavior";
+import { Duck, pickWanderTarget, usesLaptop } from "./body/behavior";
 import { alarmPalette, buildPalette } from "./body/palette";
 import { planIntent, type Plan } from "./body/intent";
 import { standBeside } from "./body/pathfind";
 import { computeSegments, type Segment, type WinRect } from "./body/platforms";
 import { SpriteRenderer } from "./body/renderer";
-import { api, on, type HitRect, type Platform } from "./ipc";
+import { api, on, type HitRect, type NudgePayload, type Platform } from "./ipc";
 import { ApprovalCard } from "./ui/approval";
 import { Bubble } from "./ui/bubble";
 import { Chat } from "./ui/chat";
@@ -42,12 +42,17 @@ const duck = new Duck({ w: renderer.width, h: renderer.height }, screen.w * 0.7,
 
 const pointer = new Pointer();
 const bubble = new Bubble(document.getElementById("bubble")!, () => void api.halt());
-const approval = new ApprovalCard(document.getElementById("approval")!, (id, ok) => void api.answerApproval(id, ok));
+const approval = new ApprovalCard(
+  document.getElementById("approval")!,
+  (id, ok, draft) => void api.answerApproval(id, ok, draft ?? null),
+  (id) => void api.undoSend(id),
+);
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
-  send: (text) => {
-    bubble.say("user", text);
-    void api.sendMessage(text);
+  send: (text, selection) => {
+    bubble.say("user", selection ? `${text || "Help with this"} 📎` : text);
+    void api.sendMessage(text, selection);
   },
+  dropSelection: () => void api.dropSelection(),
   // A local model loads while the user types.
   opened: () => void api.warmUp(),
   voiceStart: () => api.voiceStart(),
@@ -117,7 +122,8 @@ function schedule(now: number): void {
 }
 
 function think(now: number): void {
-  if (duck.mode !== "idle" || busy || approval.visible || chat.visible) {
+  // Stay put while the bubble is up: its buttons are hard to hit on a moving duck.
+  if (duck.mode !== "idle" || busy || approval.visible || chat.visible || bubble.visible) {
     nextWander = Math.max(nextWander, now + 3000);
     return;
   }
@@ -154,12 +160,35 @@ function draw(now: number): void {
   const frame = duck.frame(now);
   if (lastRect) ctx.clearRect(lastRect.x - 2, lastRect.y - 2, lastRect.w + 4, lastRect.h + 4);
   renderer.draw(frame, r.x, r.y, duck.facing < 0);
+  if (duck.laptop && duck.mode === "idle") drawLaptop(r);
   if (duck.sleeping) {
     ctx.fillStyle = "#2a1e14";
     ctx.font = "bold 14px monospace";
     ctx.fillText("z", r.x + r.w - 6, r.y + 6 - (Math.floor(now / 600) % 3) * 4);
   }
-  lastRect = { ...r, y: r.y - 16, h: r.h + 16 };
+  // The laptop sits just outside the sprite, so clear a little wider.
+  const pad = renderer.scale * LAPTOP[0].length;
+  lastRect = { x: r.x - pad, y: r.y - 16, w: r.w + pad * 2, h: r.h + 16 };
+}
+
+// A tiny open laptop, 7x5 sprite pixels: lid (L), glowing screen (S), base (B).
+const LAPTOP = [".LLLLL.", ".LSSSL.", ".LSSSL.", ".LLLLL.", "BBBBBBB"];
+const LAPTOP_COLOURS: Record<string, string> = { L: "#3a3f4b", S: "#9ad1ff", B: "#5b6170" };
+
+function drawLaptop(r: HitRect): void {
+  const px = renderer.scale;
+  const w = LAPTOP[0].length * px;
+  const x = duck.facing > 0 ? r.x + r.w - px : r.x - w + px;
+  const y = r.y + r.h - LAPTOP.length * px;
+  // The screen flickers as the duck types.
+  const glow = Math.floor(performance.now() / 220) % 3 === 0 ? "#c4e6ff" : LAPTOP_COLOURS.S;
+  LAPTOP.forEach((row, j) =>
+    [...row].forEach((k, i) => {
+      if (k === ".") return;
+      ctx.fillStyle = k === "S" ? glow : LAPTOP_COLOURS[k];
+      ctx.fillRect(Math.round(x + i * px), Math.round(y + j * px), px, px);
+    }),
+  );
 }
 
 function union(a: HitRect, b: DOMRect): HitRect {
@@ -178,7 +207,10 @@ function layoutUi(): void {
   approval.place(r, screen, avoid);
   // Tell the backend which areas should catch the mouse.
   const rects: HitRect[] = [r];
-  for (const el of [bubble.el, chat.el, approval.el]) {
+  if (!badge.classList.contains("hidden")) {
+    badge.style.transform = `translate(${Math.round(r.x + r.w - 6)}px, ${Math.round(r.y - 22)}px)`;
+  }
+  for (const el of [bubble.el, chat.el, approval.el, badge]) {
     if (el.classList.contains("hidden")) continue;
     const b = el.getBoundingClientRect();
     rects.push({ x: b.left, y: b.top, w: b.width, h: b.height });
@@ -268,6 +300,38 @@ void on("duck:point", ({ x, y, label }) => {
   duck.doAct("look", performance.now(), 800);
 });
 
+// Nudges: a "!" badge while the user is in full screen, the full nudge in the bubble otherwise.
+const badge = document.getElementById("badge") as HTMLButtonElement;
+const waiting = new Map<string, NudgePayload>();
+const shownFull = new Set<string>();
+
+function showNudge(n: NudgePayload): void {
+  waiting.delete(n.id);
+  badge.classList.toggle("hidden", waiting.size === 0);
+  if (shownFull.has(n.id)) return;
+  shownFull.add(n.id);
+  duck.doAct("peck", performance.now(), 900);
+  bubble.nudge(n.text, n.actions, (action) => api.nudgeAction(n.id, action));
+}
+
+void on("nudge", (n) => {
+  if (n.stage === "full") {
+    showNudge(n);
+    return;
+  }
+  if (shownFull.has(n.id)) return;
+  waiting.set(n.id, n);
+  badge.classList.remove("hidden");
+  badge.title = n.text;
+});
+
+void on("nudge:chime", () => chime());
+
+badge.addEventListener("click", () => {
+  touch();
+  for (const n of [...waiting.values()]) showNudge({ ...n, stage: "full" });
+});
+
 void on("reminder", ({ text, late }) => {
   touch();
   chime();
@@ -296,6 +360,7 @@ void on("busy", (b) => {
   plan = null;
   bubble.setBusy(b);
   if (!b) {
+    duck.laptop = false;
     alarm = false;
     applyPalette();
     // Flutter back down after a task that ended mid-air.
@@ -310,6 +375,16 @@ void on("approval", (req) => {
   applyPalette();
 });
 
+void on("undo", ({ id, secs }) => {
+  touch();
+  approval.showUndo(id, secs);
+});
+
+void on("undo:done", ({ id, undone }) => {
+  approval.hideUndo(id);
+  if (undone) bubble.say("notice", "Not sent.");
+});
+
 void on("agent", (ev) => {
   touch();
   switch (ev.type) {
@@ -321,6 +396,8 @@ void on("agent", (ev) => {
       break;
     case "tool_started":
       bubble.tool(ev.summary);
+      // Email, calendar and file reads: the duck pecks at its little laptop until it acts on screen again.
+      duck.laptop = usesLaptop(ev.tool);
       if (ev.tool === "run_command" || ev.tool === "write_file") duck.doAct("type", performance.now(), 1200);
       break;
     case "tool_output":
@@ -335,6 +412,7 @@ void on("agent", (ev) => {
       applyPalette();
       break;
     case "task_finished":
+      duck.laptop = false;
       // The planner's final words already streamed; show the message only if it didn't.
       if (ev.outcome !== "done") bubble.say(ev.outcome === "failed" ? "error" : "notice", ev.message);
       break;
@@ -343,6 +421,9 @@ void on("agent", (ev) => {
       break;
     case "trace_saved":
       bubble.rate((good) => void api.rateTask(ev.task_id, good));
+      break;
+    case "offer":
+      bubble.offer(ev.label, () => api.openAnswer(ev.id));
       break;
     case "task_started":
     case "thinking":
@@ -356,9 +437,13 @@ void on("settings", (s) => {
   applyPalette();
 });
 
-void on("chat:open", ({ voice }) => {
+void on("chat:open", ({ voice, selection }) => {
   touch();
   chat.open();
+  if (selection !== undefined) {
+    chat.setSelection(selection);
+    if (!selection) bubble.say("notice", "I couldn't find any selected text. Select some, then press Ctrl+Alt+A.");
+  }
   if (voice) void chat.toggleVoice();
 });
 

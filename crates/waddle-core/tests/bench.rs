@@ -176,6 +176,8 @@ struct TaskResult {
     /// Did the right things, but may have kept re-checking the (static) test screen until the step limit.
     hit: bool,
     secs: f64,
+    /// Time spent waiting on the model (the rest is looking and tools).
+    model_secs: f64,
     cost: f64,
     tokens: u64,
     steps: usize,
@@ -239,8 +241,12 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         settings,
         skills: None,
         reminders: Some(reminders.clone()),
+        facts: None,
         decider,
         self_source: None,
+        selection: None,
+        google: None,
+        style: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, id.clone(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);
@@ -254,6 +260,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     };
     let secs = started.elapsed().as_secs_f64() - *waited.lock().unwrap();
     let usage = agent.usage();
+    let model_secs = (agent.timing().model_ms() as f64 / 1000.0 - *waited.lock().unwrap()).max(0.0);
     let actions = host.gui_calls.lock().unwrap().clone();
     let steps = host.timeline.lock().unwrap().iter().filter(|(_, l)| l == "model call").count();
 
@@ -306,7 +313,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         })
         .collect();
     let note = format!("{:?} [{}] {}", r.outcome, did.join(" "), r.message.chars().take(400).collect::<String>().replace('\n', " "));
-    TaskResult { id, pass, hit, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
+    TaskResult { id, pass, hit, secs, model_secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
 }
 
 fn local() -> bool {
@@ -356,16 +363,17 @@ async fn benchmark_models() {
         let passed = results.iter().filter(|r| r.pass).count();
         let hits = results.iter().filter(|r| r.hit).count();
         let secs = results.iter().map(|r| r.secs).sum::<f64>() / n;
+        let model_secs = results.iter().map(|r| r.model_secs).sum::<f64>() / n;
         let cost = results.iter().map(|r| r.cost).sum::<f64>() / n;
         let tokens = results.iter().map(|r| r.tokens).sum::<u64>() as f64 / n;
         let steps = results.iter().map(|r| r.steps).sum::<usize>() as f64 / n;
-        let line = format!("{model:45} {tag:8} {passed:3}/{:<3} hit {hits:3} {secs:6.1}s/task ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
+        let line = format!("{model:45} {tag:8} {passed:3}/{:<3} hit {hits:3} {secs:6.1}s/task (model {model_secs:.1}s) ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
         println!("{line}");
         summary.push(line);
         let file = bench_dir().join(format!("results/{}{}.json", model.replace('/', "__"), if tag.is_empty() { String::new() } else { format!("@{tag}") }));
         let rows: Vec<Value> = results
             .iter()
-            .map(|r| json!({ "id": r.id, "pass": r.pass, "hit": r.hit, "secs": r.secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
+            .map(|r| json!({ "id": r.id, "pass": r.pass, "hit": r.hit, "secs": r.secs, "model_secs": r.model_secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
             .collect();
         std::fs::write(file, serde_json::to_string_pretty(&json!({ "model": model, "tag": tag, "passed": passed, "hits": hits, "runs": results.len(), "secs": secs, "cost": cost, "results": rows })).unwrap()).unwrap();
     }

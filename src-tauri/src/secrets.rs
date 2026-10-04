@@ -11,6 +11,10 @@ const SERVICE: &str = "dev.waddle.app";
 pub enum Secret {
     LlmKey,
     SttKey,
+    /// Keeps Waddle signed in to Google.
+    GoogleRefreshToken,
+    /// The Desktop OAuth client's secret from the user's Google Cloud project.
+    GoogleClient,
 }
 
 impl Secret {
@@ -18,12 +22,15 @@ impl Secret {
         match self {
             Secret::LlmKey => "llm_api_key",
             Secret::SttKey => "stt_api_key",
+            Secret::GoogleRefreshToken => "google_refresh_token",
+            Secret::GoogleClient => "google_client_secret",
         }
     }
     fn env_vars(self) -> &'static [&'static str] {
         match self {
             Secret::LlmKey => &["WADDLE_API_KEY", "OPENROUTER_API_KEY"],
             Secret::SttKey => &["WADDLE_STT_API_KEY", "GROQ_API_KEY"],
+            Secret::GoogleRefreshToken | Secret::GoogleClient => &[],
         }
     }
 }

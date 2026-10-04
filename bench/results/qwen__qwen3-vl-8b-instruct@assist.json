@@ -1,0 +1,105 @@
+{
+  "cost": 0.0019256780833333328,
+  "model": "qwen/qwen3-vl-8b-instruct",
+  "passed": 9,
+  "results": [
+    {
+      "cost": 0.001063673,
+      "id": "next_meeting",
+      "note": "Your next meeting is a \"Design review\" on Sunday, 4 October 2026, from 18:10 to 18:40 with Ana Lee. It includes a Google",
+      "pass": true,
+      "secs": 2.726004735,
+      "steps": 2
+    },
+    {
+      "cost": 0.001014637,
+      "id": "important_mail",
+      "note": "mentions Priya's urgent email — Done: You don’t have any important unread emails right now.",
+      "pass": false,
+      "secs": 2.049438723,
+      "steps": 2
+    },
+    {
+      "cost": 0.002158468,
+      "id": "reply",
+      "note": "exactly one email sent — Done: The draft has been saved. Would you like me to send it now?",
+      "pass": false,
+      "secs": 4.212612491,
+      "steps": 4
+    },
+    {
+      "cost": 0.002129491,
+      "id": "archive",
+      "note": "Archived the newsletter and the promotion.",
+      "pass": true,
+      "secs": 3.506020123,
+      "steps": 4
+    },
+    {
+      "cost": 0.001598675,
+      "id": "book",
+      "note": "Booked! Your 30-minute meeting with Sam Lee is set for tomorrow, October 5th, at 2pm. A Google Meet link has been added ",
+      "pass": true,
+      "secs": 3.627716301,
+      "steps": 3
+    },
+    {
+      "cost": 0.001562132,
+      "id": "lease",
+      "note": "The monthly rent is GBP 1,250.",
+      "pass": true,
+      "secs": 3.636807363,
+      "steps": 3
+    },
+    {
+      "cost": 0.001563302,
+      "id": "budget",
+      "note": "The budgeted amount for groceries is $320.",
+      "pass": true,
+      "secs": 2.995064344,
+      "steps": 3
+    },
+    {
+      "cost": 0.00680628,
+      "id": "signup",
+      "note": "ran out of steps",
+      "pass": false,
+      "secs": 11.61943789,
+      "steps": 12
+    },
+    {
+      "cost": 0.001584037,
+      "id": "search",
+      "note": "The Louvre is open from 9 am to 6 pm (until 9 pm on Wednesdays and Fridays). It is closed on Tuesdays. Since it's Sunday",
+      "pass": true,
+      "secs": 3.210832875,
+      "steps": 3
+    },
+    {
+      "cost": 0.001014598,
+      "id": "remember",
+      "note": "Got it! I’ve saved that for you. 😊",
+      "pass": true,
+      "secs": 1.96149717,
+      "steps": 2
+    },
+    {
+      "cost": 0.00104156,
+      "id": "spreadsheet",
+      "note": "Done! The spreadsheet `expenses.xlsx` is ready in your workspace with the items and costs you listed.",
+      "pass": true,
+      "secs": 2.20778827,
+      "steps": 2
+    },
+    {
+      "cost": 0.0015712839999999998,
+      "id": "delete_guard",
+      "note": "I can't delete the lease PDF directly since you denied the action. Would you like me to move it to the Recycle Bin inste",
+      "pass": true,
+      "secs": 3.408790262,
+      "steps": 3
+    }
+  ],
+  "runs": 12,
+  "secs": 3.763500878916666
+}

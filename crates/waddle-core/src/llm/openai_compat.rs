@@ -7,12 +7,13 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
+use super::{textcalls, ChatRequest, ChatResponse, Citation, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
 
 pub struct OpenAiCompat {
     base_url: String,
     api_key: Option<String>,
     reasoning: Option<&'static str>,
+    no_training: bool,
     http: reqwest::Client,
 }
 
@@ -22,13 +23,27 @@ impl OpenAiCompat {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("http client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, http }
+        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, no_training: false, http }
     }
 
     /// Sends OpenRouter's `reasoning.effort` with every request ("none", "low", ...).
     pub fn with_reasoning(mut self, effort: Option<&'static str>) -> Self {
         self.reasoning = effort;
         self
+    }
+
+    /// Asks OpenRouter to route only to providers that don't keep or train on prompts.
+    pub fn with_no_training(mut self, on: bool) -> Self {
+        self.no_training = on;
+        self
+    }
+
+    fn body(&self, req: &ChatRequest<'_>) -> Value {
+        let mut body = request_body(req, self.reasoning);
+        if self.no_training {
+            body["provider"] = json!({ "data_collection": "deny" });
+        }
+        body
     }
 }
 
@@ -85,6 +100,10 @@ pub(crate) fn request_body(req: &ChatRequest<'_>, reasoning: Option<&str>) -> Va
     if let Some(effort) = reasoning {
         body["reasoning"] = json!({ "effort": effort });
     }
+    if let Some(n) = req.web {
+        // Exa costs a flat ~$0.007 a search; "native" would bill the model's own (dearer) search.
+        body["plugins"] = json!([{ "id": "web", "engine": "exa", "max_results": n }]);
+    }
     if !req.tools.is_empty() {
         body["tools"] = req
             .tools
@@ -114,6 +133,7 @@ pub(crate) struct SseAccumulator {
     text: String,
     calls: BTreeMap<u64, PartialCall>,
     usage: Usage,
+    citations: Vec<Citation>,
     done: bool,
 }
 
@@ -147,6 +167,14 @@ impl SseAccumulator {
             self.usage = Usage { prompt_tokens: n("prompt_tokens"), completion_tokens: n("completion_tokens"), cost: u.get("cost").and_then(Value::as_f64) };
         }
         let Some(delta) = v.pointer("/choices/0/delta") else { return Ok(()) };
+        for a in delta.get("annotations").and_then(Value::as_array).into_iter().flatten() {
+            let Some(c) = a.get("url_citation") else { continue };
+            let url = c.get("url").and_then(Value::as_str).unwrap_or("").to_string();
+            if !url.is_empty() && !self.citations.iter().any(|x| x.url == url) {
+                let title = c.get("title").and_then(Value::as_str).unwrap_or("").to_string();
+                self.citations.push(Citation { url, title });
+            }
+        }
         if let Some(t) = delta.get("content").and_then(Value::as_str) {
             if !t.is_empty() {
                 self.text.push_str(t);
@@ -198,7 +226,7 @@ impl SseAccumulator {
                 tool_calls = calls;
             }
         }
-        ChatResponse { text, tool_calls, usage: self.usage }
+        ChatResponse { text, tool_calls, usage: self.usage, citations: self.citations }
     }
 }
 
@@ -211,7 +239,7 @@ impl Provider for OpenAiCompat {
             .post(&url)
             .header("HTTP-Referer", "https://github.com/DimeDataCloud/Waddle")
             .header("X-Title", "Project Waddle")
-            .json(&request_body(&req, self.reasoning));
+            .json(&self.body(&req));
         if let Some(key) = self.api_key.as_deref().filter(|k| !k.is_empty()) {
             builder = builder.bearer_auth(key);
         }
@@ -308,14 +336,37 @@ mod tests {
             Message::user_with_image("screen", ImageData { mime: "image/png".into(), base64: "AAA".into() }),
         ];
         let tools = vec![ToolSpec { name: "x".into(), description: "d".into(), parameters: json!({"type":"object"}) }];
-        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 }, None);
+        let req = ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10, web: None };
+        let body = request_body(&req, None);
         assert_eq!(body["messages"][1]["tool_calls"][0]["function"]["arguments"], "{}");
         assert_eq!(body["messages"][2]["tool_call_id"], "c9");
         assert_eq!(body["messages"][3]["content"][1]["image_url"]["url"], "data:image/png;base64,AAA");
         assert_eq!(body["tools"][0]["function"]["name"], "x");
         assert_eq!(body["stream"], true);
         assert!(body.get("reasoning").is_none());
-        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 }, Some("none"));
+        assert!(body.get("plugins").is_none() && body.get("provider").is_none());
+        let body = request_body(&req, Some("none"));
         assert_eq!(body["reasoning"]["effort"], "none");
+    }
+
+    #[test]
+    fn web_search_and_no_training_reach_the_request() {
+        let msgs = vec![Message::user("who won?")];
+        let req = ChatRequest { model: "m", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: Some(3) };
+        let private = OpenAiCompat::new("https://openrouter.ai/api/v1".into(), None).with_no_training(true);
+        let body = private.body(&req);
+        assert_eq!(body["provider"]["data_collection"], "deny");
+        assert_eq!(body["plugins"][0]["id"], "web");
+        assert_eq!(body["plugins"][0]["max_results"], 3);
+        let open = OpenAiCompat::new("https://openrouter.ai/api/v1".into(), None);
+        assert!(open.body(&req).get("provider").is_none());
+    }
+
+    #[test]
+    fn collects_web_citations_once_each() {
+        let ann = r#"{"type":"url_citation","url_citation":{"url":"https://a.example/x","title":"A","content":"…"}}"#;
+        let line = format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"Hi\",\"annotations\":[{ann},{ann}]}}}}]}}\n");
+        let (resp, _) = feed(&[&line, &line]);
+        assert_eq!(resp.citations, vec![Citation { url: "https://a.example/x".into(), title: "A".into() }]);
     }
 }

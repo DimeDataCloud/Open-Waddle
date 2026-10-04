@@ -4,6 +4,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use waddle_core::audit::{AuditRecord, VerifyReport};
 use waddle_core::config::{ProviderKind, VoiceBackend};
+use waddle_core::google::gmail::MailDraft;
+use waddle_core::google::{auth, OAuthClient, SCOPES};
 use waddle_core::Settings;
 
 use crate::bridge::Platform;
@@ -49,10 +51,40 @@ fn view(state: &AppState, key_storage: Option<&'static str>) -> SettingsView {
 }
 
 #[tauri::command]
-pub fn send_message(state: State<'_, AppState>, text: String) {
+pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<bool>) {
     // Focus stays in the chat box for follow-ups; the bridge hands focus back
     // to the user's app right before Waddle types anything.
-    state.session.user_message(text);
+    match selection.filter(|s| *s).and_then(|_| state.host.take_selection()) {
+        Some(sel) => state.session.user_message_with_selection(text, sel),
+        None => state.session.user_message(text),
+    }
+}
+
+/// The user removed the selection chip from the chat box.
+#[tauri::command]
+pub fn drop_selection(state: State<'_, AppState>) {
+    let _ = state.host.take_selection();
+}
+
+/// Saves a research answer as Markdown in the workspace and opens it.
+#[tauri::command]
+pub async fn open_answer(state: State<'_, AppState>, id: String) -> CmdResult<String> {
+    state.session.open_answer(&id).map(|p| p.display().to_string()).map_err(err)
+}
+
+#[tauri::command]
+pub async fn facts_list(state: State<'_, AppState>) -> CmdResult<Vec<waddle_core::facts::Fact>> {
+    Ok(state.facts.list())
+}
+
+#[tauri::command]
+pub async fn fact_add(state: State<'_, AppState>, text: String) -> CmdResult<String> {
+    state.facts.add(&text).map_err(err)
+}
+
+#[tauri::command]
+pub async fn fact_forget(state: State<'_, AppState>, id: String) -> CmdResult<String> {
+    state.facts.forget(&id).map_err(err)
 }
 
 #[tauri::command]
@@ -66,8 +98,179 @@ pub fn halt(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-pub fn answer_approval(state: State<'_, AppState>, id: String, approved: bool) {
-    state.host.answer_approval(&id, approved);
+pub fn answer_approval(state: State<'_, AppState>, id: String, approved: bool, draft: Option<MailDraft>) {
+    state.host.answer_approval(&id, approved, draft);
+}
+
+/// Undo on the bar that follows Send: the email doesn't go.
+#[tauri::command]
+pub fn undo_send(state: State<'_, AppState>, id: String) {
+    state.host.undo_send(&id);
+}
+
+#[derive(Serialize)]
+pub struct GoogleStatus {
+    pub client_id: String,
+    pub has_secret: bool,
+    pub connected: bool,
+    pub email: Option<String>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn google_status(state: State<'_, AppState>) -> CmdResult<GoogleStatus> {
+    let google = state.google.read().unwrap().clone();
+    let (email, error) = match google {
+        Some(g) => match g.mail_profile().await {
+            Ok((email, _)) => (Some(email), None),
+            Err(e) => (None, Some(format!("{e:#}"))),
+        },
+        None => (None, None),
+    };
+    Ok(GoogleStatus {
+        client_id: state.settings.read().unwrap().google_client_id.clone(),
+        has_secret: state.secrets.get(Secret::GoogleClient).is_some(),
+        connected: state.google.read().unwrap().is_some(),
+        email,
+        error,
+    })
+}
+
+/// Signs in to Google in the browser (PKCE, loopback redirect) and keeps the refresh token in the keychain.
+#[tauri::command]
+pub async fn google_connect(state: State<'_, AppState>, client_id: String, client_secret: Option<String>) -> CmdResult<GoogleStatus> {
+    let client_id = client_id.trim().to_string();
+    if client_id.is_empty() {
+        return Err("Paste the OAuth client ID from your Google Cloud project first (see the setup guide).".into());
+    }
+    if let Some(secret) = client_secret.filter(|s| !s.trim().is_empty()) {
+        state.secrets.set(Secret::GoogleClient, &secret).map_err(err)?;
+    }
+    let client = OAuthClient { id: client_id.clone(), secret: state.secrets.get(Secret::GoogleClient) };
+    let cancel = tokio_util::sync::CancellationToken::new();
+    if let Some(old) = state.google_signin.lock().unwrap().replace(cancel.clone()) {
+        old.cancel();
+    }
+    let open = |url: &str| {
+        if let Err(e) = crate::desktop::open_url(url) {
+            log::warn!("{e:#}");
+        }
+    };
+    let tokens = auth::sign_in(&crate::google_endpoints(), &client, SCOPES, open, &cancel, std::time::Duration::from_secs(300)).await.map_err(|e| format!("{e:#}"))?;
+    state.google_signin.lock().unwrap().take();
+    state.secrets.set(Secret::GoogleRefreshToken, tokens.refresh_token.as_deref().unwrap_or("")).map_err(err)?;
+    let mut settings = state.settings.read().unwrap().clone();
+    settings.google_client_id = client_id;
+    state.apply_settings(settings).map_err(err)?;
+    log::info!("connected to Google");
+    google_status(state).await
+}
+
+#[tauri::command]
+pub fn google_cancel(state: State<'_, AppState>) {
+    if let Some(c) = state.google_signin.lock().unwrap().take() {
+        c.cancel();
+    }
+}
+
+/// Signs out: Google forgets the grant and the refresh token leaves the keychain.
+#[tauri::command]
+pub async fn google_disconnect(state: State<'_, AppState>) -> CmdResult<GoogleStatus> {
+    if let Some(token) = state.secrets.get(Secret::GoogleRefreshToken) {
+        auth::revoke(&crate::google_endpoints(), &token).await;
+    }
+    state.secrets.set(Secret::GoogleRefreshToken, "").map_err(err)?;
+    let settings = state.settings.read().unwrap().clone();
+    state.apply_settings(settings).map_err(err)?;
+    google_status(state).await
+}
+
+/// A button on a nudge. Returns text to show in the bubble, if any.
+#[tauri::command]
+pub async fn nudge_action(state: State<'_, AppState>, id: String, action: String) -> CmdResult<Option<String>> {
+    use waddle_core::nudges::{self, Topic};
+    let topic = state.nudges.lock().unwrap().shown.get(&id).cloned();
+    let Some(topic) = topic else { return Ok(None) };
+    if action == "dismiss" {
+        state.nudges.lock().unwrap().shown.remove(&id);
+        return Ok(None);
+    }
+    match (action.as_str(), &topic) {
+        ("join", Topic::Meeting { join: Some(url), .. }) => {
+            crate::desktop::open_url(url).map_err(err)?;
+            Ok(None)
+        }
+        ("snooze", Topic::Meeting { .. }) => {
+            let now = chrono::Local::now().timestamp_millis();
+            let ok = state.nudges.lock().unwrap().state.snooze(topic.clone(), now);
+            Ok(Some(if ok { "I'll remind you again in 2 minutes.".into() } else { "It's about to start!".into() }))
+        }
+        ("open", Topic::Mail { thread_id, .. }) => {
+            crate::desktop::open_url(&format!("https://mail.google.com/mail/u/0/#all/{thread_id}")).map_err(err)?;
+            Ok(None)
+        }
+        ("reply", Topic::Mail { id, .. }) => {
+            // Only the id: the sender and subject are untrusted and mustn't become the user's words.
+            state.session.user_message(format!("Help me reply to the email with id {id}: read it, then write the reply on the send card. If what to say isn't clear, ask me first."));
+            Ok(None)
+        }
+        ("mute", Topic::Mail { from, .. }) => {
+            let addr = nudges::address(from);
+            let mut settings = state.settings.read().unwrap().clone();
+            if !settings.muted_senders.iter().any(|m| m.eq_ignore_ascii_case(&addr)) {
+                settings.muted_senders.push(addr.clone());
+                state.apply_settings(settings).map_err(err)?;
+            }
+            Ok(Some(format!("Okay, no more nudges about mail from {addr}. (Settings → Nudges to undo.)")))
+        }
+        ("brief", Topic::Brief) => {
+            let google = state.google.read().unwrap().clone().ok_or("Google isn't connected")?;
+            let (provider, model) = state.session.fast();
+            let decider = state.decider.read().unwrap().clone();
+            let text = nudges::compose_brief(&google, provider.as_ref(), &model, decider.as_deref(), chrono::Local::now()).await.map_err(|e| format!("{e:#}"))?;
+            Ok(Some(text))
+        }
+        _ => Err(format!("`{action}` doesn't apply to that nudge")),
+    }
+}
+
+#[derive(Serialize)]
+pub struct BrowserStatus {
+    pub connected: bool,
+    pub version: Option<String>,
+    pub folder: Option<String>,
+}
+
+#[tauri::command]
+pub async fn browser_status(state: State<'_, AppState>) -> CmdResult<BrowserStatus> {
+    let folder = state.data_dir.join("extension");
+    Ok(BrowserStatus {
+        connected: state.host.browser.connected(),
+        version: state.host.browser.version(),
+        folder: folder.exists().then(|| folder.display().to_string()),
+    })
+}
+
+/// Puts the extension in a folder Chrome can load it from, registers the relay,
+/// and opens the folder. Chrome needs one manual step: Load unpacked.
+#[tauri::command]
+pub async fn browser_setup(state: State<'_, AppState>) -> CmdResult<BrowserStatus> {
+    let folder = crate::browser::install_extension(&state.data_dir).map_err(err)?;
+    crate::browser::register_host(&state.data_dir).map_err(err)?;
+    if let Err(e) = crate::desktop::open_path(&folder) {
+        log::warn!("{e:#}");
+    }
+    browser_status(state).await
+}
+
+#[tauri::command]
+pub async fn style_get(state: State<'_, AppState>) -> CmdResult<String> {
+    Ok(state.style.get().unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn style_set(state: State<'_, AppState>, text: String) -> CmdResult<()> {
+    state.style.set(&text).map_err(err)
 }
 
 #[tauri::command]
@@ -120,6 +323,7 @@ pub async fn save_settings(
     }
     state.apply_settings(settings).map_err(err)?;
     let s = state.settings.read().unwrap().clone();
+    crate::sync_autostart(&app, s.autostart);
     let _ = app.emit_to("overlay", "settings", serde_json::json!({ "color": s.character.color, "wander": s.wander, "demo": state.is_demo() }));
     Ok(view(&state, storage))
 }
@@ -144,13 +348,7 @@ pub async fn open_settings(app: AppHandle) -> CmdResult<()> {
 #[tauri::command]
 pub async fn open_workspace(state: State<'_, AppState>) -> CmdResult<()> {
     let path = state.workspace().root().to_path_buf();
-    #[cfg(windows)]
-    let r = std::process::Command::new("explorer").arg(&path).spawn();
-    #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&path).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(&path).spawn();
-    r.map(|_| ()).map_err(err)
+    crate::desktop::open_path(&path).map_err(err)
 }
 
 #[tauri::command]

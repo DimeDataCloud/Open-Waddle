@@ -142,6 +142,39 @@ pub fn restore_foreground() {
     }
 }
 
+pub fn focus(id: u64) {
+    unsafe {
+        let _ = SetForegroundWindow(HWND(id as isize as *mut c_void));
+    }
+}
+
+pub fn open_path(path: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(shell_open(&path.to_string_lossy()), "Windows couldn't open {}", path.display());
+    Ok(())
+}
+
+/// Sets the default value of a key under HKEY_CURRENT_USER, creating it if needed.
+pub fn set_user_registry_default(subkey: &str, value: &str) -> anyhow::Result<()> {
+    use windows::Win32::System::Registry::{RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ};
+    let mut key = HKEY::default();
+    let sub = HSTRING::from(subkey);
+    // SAFETY: plain registry calls with valid, NUL-terminated strings and an out-pointer we own.
+    unsafe {
+        RegCreateKeyExW(HKEY_CURRENT_USER, &sub, None, PCWSTR::null(), REG_OPTION_NON_VOLATILE, KEY_WRITE, None, &mut key, None).ok()?;
+        let wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
+        let bytes = std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2);
+        let r = RegSetValueExW(key, PCWSTR::null(), None, REG_SZ, Some(bytes));
+        let _ = RegCloseKey(key);
+        r.ok()?;
+    }
+    Ok(())
+}
+
+pub fn open_url(url: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(shell_open(url), "Windows couldn't open the browser");
+    Ok(())
+}
+
 fn shell_open(target: &str) -> bool {
     let file = HSTRING::from(target);
     let verb = HSTRING::from("open");

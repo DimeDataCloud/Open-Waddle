@@ -4,15 +4,18 @@
 mod ambient;
 mod actuate;
 mod bridge;
+mod browser;
 mod commands;
 mod desktop;
 mod overlay;
+mod presence;
 mod secrets;
 mod selftest;
 mod shortcuts;
 #[cfg(windows)]
 mod uia;
 mod voice;
+mod watch;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -23,6 +26,9 @@ use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
 use waddle_core::decide::{Decider, Jev};
+use waddle_core::facts::FactStore;
+use waddle_core::google::style::StyleNote;
+use waddle_core::google::{Endpoints, Google, OAuthClient};
 use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
@@ -34,6 +40,7 @@ use crate::overlay::{Geometry, OverlayState};
 use crate::secrets::{Secret, Secrets};
 
 pub struct AppState {
+    pub app: AppHandle,
     pub session: Arc<Session>,
     pub host: Arc<TauriHost>,
     pub overlay: Arc<OverlayState>,
@@ -43,8 +50,17 @@ pub struct AppState {
     pub recording: Mutex<Option<voice::Recording>>,
     pub skills: Arc<SkillStore>,
     pub reminders: Arc<ReminderStore>,
+    pub facts: Arc<FactStore>,
     pub decider: RwLock<Option<Arc<dyn Decider>>>,
     pub traces: Arc<TraceStore>,
+    /// The signed-in Google account, if any.
+    pub google: RwLock<Option<Arc<Google>>>,
+    pub style: Arc<StyleNote>,
+    /// Cancels a Google sign-in that's waiting for the browser.
+    pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
+    /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
+    pub nudges: watch::Shared,
+    pub data_dir: PathBuf,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -78,6 +94,50 @@ pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool) ->
     Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn Decider>)
 }
 
+/// Google's servers, or a fake on this machine for development (`WADDLE_GOOGLE_BASE`).
+pub(crate) fn google_endpoints() -> Endpoints {
+    match std::env::var("WADDLE_GOOGLE_BASE") {
+        Ok(base) if base.starts_with("http://127.0.0.1:") || base.starts_with("http://localhost:") => Endpoints::at(&base),
+        _ => Endpoints::google(),
+    }
+}
+
+/// The Google account, when the user has set a client ID and signed in.
+pub(crate) fn google_for(settings: &Settings, secrets: &Secrets) -> Option<Arc<Google>> {
+    let id = settings.google_client_id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let refresh = secrets.get(Secret::GoogleRefreshToken)?;
+    let client = OAuthClient { id: id.to_string(), secret: secrets.get(Secret::GoogleClient) };
+    Some(Arc::new(Google::new(google_endpoints(), client, refresh)))
+}
+
+/// The folders Waddle may read: the user's own folders and Drive for desktop, plus any they added.
+pub(crate) fn read_folders(app: &AppHandle, settings: &Settings) -> Vec<PathBuf> {
+    let mut out = settings.read_folders.clone();
+    if settings.read_user_folders {
+        let p = app.path();
+        out.extend([p.document_dir(), p.download_dir(), p.desktop_dir(), p.picture_dir(), p.audio_dir(), p.video_dir()].into_iter().flatten());
+        let home = p.home_dir().ok();
+        // Drive for desktop: a G: drive (or another letter) on Windows, a folder elsewhere.
+        #[cfg(windows)]
+        out.extend(('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\My Drive"))).filter(|d| d.is_dir()));
+        if let Some(h) = home {
+            out.extend(["Google Drive", "My Drive"].iter().map(|n| h.join(n)).filter(|d| d.is_dir()));
+            if let Ok(entries) = std::fs::read_dir(h.join("Library").join("CloudStorage")) {
+                out.extend(entries.flatten().map(|e| e.path()).filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("GoogleDrive"))));
+            }
+        }
+    }
+    out
+}
+
+/// The workspace with the folders the user allowed around it.
+pub(crate) fn workspace_for(app: &AppHandle, settings: &Settings, dir: PathBuf) -> anyhow::Result<Arc<Workspace>> {
+    Ok(Arc::new(Workspace::new(dir)?.with_roots(&read_folders(app, settings), &settings.write_folders)))
+}
+
 /// Waddle's own source folder, if the user turned self-editing on.
 fn self_source_for(settings: &Settings) -> anyhow::Result<Option<Arc<Workspace>>> {
     match &settings.self_source_dir {
@@ -98,10 +158,11 @@ impl AppState {
 
     pub fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
         let ws_dir = settings.workspace_dir.clone().unwrap_or_else(|| self.workspace().root().to_path_buf());
-        let workspace = Arc::new(Workspace::new(ws_dir)?);
+        let workspace = workspace_for(&self.app, &settings, ws_dir)?;
         let (provider, demo) = provider_for(&settings, &self.secrets);
         let decider = decider_for(&settings, &self.secrets, demo);
         let self_source = self_source_for(&settings)?;
+        let google = google_for(&settings, &self.secrets);
         if let Some(dir) = self.settings_path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -112,16 +173,42 @@ impl AppState {
             workspace: workspace.clone(),
             skills: Some(self.skills.clone()),
             reminders: Some(self.reminders.clone()),
+            facts: Some(self.facts.clone()),
             decider: decider.clone(),
             self_source,
             traces: Some(self.traces.clone()),
+            google: google.clone(),
+            style: Some(self.style.clone()),
         });
+        *self.google.write().unwrap() = google;
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
         *self.demo.write().unwrap() = demo;
         *self.decider.write().unwrap() = decider;
         Ok(())
     }
+}
+
+/// Starts Waddle at sign-in, or stops doing so. Release builds only: a development
+/// build shouldn't register itself to start with the computer.
+pub fn sync_autostart(app: &AppHandle, on: bool) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    if launcher.is_enabled().unwrap_or(!on) == on {
+        return;
+    }
+    let r = if on { launcher.enable() } else { launcher.disable() };
+    if let Err(e) = r {
+        log::warn!("autostart: {e}");
+    }
+}
+
+/// The relay Chrome starts (`waddle.exe chrome-extension://…/`).
+pub fn native_host() -> i32 {
+    browser::run_native_host()
 }
 
 /// Gives the overlay keyboard focus so the chat box can take typing.
@@ -234,16 +321,32 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         .unwrap_or_default();
     let secrets = Secrets::new(&config_dir);
     let audit = Arc::new(AuditLog::open(&data_dir.join("audit.sqlite"))?);
-    let workspace = Arc::new(Workspace::new(settings.workspace_dir.clone().unwrap_or_else(|| default_workspace(&handle)))?);
+    let workspace = workspace_for(&handle, &settings, settings.workspace_dir.clone().unwrap_or_else(|| default_workspace(&handle)))?;
 
     let geometry = place_overlay(&handle)?;
     let overlay = OverlayState::new(geometry);
-    let host = TauriHost::new(handle.clone(), overlay.clone());
+    let link = browser::BrowserLink::new();
+    link.serve();
+    match browser::register_host(&data_dir) {
+        Ok(_) => {
+            // Keep an already set-up extension in step with this version of the app.
+            if data_dir.join("extension").exists() {
+                let _ = browser::install_extension(&data_dir);
+            }
+        }
+        Err(e) => log::warn!("couldn't register the Chrome link: {e:#}"),
+    }
+    let host = TauriHost::new(handle.clone(), overlay.clone(), link);
     let (provider, demo) = provider_for(&settings, &secrets);
     let decider = decider_for(&settings, &secrets, demo);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
+    let facts = Arc::new(FactStore::new(data_dir.join("facts.json")));
+    let style = Arc::new(StyleNote::new(data_dir.join("style.md")));
+    let nudges = watch::load(data_dir.join("nudges.json"));
+    sync_autostart(&handle, settings.autostart);
+    let google = google_for(&settings, &secrets);
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
         None
@@ -259,13 +362,17 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             workspace: workspace.clone(),
             skills: Some(skills.clone()),
             reminders: Some(reminders.clone()),
+            facts: Some(facts.clone()),
             decider: decider.clone(),
             self_source,
             traces: Some(traces.clone()),
+            google: google.clone(),
+            style: Some(style.clone()),
         },
     );
 
     app.manage(AppState {
+        app: handle.clone(),
         session,
         host: host.clone(),
         overlay: overlay.clone(),
@@ -275,8 +382,14 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         recording: Mutex::default(),
         skills,
         reminders: reminders.clone(),
+        facts,
         decider: RwLock::new(decider),
         traces,
+        google: RwLock::new(google),
+        style,
+        google_signin: Mutex::default(),
+        nudges: nudges.clone(),
+        data_dir: data_dir.clone(),
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
@@ -285,12 +398,16 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     overlay::spawn_hit_test(handle.clone(), overlay);
     bridge::spawn_reminder_clock(host.clone(), reminders);
     ambient::spawn(handle.clone(), host.clone());
+    watch::spawn(handle.clone(), host.clone(), nudges);
     bridge::spawn_window_sampler(host);
     build_tray(&handle)?;
     {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
         if let Err(e) = handle.global_shortcut().register(shortcuts::talk_key()) {
             log::warn!("could not register Ctrl+Alt+Space: {e}");
+        }
+        if let Err(e) = handle.global_shortcut().register(shortcuts::selection_key()) {
+            log::warn!("could not register Ctrl+Alt+A: {e}");
         }
     }
     Ok(())
@@ -313,6 +430,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(shortcuts::handle).build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             setup(app).map_err(|e| {
                 eprintln!("Waddle failed to start: {e:#}");
@@ -338,6 +456,21 @@ pub fn run() {
             commands::clear_memory,
             commands::skills_list,
             commands::skill_forget,
+            commands::facts_list,
+            commands::fact_add,
+            commands::fact_forget,
+            commands::open_answer,
+            commands::undo_send,
+            commands::nudge_action,
+            commands::browser_status,
+            commands::browser_setup,
+            commands::google_status,
+            commands::google_connect,
+            commands::google_cancel,
+            commands::google_disconnect,
+            commands::style_get,
+            commands::style_set,
+            commands::drop_selection,
             commands::rate_task,
             commands::traces_summary,
             commands::export_traces,

@@ -14,6 +14,18 @@ interface Settings {
   workspace_dir: string | null;
   wander: boolean;
   record_traces: boolean;
+  no_training: boolean;
+  google_client_id: string;
+  working_hours: [number, number];
+  send_undo_secs: number;
+  meeting_nudges: boolean;
+  mail_nudges: boolean;
+  morning_brief: boolean;
+  muted_senders: string[];
+  autostart: boolean;
+  read_user_folders: boolean;
+  read_folders: string[];
+  write_folders: string[];
   self_source_dir: string | null;
   max_delegation_depth: number;
   character: { id: string; color: string };
@@ -101,11 +113,30 @@ function fill(view: SettingsView): void {
   $("color").value = s.character.color;
   $("wander").checked = s.wander;
   $("record_traces").checked = s.record_traces;
+  $("no_training").checked = s.no_training;
+  $("google_client_id").value = s.google_client_id;
+  $("work_start").value = String(s.working_hours[0]);
+  $("work_end").value = String(s.working_hours[1]);
+  $("send_undo_secs").value = String(s.send_undo_secs);
+  $("meeting_nudges").checked = s.meeting_nudges;
+  $("mail_nudges").checked = s.mail_nudges;
+  $("morning_brief").checked = s.morning_brief;
+  $<HTMLTextAreaElement>("muted_senders").value = s.muted_senders.join("\n");
+  $("autostart").checked = s.autostart;
+  $("read_user_folders").checked = s.read_user_folders;
+  $<HTMLTextAreaElement>("read_folders").value = s.read_folders.join("\n");
+  $<HTMLTextAreaElement>("write_folders").value = s.write_folders.join("\n");
   $("mode").textContent = view.demo
     ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
     : `Using ${s.model}. Workspace: ${view.workspace}`;
   syncVisibility();
 }
+
+const lines = (id: string) =>
+  $<HTMLTextAreaElement>(id)
+    .value.split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 function collect(): Settings {
   const num = (id: string, fallback: number) => {
@@ -127,6 +158,21 @@ function collect(): Settings {
     workspace_dir: $("workspace_dir").value.trim() || null,
     wander: $("wander").checked,
     record_traces: $("record_traces").checked,
+    no_training: $("no_training").checked,
+    google_client_id: $("google_client_id").value.trim(),
+    working_hours: [num("work_start", 9), num("work_end", 17)],
+    send_undo_secs: num("send_undo_secs", 10),
+    meeting_nudges: $("meeting_nudges").checked,
+    mail_nudges: $("mail_nudges").checked,
+    morning_brief: $("morning_brief").checked,
+    muted_senders: $<HTMLTextAreaElement>("muted_senders")
+      .value.split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean),
+    autostart: $("autostart").checked,
+    read_user_folders: $("read_user_folders").checked,
+    read_folders: lines("read_folders"),
+    write_folders: lines("write_folders"),
     self_source_dir: $("self_source_dir").value.trim() || null,
     max_delegation_depth: num("max_delegation_depth", 2),
     character: { ...current.character, color: $("color").value },
@@ -171,6 +217,151 @@ async function loadSkills(): Promise<void> {
       return li;
     }),
   );
+}
+
+async function loadFacts(): Promise<void> {
+  const facts = await invoke<{ id: string; text: string }[]>("facts_list");
+  const list = $("facts");
+  if (!facts.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "Nothing yet.";
+    list.replaceChildren(li);
+    return;
+  }
+  list.replaceChildren(
+    ...facts.map((f) => {
+      const li = document.createElement("li");
+      const text = document.createElement("span");
+      text.textContent = f.text;
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "link";
+      forget.textContent = "Forget";
+      forget.onclick = async () => {
+        await invoke("fact_forget", { id: f.id });
+        void loadFacts();
+      };
+      li.append(text, forget);
+      return li;
+    }),
+  );
+}
+
+async function addFact(): Promise<void> {
+  const input = $("fact-text");
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await invoke("fact_add", { text });
+    input.value = "";
+  } catch (err) {
+    $("status").textContent = String(err);
+  }
+  void loadFacts();
+}
+
+$("fact-add").addEventListener("click", () => void addFact());
+$("fact-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void addFact();
+  }
+});
+
+interface GoogleStatus {
+  client_id: string;
+  has_secret: boolean;
+  connected: boolean;
+  email: string | null;
+  error: string | null;
+}
+
+function showGoogle(g: GoogleStatus): void {
+  $("google-connect").classList.toggle("hidden", g.connected);
+  $("google-disconnect").classList.toggle("hidden", !g.connected);
+  $("google_client_secret").placeholder = g.has_secret ? "saved (leave blank to keep)" : "from the same page as the client ID";
+  $("google-status").textContent = g.connected
+    ? g.email
+      ? `Connected as ${g.email}.`
+      : `Connected, but Google didn't answer: ${g.error ?? "unknown error"}`
+    : "Not connected. Without it, Waddle uses Gmail and Calendar in Chrome on screen.";
+}
+
+async function loadGoogle(): Promise<void> {
+  try {
+    showGoogle(await invoke<GoogleStatus>("google_status"));
+  } catch (err) {
+    $("google-status").textContent = String(err);
+  }
+}
+
+$("google-connect").addEventListener("click", async () => {
+  const button = $<HTMLButtonElement>("google-connect");
+  if (button.dataset.waiting) {
+    await invoke("google_cancel");
+    return;
+  }
+  button.dataset.waiting = "1";
+  button.textContent = "Cancel";
+  $("google-status").textContent = "Finish signing in in your browser…";
+  try {
+    const secret = $("google_client_secret").value.trim();
+    showGoogle(await invoke<GoogleStatus>("google_connect", { clientId: $("google_client_id").value.trim(), clientSecret: secret || null }));
+    $("google_client_secret").value = "";
+  } catch (err) {
+    $("google-status").textContent = `Couldn't connect: ${err}`;
+  } finally {
+    delete button.dataset.waiting;
+    button.textContent = "Connect";
+  }
+});
+
+$("google-disconnect").addEventListener("click", async () => {
+  showGoogle(await invoke<GoogleStatus>("google_disconnect"));
+});
+
+$("style-save").addEventListener("click", async () => {
+  await invoke("style_set", { text: $<HTMLTextAreaElement>("style-note").value });
+  $("style-save").textContent = "Saved";
+  setTimeout(() => ($("style-save").textContent = "Save note"), 1500);
+});
+
+interface BrowserStatus {
+  connected: boolean;
+  version: string | null;
+  folder: string | null;
+}
+
+function showBrowser(b: BrowserStatus): void {
+  $("browser-status").textContent = b.connected
+    ? `Connected (extension ${b.version ?? "?"}).`
+    : b.folder
+      ? "Not connected. Is Chrome open with the extension loaded?"
+      : "Not set up yet.";
+  if (b.folder) $("browser-folder").textContent = b.folder;
+  $("browser-steps").classList.toggle("hidden", b.connected || !b.folder);
+}
+
+async function loadBrowser(): Promise<void> {
+  try {
+    showBrowser(await invoke<BrowserStatus>("browser_status"));
+  } catch (err) {
+    $("browser-status").textContent = String(err);
+  }
+}
+
+$("browser-setup").addEventListener("click", async () => {
+  try {
+    showBrowser(await invoke<BrowserStatus>("browser_setup"));
+  } catch (err) {
+    $("browser-status").textContent = `Couldn't set up: ${err}`;
+  }
+});
+
+async function loadStyle(): Promise<void> {
+  const note = $<HTMLTextAreaElement>("style-note");
+  if (document.activeElement !== note) note.value = await invoke<string>("style_get");
 }
 
 async function loadAudit(): Promise<void> {
@@ -296,7 +487,15 @@ void invoke<SettingsView>("get_settings").then(fill);
 void loadTraces();
 void loadAudit();
 void loadSkills();
+void loadFacts();
+void loadGoogle();
+void loadStyle();
+void loadBrowser();
 setInterval(() => {
+  void loadBrowser();
+  void loadStyle();
   void loadAudit();
   void loadSkills();
+  // Don't redraw the list under the user while they type a new fact.
+  if (document.activeElement !== $("fact-text")) void loadFacts();
 }, 5000);

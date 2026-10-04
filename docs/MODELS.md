@@ -8,6 +8,10 @@ Short version:
 - **Fallback: `qwen/qwen3-vl-8b-instruct`**, the previous default, which is still solid. Set it as the model in Settings to switch back.
 - **Before each task on OpenRouter, TypeSafe's Jev decision model** checks whether the screen is needed at all, and skips the screenshot when it isn't (see below).
 - **The harness mattered far more than the model.** The same model scored 27% before.
+- **v0.2 picks (October 4, 2026), all confirmed by testing:**
+  - **Planner:** `openai/gpt-6-luna`. 12/12 on the new assistant bench in both passes, at about $0.0005 a task. That's the cheapest of the models that passed everything.
+  - **Chat and research:** `google/gemini-2.5-flash-lite`. Replies take 1–1.6 s, and a cited research summary takes 4.5 s.
+  - **Decisions** (routing, the screen check, mail importance): Jev 1.13, at about $0.00002 each.
 - Two moves are worth making next:
   - try the newer, cheaper Qwen Flash models (your OpenRouter guardrail blocks them for now)
   - fine-tune a 4B model for the local, free brain ([TRAINING.md](TRAINING.md))
@@ -101,6 +105,8 @@ The suite now has 21 tasks: the 15 above plus 6 assistant tasks (point at someth
 | qwen/qwen3.8-27b | 18/42* | — | 15 s | $0.0024 | First clicks look right; then re-checks the static screen and re-clicks |
 | google/gemini-3.1-flash-lite | 6/42* | — | 8 s | $0.0038 | First clicks right (Night light, Delete, Compose), then re-clicks to the step limit; pricier than Qwen |
 
+**Quiet mode (0.1.9 default voice):** the same 21 tasks × 2 with openai/gpt-6-luna, now that the model acts without narrating and speaks only to finish, answer or ask: **25/42 strict, 42/42 hit, 7.1 s and $0.00064 per task** (3.6 steps on average). Faster and cheaper than the narrating run above, with fewer wasted re-checks.
+
 \* First run, before the hit score and the concurrency cap. Rate limits and re-checks count as failures, so these numbers are a floor.
 † Includes the wasted re-check steps on the static screen; on real pages, where the screen changes, Luna needs fewer steps (below).
 
@@ -115,6 +121,42 @@ Real Google Chrome, the real app, the real model, one run each:
 |---|---|---|---|
 | openai/gpt-6-luna | 3/3 | 24 s | $0.0010 |
 | qwen/qwen3-vl-8b-instruct | 2/3 (answered without acting on Hacker News) | 16 s | $0.0021 |
+
+## v0.2 bake-off: assistant tasks (October 4, 2026)
+
+`crates/waddle-core/tests/assist.rs` runs 12 text-only jobs against a fake Google, a temporary folder and a fake Chrome extension, using the app's real prompt, tools and tiers. Each check looks at what happened, not just the reply. For example:
+- **reply:** an email went to Ana, in her thread, and says Thursday
+- **book:** an event with Sam at 14:00 that has a Meet link
+- **signup:** typed into field e1 and clicked e3
+- **delete_guard:** asked before deleting, and kept the file when the user said no
+
+Running out of steps or hitting a provider error counts as a failure.
+
+The 12 jobs:
+
+| Area | Jobs |
+|---|---|
+| Calendar | next meeting, booking with a contact and a Meet link |
+| Mail | important unread mail, threaded reply, archiving |
+| Files | rent from a PDF, a figure from an XLSX, making a spreadsheet, a refused delete |
+| Chrome | filling a form, a web search |
+| Memory | remembering a fact |
+
+| Model | Passed | Time per task | Cost per task | Notes |
+|---|---|---|---|---|
+| **openai/gpt-6-luna** | **36/36** (3 passes) | 5.7 s (when not rate-limited) | **$0.0005** | **Keep as the default.** Short, correct answers. |
+| openai/gpt-6-luna-pro | 12/12 | 10–14 s (partly rate-limit waits) | $0.0015 | As accurate, 3× the cost and slower. Lists every unread email when asked for important ones. |
+| xiaomi/mimo-v2.6-flash | 12/12 | 6.1 s | $0.0019 | Accurate and quick, 4× the cost. Writes Markdown, which the bubble strips. **The best alternative.** |
+| qwen/qwen3-vl-8b-instruct | 9/12 | 3.8 s | $0.0019 | Saved a draft instead of sending, missed the urgent email, and ran out of steps on the form. |
+
+New accounts are limited to 20 requests a minute per model, so the bench retries after a 429. Times above leave those waits out. The whole bake-off, with reruns, cost about $0.2.
+
+**Chat and research models (one pass each):**
+- `google/gemini-2.5-flash-lite`:
+  - small talk and a knowledge question: 1.0–1.6 s
+  - a current-facts question with web search: 3.2 s
+  - a research summary: first words in 2.0 s, done in 4.5 s
+- `inception/mercury-2.5`: 4.9 s for a "thanks", and it handed small talk off to a task. Not used.
 
 ## Jev and Laya (decision models)
 
@@ -131,6 +173,7 @@ These are "System One" models: one quick pass that returns a yes/no probability,
 - Jev scored 28/32 on sample requests, and every miss was on the safe side (it looked when it didn't need to).
 - Below 0.3 the opening screenshot is skipped. That would have skipped 8 of the 12 tasks that didn't need the screen (reminders, files, maths, writing), with no wrong skips. Every task that needed the screen scored 0.5 or more.
 - Any error, or an answer slower than 2 s, means "look".
+- With Google connected, the question says mail, calendar and contacts are reachable without the screen, and the skip bar rises to 0.6. Live: "what's my next meeting?" 0.23, "any important unread email?" 0.51, "reply to Ana…" 0.48, "find 45 minutes with Sam…" 0.33, against "summarise this email" 0.83 and "click the blue button" 0.99. That took "what's my next meeting?" from 5.2 s to 3.3 s end to end.
 
 **Also in use: ambient behaviour and the chat lane.**
 
@@ -140,7 +183,13 @@ These are "System One" models: one quick pass that returns a yes/no probability,
   - nap after a minute with no mouse movement
 
   Each decision took 0.26–0.6 s, and a busy day costs a few cents at most.
-- **Chat lane:** messages Jev rates at least 0.8 "just conversation" get an instant answer from the fast model. On 22 sample messages it scored 22/22: chat came out at 0.98–1.00 and tasks at 0.17 or lower. Median latency was 0.32 s.
+- **Router (0.1.9):** one Jev call per message asks two questions at once: *chat, research or task?* and *does it need current facts from the web?*
+  - Chat at 0.8 or more gets an instant answer from the fast model; research at 0.7 or more gets a cited web answer; anything else is a task. A chat that scores 0.6 or more on the web question gets a web search (OpenRouter's `web` plugin, about $0.007).
+  - On the 45 labelled messages in `crates/waddle-core/tests/fixtures/router.json` it routed 44/45 correctly and got the web question right on 42/45, in one call (median 0.4 s, slowest 1.0 s, about $0.00002).
+  - Tasks start before the answer comes back: the planner looks at the screen while Jev decides and is dropped silently if the message turns out to be chat or research. The first model call waits for the decision, so nothing on screen happens until it's a task.
+  - Measured costs: a chat reply about $0.00002, a web chat about $0.007, a research answer about $0.008 (5 sources).
+
+- **Mail importance (0.1.11):** Jev scores each new email from only the sender, subject and first line ("deserves interrupting the user now"). On the 30 labelled emails in `crates/waddle-core/tests/fixtures/importance.json`, all 18 that can wait scored 0.10 or less, and the 12 important ones scored 0.19–0.90. The nudge bar is therefore 0.4, not the planned 0.7: 29/30 right, no false alarms. The miss was "Call me when you can" from a parent (0.19). About $0.000015 per email.
 
 **Jev Router (`typesafe/jev-router`)** is a different product: it picks a chat model for each request. It isn't tested here, because its per-request model choice makes cost unpredictable.
 

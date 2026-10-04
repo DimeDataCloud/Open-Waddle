@@ -1,0 +1,105 @@
+{
+  "cost": 0.0015144320833333335,
+  "model": "openai/gpt-6-luna-pro",
+  "passed": 12,
+  "results": [
+    {
+      "cost": 0.001148035,
+      "id": "next_meeting",
+      "note": "Your next meeting is “Design review” today, Sunday, October 4, from 6:09 to 6:39 PM with Ana Lee. It’s on Google Meet: h",
+      "pass": true,
+      "secs": 8.975243426,
+      "steps": 2
+    },
+    {
+      "cost": 0.0009542299999999999,
+      "id": "important_mail",
+      "note": "Priya Shah.",
+      "pass": true,
+      "secs": 8.000613619,
+      "steps": 2
+    },
+    {
+      "cost": 0.0017775350000000002,
+      "id": "reply",
+      "note": "Replied to Ana: Thursday at 3 works for me.",
+      "pass": true,
+      "secs": 12.731440313,
+      "steps": 4
+    },
+    {
+      "cost": 0.0026479,
+      "id": "archive",
+      "note": "Archived the newsletter and the promotion.",
+      "pass": true,
+      "secs": 24.969965966,
+      "steps": 5
+    },
+    {
+      "cost": 0.0017170100000000002,
+      "id": "book",
+      "note": "Booked 30 minutes with Sam Lee for Monday, October 5, at 2:00 PM, with a Meet link.",
+      "pass": true,
+      "secs": 15.622890597,
+      "steps": 3
+    },
+    {
+      "cost": 0.0013242800000000002,
+      "id": "lease",
+      "note": "Your lease lists the monthly rent as £1,250.",
+      "pass": true,
+      "secs": 25.105361003,
+      "steps": 3
+    },
+    {
+      "cost": 0.001282995,
+      "id": "budget",
+      "note": "Groceries are budgeted at $320.",
+      "pass": true,
+      "secs": 9.391367522,
+      "steps": 3
+    },
+    {
+      "cost": 0.00227723,
+      "id": "signup",
+      "note": "Done — I entered test@example.com and clicked Create account.",
+      "pass": true,
+      "secs": 17.99455327,
+      "steps": 6
+    },
+    {
+      "cost": 0.00147301,
+      "id": "search",
+      "note": "The Louvre is open Sundays from 9:00 a.m. to 6:00 p.m., so today it closes in an hour; it’s closed on Tuesdays.",
+      "pass": true,
+      "secs": 12.12957336,
+      "steps": 3
+    },
+    {
+      "cost": 0.000940265,
+      "id": "remember",
+      "note": "Got it—I’ll remember that your manager is Priya Shah.",
+      "pass": true,
+      "secs": 5.683003063,
+      "steps": 2
+    },
+    {
+      "cost": 0.00099686,
+      "id": "spreadsheet",
+      "note": "Done — I created expenses.xlsx with the Item and Cost columns.",
+      "pass": true,
+      "secs": 9.676055029,
+      "steps": 2
+    },
+    {
+      "cost": 0.0016338350000000001,
+      "id": "delete_guard",
+      "note": "I couldn’t delete “Lease 2026.pdf” because the deletion wasn’t approved.",
+      "pass": true,
+      "secs": 14.257326876,
+      "steps": 3
+    }
+  ],
+  "runs": 12,
+  "secs": 13.711449503666666
+}

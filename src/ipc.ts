@@ -19,7 +19,8 @@ export type AgentEvent =
   | { type: "approval_resolved"; id: string; decision: Decision }
   | { type: "task_finished"; task_id: string; outcome: Outcome; message: string }
   | { type: "notice"; text: string }
-  | { type: "trace_saved"; task_id: string };
+  | { type: "trace_saved"; task_id: string }
+  | { type: "offer"; id: string; label: string };
 
 export interface ApprovalRequest {
   id: string;
@@ -30,6 +31,32 @@ export interface ApprovalRequest {
   reason: string;
   detail: string;
   countdown_ms: number | null;
+  /** An email about to be sent: the send card shows it in full and lets the user edit it. */
+  draft?: MailDraft;
+}
+
+export interface MailDraft {
+  to: string;
+  cc: string;
+  subject: string;
+  body: string;
+  reply_to?: string;
+}
+
+/** A tap on the shoulder: a meeting soon, important mail, or the morning brief offer. */
+export interface NudgePayload {
+  id: string;
+  kind: "meeting" | "mail" | "brief";
+  stage: "small" | "full";
+  text: string;
+  actions: { id: string; label: string }[];
+}
+
+/** Text grabbed with Ctrl+Alt+A, as the chat box shows it. */
+export interface SelectionPreview {
+  chars: number;
+  preview: string;
+  app: string;
 }
 
 export interface Platform {
@@ -58,10 +85,14 @@ export interface HitRect {
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
-  sendMessage: (text: string) => invoke<void>("send_message", { text }),
+  sendMessage: (text: string, selection = false) => invoke<void>("send_message", { text, selection }),
+  dropSelection: () => invoke<void>("drop_selection"),
+  openAnswer: (id: string) => invoke<string>("open_answer", { id }),
   warmUp: () => invoke<void>("warm_up"),
   halt: () => invoke<boolean>("halt"),
-  answerApproval: (id: string, approved: boolean) => invoke<void>("answer_approval", { id, approved }),
+  answerApproval: (id: string, approved: boolean, draft: MailDraft | null = null) => invoke<void>("answer_approval", { id, approved, draft }),
+  undoSend: (id: string) => invoke<void>("undo_send", { id }),
+  nudgeAction: (id: string, action: string) => invoke<string | null>("nudge_action", { id, action }),
   duckArrived: (id: string) => invoke<void>("duck_arrived", { id }),
   setHitRects: (rects: HitRect[]) => invoke<void>("set_hit_rects", { rects }),
   setCapture: (on: boolean) => invoke<void>("set_capture", { on }),
@@ -82,8 +113,12 @@ export interface Events {
   reminder: { text: string; late: boolean };
   "duck:intent": { intent: Intent; window: Platform | null; cursor: { x: number; y: number } | null };
   settings: { color: string; wander: boolean; demo: boolean };
-  "chat:open": { voice: boolean };
+  "chat:open": { voice: boolean; selection?: SelectionPreview | null };
   "wander:toggle": null;
+  undo: { id: string; secs: number };
+  nudge: NudgePayload;
+  "nudge:chime": null;
+  "undo:done": { id: string; undone: boolean };
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {

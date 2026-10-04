@@ -4,6 +4,8 @@
 //! Coordinates: the host works in logical screen pixels. The model may use
 //! pixels or a 0..1000 grid (see `CoordMode`); conversion happens only here.
 
+pub mod browser;
+pub mod docs;
 pub mod fs;
 pub mod shell;
 
@@ -27,6 +29,14 @@ pub struct Capabilities {
     pub self_improve: bool,
     /// Reminders can be set (the app pops them up when due).
     pub reminders: bool,
+    /// Long-term facts about the user (`remember` / `forget`).
+    pub memory: bool,
+    /// Text the user selected came with the message and can be replaced.
+    pub selection: bool,
+    /// Gmail, Calendar and Contacts are connected.
+    pub google: bool,
+    /// Chrome is reachable through Waddle's extension.
+    pub browser: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,6 +109,8 @@ pub enum GuiAction {
     PointAt { x: f64, y: f64, label: String },
     ReadClipboard,
     WriteClipboard { text: String },
+    /// Paste over the text the user selected before asking (focus goes back to its window first).
+    ReplaceSelection { text: String },
 }
 
 impl GuiAction {
@@ -177,7 +189,7 @@ impl ToolOutcome {
     }
 }
 
-fn spec(name: &str, description: &str, properties: Value, required: &[&str]) -> ToolSpec {
+pub(crate) fn spec(name: &str, description: &str, properties: Value, required: &[&str]) -> ToolSpec {
     let mut parameters = json!({ "type": "object", "properties": properties });
     if !required.is_empty() {
         parameters["required"] = json!(required);
@@ -261,6 +273,29 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             &["text"],
         ));
     }
+    if caps.selection {
+        v.push(spec(
+            "replace_selection",
+            "Replace the text the user selected with new text (e.g. a rewrite or translation). Use only when they ask you to change it in place.",
+            json!({ "text": { "type": "string" } }),
+            &["text"],
+        ));
+    }
+    if caps.google {
+        v.extend(crate::google::tools::specs());
+    }
+    if caps.browser {
+        v.extend(browser::specs());
+    }
+    if caps.memory {
+        v.push(spec(
+            "remember",
+            "Save a short, lasting fact about the user for future conversations, e.g. \"Their sister is Ana\". Under 200 characters.",
+            json!({ "fact": { "type": "string" } }),
+            &["fact"],
+        ));
+        v.push(spec("forget", "Delete a saved fact by its id.", json!({ "id": { "type": "string" } }), &["id"]));
+    }
     if caps.reminders {
         v.push(spec(
             "reminder",
@@ -299,6 +334,38 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
         &["path", "content"],
     ));
     v.push(spec("list_dir", "List a folder (default: the workspace).", json!({ "path": path }), &[]));
+    let any_path = json!({ "type": "string", "description": "Absolute, ~/..., or relative to your workspace" });
+    v.push(spec(
+        "find_files",
+        "Find the user's files by name (then by text inside), newest first. Searches every folder you may read unless root is given.",
+        json!({
+            "query": { "type": "string", "description": "Words in the name or text" },
+            "root": any_path,
+            "ext": { "type": "string", "description": "Only this extension, e.g. pdf" },
+            "modified_within_days": { "type": "integer" }
+        }),
+        &["query"],
+    ));
+    v.push(spec(
+        "read_document",
+        "Read a PDF, Word, PowerPoint, Excel, CSV or text file as text. pages limits PDF pages or slides, e.g. \"1-3\".",
+        json!({ "path": any_path, "pages": { "type": "string" } }),
+        &["path"],
+    ));
+    v.push(spec(
+        "create_document",
+        "Make a new document. docx: lines become paragraphs (# for headings, - for bullets). xlsx and csv: give the rows as CSV. md: Markdown.",
+        json!({ "path": any_path, "kind": { "type": "string", "enum": ["docx", "xlsx", "csv", "md"] }, "content": { "type": "string" } }),
+        &["path", "kind", "content"],
+    ));
+    v.push(spec(
+        "move_file",
+        "Move a file or folder to another folder or path (never overwrites).",
+        json!({ "from": any_path, "to": any_path }),
+        &["from", "to"],
+    ));
+    v.push(spec("rename_file", "Rename a file in its folder.", json!({ "path": any_path, "new_name": { "type": "string" } }), &["path", "new_name"]));
+    v.push(spec("delete_file", "Send a file or folder to the Recycle Bin (the user has to approve).", json!({ "path": any_path }), &["path"]));
     if caps.delegation {
         v.push(spec(
             "delegate",
@@ -344,7 +411,13 @@ pub fn is_gui_tool(name: &str) -> bool {
             | "point_at"
             | "read_clipboard"
             | "copy_to_clipboard"
+            | "replace_selection"
     )
+}
+
+/// Tools that only read and never use the screen: several in one turn run at once.
+pub fn is_parallel_read(name: &str) -> bool {
+    matches!(name, "read_file" | "list_dir" | "browser_read" | "find_files" | "read_document") || crate::google::tools::is_parallel_read(name)
 }
 
 fn num(args: &Value, k: &str) -> Option<f64> {
@@ -408,6 +481,7 @@ pub fn parse_gui_action(call: &ToolCall, coords: &Coords) -> Result<GuiAction, S
         }
         "read_clipboard" => GuiAction::ReadClipboard,
         "copy_to_clipboard" => GuiAction::WriteClipboard { text: text(a, "text").ok_or("`text` is required")? },
+        "replace_selection" => GuiAction::ReplaceSelection { text: text(a, "text").ok_or("`text` is required")? },
         other => return Err(format!("`{other}` is not a GUI tool")),
     })
 }
@@ -486,6 +560,9 @@ pub fn summarize(call: &ToolCall) -> String {
         "point_at" => if s("label").is_empty() { "It's here".into() } else { short(s("label")) },
         "read_clipboard" => "Read what you copied".into(),
         "copy_to_clipboard" => format!("Copy \"{}\" to the clipboard", short(s("text"))),
+        "replace_selection" => format!("Replace your selection with \"{}\"", short(s("text"))),
+        "remember" => format!("Remember: {}", short(s("fact"))),
+        "forget" => "Forget a fact".into(),
         "reminder" => match s("action").as_str() {
             "list" => "Check your reminders".into(),
             "cancel" => "Cancel a reminder".into(),
@@ -499,7 +576,7 @@ pub fn summarize(call: &ToolCall) -> String {
         "forget_skill" => format!("Forget skill \"{}\"", s("name")),
         "update_settings" => format!("Change my settings: {}", a.get("changes").map(|c| c.to_string()).unwrap_or_default()),
         "list_dir" => format!("List {}", if s("path").is_empty() { "the workspace".into() } else { s("path") }),
-        other => format!("Use {other}"),
+        other => crate::google::tools::summarize(call).or_else(|| browser::summarize(call)).unwrap_or_else(|| format!("Use {other}")),
     }
 }
 
@@ -574,8 +651,13 @@ mod tests {
         let names = |caps| specs(caps, &c).into_iter().map(|s| s.name).collect::<Vec<_>>();
         let headless = names(Capabilities::default());
         assert!(headless.contains(&"run_command".to_string()) && !headless.contains(&"click".to_string()));
-        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true });
+        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true, google: true, browser: true });
+        assert!(full.contains(&"browser_click".to_string()) && !headless.contains(&"browser_read".to_string()));
+        assert!(full.contains(&"mail_send".to_string()) && full.contains(&"calendar_free".to_string()));
+        assert!(!headless.contains(&"mail_search".to_string()), "Google tools only when connected");
         assert!(full.contains(&"reminder".to_string()) && full.contains(&"point_at".to_string()));
+        assert!(full.contains(&"remember".to_string()) && full.contains(&"replace_selection".to_string()));
+        assert!(!names(Capabilities { gui: true, ..Default::default() }).contains(&"replace_selection".to_string()), "only with a selection");
         assert!(full.contains(&"delegate".to_string()) && full.contains(&"save_skill".to_string()));
         assert!(full.contains(&"find_elements".to_string()) && full.contains(&"click".to_string()));
         let no_a11y = names(Capabilities { gui: true, ..Default::default() });

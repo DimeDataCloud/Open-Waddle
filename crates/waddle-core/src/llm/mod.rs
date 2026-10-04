@@ -87,6 +87,8 @@ pub struct ChatRequest<'a> {
     pub tools: &'a [ToolSpec],
     pub temperature: f32,
     pub max_tokens: u32,
+    /// Search the web first and give the model this many results (OpenRouter's web plugin).
+    pub web: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -94,6 +96,14 @@ pub struct ChatResponse {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
     pub usage: Usage,
+    /// Pages a web search found, as the server cited them.
+    pub citations: Vec<Citation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Citation {
+    pub url: String,
+    pub title: String,
 }
 
 /// What a call (or a whole task) used, as reported by the server.
@@ -156,9 +166,11 @@ pub trait Provider: Send + Sync {
 /// Builds the provider described by `settings`.
 pub fn build_provider(settings: &Settings, api_key: Option<String>) -> Arc<dyn Provider> {
     match settings.provider {
-        ProviderKind::OpenaiCompat => {
-            Arc::new(openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key).with_reasoning(settings.reasoning.effort()))
-        }
+        ProviderKind::OpenaiCompat => Arc::new(
+            openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key)
+                .with_reasoning(settings.reasoning.effort())
+                .with_no_training(settings.no_training && settings.is_openrouter()),
+        ),
         ProviderKind::Ollama => Arc::new(ollama::Ollama::new(settings.base_url.clone(), settings.ollama.clone())),
         ProviderKind::Mock => Arc::new(mock::MockProvider::demo()),
     }

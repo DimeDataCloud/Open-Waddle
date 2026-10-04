@@ -51,17 +51,40 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "scroll" => assess(Tier::NonDestructive, "scrolls"),
         "read_clipboard" => assess(Tier::NonDestructive, "reads the clipboard"),
         "reminder" => assess(Tier::NonDestructive, "manages reminders"),
+        "remember" | "forget" => assess(Tier::NonDestructive, "updates the facts Waddle keeps about you (listed in Settings)"),
+        "replace_selection" => assess(Tier::ScopedMutation, "replaces the text you selected"),
+        "mail_search" | "mail_read" | "contacts_find" | "calendar_events" | "calendar_free" => assess(Tier::NonDestructive, "reads your Google account"),
+        "mail_style" => assess(Tier::NonDestructive, "reads some of your sent mail to learn your writing style"),
+        "mail_draft" => assess(Tier::ScopedMutation, "saves a draft in Gmail (nothing is sent)"),
+        "mail_modify" => assess(Tier::ScopedMutation, "archives, labels or marks an email"),
+        "calendar_create" => assess(Tier::ScopedMutation, "adds an event to your calendar (attendees get an invitation)"),
+        "calendar_update" => assess(Tier::ScopedMutation, "changes a calendar event (attendees are told)"),
+        "calendar_respond" => assess(Tier::ScopedMutation, "answers an invitation"),
+        "browser_read" => assess(Tier::Passive, "reads a web page"),
+        "browser_tabs" if arg("action") == "close" => assess(Tier::ScopedMutation, "closes a Chrome tab"),
+        "browser_tabs" | "browser_navigate" => assess(Tier::NonDestructive, "moves around in Chrome"),
+        "browser_click" => assess(Tier::ScopedMutation, "clicks on a web page"),
+        "browser_type" => assess(Tier::ScopedMutation, "types into a web page"),
+        "mail_send" => assess(Tier::Destructive, "sends an email from your account"),
+        "mail_trash" => assess(Tier::Destructive, "moves an email to the bin"),
+        "calendar_delete" => assess(Tier::Destructive, "deletes a calendar event (attendees are told)"),
         "copy_to_clipboard" => assess(Tier::ScopedMutation, "replaces what's on the clipboard"),
         "drag" => assess(Tier::ScopedMutation, "drags in another application"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
         "read_file" | "list_dir" => assess(Tier::NonDestructive, "reads the workspace"),
+        "find_files" | "read_document" => assess(Tier::NonDestructive, "reads your files"),
+        "drive_search" | "drive_read" => assess(Tier::NonDestructive, "reads your Google Drive"),
+        "move_file" | "rename_file" => assess(Tier::ScopedMutation, "moves or renames a file in a folder you allowed"),
+        "create_document" if ctx.file_exists(arg("path")) => assess(Tier::ScopedMutation, "replaces a file (the old copy goes to the Recycle Bin)"),
+        "create_document" => assess(Tier::ScopedMutation, "creates a new document"),
+        "delete_file" => assess(Tier::Destructive, "sends a file to the Recycle Bin"),
         "save_skill" | "forget_skill" => assess(Tier::Destructive, "changes Waddle's long-term memory (loaded into every task)"),
         "update_settings" => assess(Tier::Destructive, "changes Waddle's own settings"),
         "delegate" => assess(Tier::NonDestructive, "starts a sub-task; each of its actions is gated on its own"),
         "write_file" if is_self_path(arg("path")) => assess(Tier::Destructive, "edits Waddle's own source code"),
         "write_file" => {
             if ctx.file_exists(arg("path")) {
-                assess(Tier::Destructive, "overwrites an existing file")
+                assess(Tier::ScopedMutation, "overwrites a file (the old copy goes to the Recycle Bin)")
             } else {
                 assess(Tier::ScopedMutation, "creates a new file in the workspace")
             }
@@ -184,12 +207,43 @@ mod tests {
         assert_eq!(tier_of("reminder", json!({"action":"add"}), false), Tier::NonDestructive);
         assert_eq!(tier_of("drag", json!({}), false), Tier::ScopedMutation);
         assert_eq!(tier_of("copy_to_clipboard", json!({"text":"x"}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("remember", json!({"fact":"x"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("forget", json!({"id":"x"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("replace_selection", json!({"text":"x"}), false), Tier::ScopedMutation);
+    }
+
+    #[test]
+    fn browser_tiers() {
+        assert_eq!(tier_of("browser_read", json!({}), false), Tier::Passive);
+        assert_eq!(tier_of("browser_tabs", json!({"action":"list"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("browser_tabs", json!({"action":"close"}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("browser_navigate", json!({"url":"x"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("browser_click", json!({}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("browser_type", json!({}), false), Tier::ScopedMutation);
+    }
+
+    #[test]
+    fn only_sends_and_deletes_need_a_click_in_google() {
+        for read in ["mail_search", "mail_read", "contacts_find", "calendar_events", "calendar_free", "mail_style"] {
+            assert_eq!(tier_of(read, json!({}), false), Tier::NonDestructive, "{read}");
+        }
+        for notice in ["mail_draft", "mail_modify", "calendar_create", "calendar_update", "calendar_respond"] {
+            assert_eq!(tier_of(notice, json!({}), false), Tier::ScopedMutation, "{notice}");
+        }
+        for click in ["mail_send", "mail_trash", "calendar_delete"] {
+            assert_eq!(tier_of(click, json!({}), false), Tier::Destructive, "{click}");
+        }
     }
 
     #[test]
     fn write_file_escalates_when_overwriting() {
         assert_eq!(tier_of("write_file", json!({"path":"new.txt"}), false), Tier::ScopedMutation);
-        assert_eq!(tier_of("write_file", json!({"path":"old.txt"}), true), Tier::Destructive);
+        assert_eq!(tier_of("write_file", json!({"path":"old.txt"}), true), Tier::ScopedMutation, "the old copy goes to the Recycle Bin");
+        assert_eq!(tier_of("write_file", json!({"path":"self/src/lib.rs"}), true), Tier::Destructive, "own code still needs a click");
+        assert_eq!(tier_of("delete_file", json!({"path":"x"}), true), Tier::Destructive);
+        assert_eq!(tier_of("move_file", json!({}), true), Tier::ScopedMutation);
+        assert_eq!(tier_of("find_files", json!({}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("drive_read", json!({}), false), Tier::NonDestructive);
     }
 
     #[test]
