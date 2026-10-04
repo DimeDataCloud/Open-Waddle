@@ -1,250 +1,193 @@
-# Waddle v0.2: assistant build-out
+# Waddle v0.3: the production pass
 
-## Context
+## Where things stand
 
-**Where things stand**
-- v0.1.8 is on main, including Jev ambient behaviour, the instant chat lane and quiet mode. Milestone 1 (0.1.9) adds routing, research, memory and the selection hotkey; milestone 2 (0.1.10) adds Gmail, Calendar and Contacts; milestone 3 (0.1.11) adds nudges, the morning brief and autostart; milestone 4 (0.1.12) adds the Chrome extension; milestone 5 (0.1.13) adds files, documents and Drive; 0.2.0 adds the assistant bench and model picks. **v0.2 is complete.**
-- The duck can drive the screen, point, scroll, drag, use the clipboard and set reminders. Jev makes the ~0.3 s decisions.
-- Nothing has run on the Surface yet.
+- **v0.2 is done and merged** (milestones 0.1.9 → 0.2.0: routing, research, memory, the selection hotkey, Gmail, Calendar, Contacts, nudges, the morning brief, the Chrome extension, files and Drive, and the assistant bench). The v0.2 plan is in this file's git history.
+- 169 Rust tests and the frontend and extension tests pass. Nothing has run on the Surface yet.
+- **This pass:** nine releases, 0.2.1 → 0.2.9, that revise, adapt, enhance, polish and define Waddle. You test **0.2.9** on the Surface; the fixes from that test become **0.3.0**.
 
-**What v0.2 is**
-- A thorough build-out of features and mechanics, ending in one full build the user installs and tests on the Surface. On-device testing waits until then.
-- Focus: **reliability and speed**, and **real assistant jobs** (email, calendar, browser, files) on **Google Workspace**, with the best model for each role confirmed by testing.
-- Budget: under $5 a month to run, and under $1 for model testing.
-- Deferred: the visual FX layer and spoken replies (text bubbles only).
+## What the assessment found
 
-## Decisions (from the grilling)
+**Corrections** (things that are wrong or fragile today)
+- **Two Waddles at once.** Autostart plus opening it by hand starts a second copy: two ducks, two Chrome links and double nudges. There's no single-instance guard.
+- **One hiccup fails a task.** A rate limit (new OpenRouter accounts get 20 requests a minute per model), a 502 or a dropped connection ends the task with "I couldn't reach my brain". A stream that stops sending hangs until the 5-minute task timeout.
+- **Long replies get cut off silently.** The planner's 1,024-token reply cap can cut a long email, document or file in the middle of a tool call. The broken arguments then reach the tool.
+- **Rotating, docking or changing the display breaks the overlay.** It's placed once at start-up. On a Surface, rotating to portrait, plugging in a monitor or changing the scale leaves the duck walking on the old screen size.
+- **Unsafe saves.** Settings, facts, reminders, nudges, the style note and skills are written in place. A crash or power cut mid-write can lose them, and an unreadable `settings.json` quietly resets everything to defaults. The nudge state is rewritten every 15 seconds even when nothing changed.
+- **An expired Google sign-in fails silently.** If the sign-in is revoked or expires, the watcher logs a warning every 90 seconds forever and Settings still says "Connected".
+- **Shortcut tiers depend on spelling.** `alt+f4` needs a click, but `f4+alt` or `control+w` only get the 2 s notice. Key names aren't put in a standard form first.
+- **Research files overwrite each other.** Asking the same question twice replaces the earlier `.md` file.
 
-| Topic | Decision |
-|---|---|
-| Version | Intermediate PRs are 0.1.9 → 0.1.13; the last PR is **0.2.0** |
-| Delivery | One PR per milestone, in order. One installer at the end. |
-| Routing | Jev 3-way choice per message: **chat** / **research** / **task**. A chat that needs current facts gets OpenRouter web search. Deep research gets web search plus a longer cited answer. A "search for…" task drives Google in Chrome, visibly. |
-| Google access | **Hybrid.** APIs when signed in; screen-driving Gmail and Calendar in Chrome otherwise. Desktop OAuth with PKCE and a loopback redirect. Client ID goes in Settings. The guide recommends an **Internal** app in the user's Workspace (no Google review, no 7-day sign-in expiry). |
-| Approvals | **Only deletes and sends need a click (tier 3):** send, reply or forward mail; trash mail; delete events or files. Archive, label, drafts, creating events or invites, RSVPs and moves get the 2 s notice (tier 2). Reads are free. |
-| Privacy | OpenRouter requests send `provider.data_collection: "deny"` (no training); new setting `no_training`, on by default. Jev sees only app names, the message, and sender plus subject plus first line for importance checks. |
-| Nudges | Calendar and inbox. Jev scores each new email's sender, subject and first line; you can mute a sender. In full screen: a small nudge right away, then the full nudge when you leave full screen or after 5 min, whichever comes first. A meeting nudge always arrives before the start. |
-| Brief | On the first activity after 06:00 each day, the duck offers a brief in a small pop-up you can dismiss. Clicking it shows today's meetings and important unread mail. |
-| Contacts | Google Contacts (read-only) plus addresses typed by hand. Ambiguous name → it asks. |
-| Browser | Chrome plus a Waddle MV3 extension, through native messaging (no open port). |
-| Files | **Read** anywhere in your user folders (Documents, Downloads, Desktop, Drive for desktop) and Google Drive. **Write, rename or move** only in folders you allow, with a 2 s notice. **Delete** sends the file to the Recycle Bin and needs a click. **Overwrite** moves the old copy to the Recycle Bin first, so it gets a notice instead of a click. |
-| Speed | "What's my next meeting?" answers in **under 5 s**. |
-| Autostart | Start with Windows, on by default, with a toggle (nudges and the brief need it running). |
-| Order | As listed below: foundations first. |
-| API visuals | **Duck animation only.** While API, file or browser-read tools run, the duck pecks at a little laptop. No status text. |
-| Send card | **Send / Edit / Cancel**, showing the full message. Edit changes the text in the card. After Send, a **10 s Undo** before it actually goes. |
-| Escalation | **Never** retry on a stronger model; just report the failure. |
-| Memory | **Long-term facts list:** a `remember` / `forget` tool, a local file of about 2 KB, added to every prompt. It can save on its own; the list is visible and editable in Settings. |
-| Draft style | **Learned once from about 20 sent emails** into a short style note (greeting, sign-off, tone), editable in Settings. Only the note is used after that. |
-| Selection hotkey | **Ctrl+Alt+A:** the chat opens with the selected text attached. Results go to the clipboard, or replace the selection after a 2 s notice. |
-| Scheduling | **Your own calendar only:** find gaps inside working hours (a setting, default 9–17) and propose 3 slots. |
+**Efficiency**
+- Every step re-sends every earlier tool result. A 64 KB file read or command output is billed again at each later step, so long tasks get slow and costly. Screenshots are already trimmed; text isn't.
+- Chat replies wait for the whole answer before showing anything.
+- The conversation is forgotten when Waddle restarts.
+- Nothing adds up what Waddle spends. You set a $5-a-month target, but nothing shows the running total or stops at a limit.
 
-## Milestones
+**Gaps compared with the best desktop agents in 2026**
+- **No way to add tools.** The Model Context Protocol (MCP) is now the standard way to connect an agent to other apps and services. Waddle can't use MCP servers.
+- **No scheduled work.** Reminders chime, but they can't run a task ("every weekday at 8:45, tell me what's on today").
+- **No spoken replies** (deferred from v0.2), even though Windows 11 has free, offline neural voices.
+- **No conversation history.** Once the bubble fades, an answer is gone. There's also no way to recall what you typed earlier.
+- **One monitor only.** The duck lives on the primary monitor even when you work on another one.
+- **No first-run guide.** Setup is spread over eleven sections of a long Settings page.
+- **No visual effects** (deferred from v0.2), and error messages are written for developers.
 
-### 1. Reliability, speed, routing (0.1.9)
+## Releases
 
-**Router**
-- `decide.rs`: replace `chat_only` with `route(message) -> Option<(Route, f64)>`.
-  - `Route` is Chat, Research or Task.
-  - Add a second noul, `needs_web(message)`, asked only on the chat route.
-- `session.rs::route()`:
-  - **Speculative start:** begin the planner's first call alongside Jev, and cancel it if Jev says chat with probability ≥ 0.8. This takes Jev's 0.3 s off every task.
-  - Chat goes to `chat_reply`, adding the web plugin when `needs_web` ≥ 0.6.
-  - Research goes to a new `research_reply`: fast model, `plugins:[{id:"web",max_results:5}]`, about 6 sentences with numbered sources. The bubble gets a **Full answer** button that saves the answer to `Documents\Waddle\research\<slug>.md` and opens it.
+Each release is tested, committed and pushed with its version bump. They're delivered in order.
 
-**OpenRouter request body** (`llm/openai_compat.rs` `request_body`)
-- Add `provider.data_collection` when `no_training` is on and the base URL is OpenRouter.
-- Add `plugins` when the `ChatRequest` asks for web search: new field `web: Option<u8>`.
+### 0.2.1 Revise: reliability
+- **Single instance.** A second launch opens the running Waddle's chat box instead of starting a second duck. The Chrome relay (`waddle.exe chrome-extension://…`) is unaffected.
+- **Model calls survive hiccups.**
+  - Rate limits, 5xx errors, dropped connections and cut streams are retried up to twice on the **same model**. Waits are 1 s then 3 s, or what `Retry-After` asks for, up to 8 s.
+  - A retry happens only if nothing has been shown to the user yet. Escalating to a stronger model still never happens.
+  - A stream that goes quiet for 60 s is treated as dropped.
+  - Errors read like "OpenRouter is rate-limiting this model; try again in a minute", not a raw HTTP dump.
+- **No more cut-off replies.**
+  - The planner's reply cap goes from 1,024 to 4,096 tokens. The cap only limits output, so it costs nothing extra unless used.
+  - A reply that still hits the cap (`finish_reason: length`) is never run as a broken tool call. The model gets one nudge to write shorter content or split it.
+- **Follows display changes.** The overlay re-places itself within about 2 s when the work area, resolution, scale or orientation changes (rotating the Surface, docking, moving the taskbar).
+- **Crash-safe saves.**
+  - Every store writes to a temporary file and then renames it.
+  - An unreadable settings file is kept as `settings.json.bad` and Waddle says so, instead of silently resetting.
+  - The nudge state is saved only when it changes.
+- **Expired Google sign-in.** When Google refuses the saved sign-in (`invalid_grant`), Waddle:
+  - stops polling
+  - says once "Google signed me out; reconnect in Settings"
+  - shows "Sign-in expired" in Settings.
+- **Shortcut tiers.** Key names are put in a standard form before classifying: modifier order, `control`/`ctrl`, `del`/`delete`, `win`/`meta`/`super`/`cmd`.
+- **Research file names** get `-2`, `-3`… instead of overwriting.
 
-**Copy guard** (`agent.rs`)
-- Refuse `press_keys` ctrl+c that immediately follows this task's own `type_text`.
-- The refusal hint: "call copy_to_clipboard with the text".
+### 0.2.2 Revise: leaner, faster, cheaper
+- **Context budget.**
+  - Once a task's conversation passes about 48,000 characters, earlier tool results longer than 1,500 characters are cut down to their start plus "[trimmed; read it again if you need it]".
+  - This happens all at once, like screenshots, so a local model's prompt cache misses only once.
+- **Chat replies stream.** The first words show in about half a second. The "[task]" hand-off is still detected from the first few tokens.
+- **Conversation survives restarts.** The last 10 exchanges are kept in `memory.json`, cleared after 12 hours of silence or by **Forget conversation**.
+- **Spending meter and monthly budget.**
+  - Every paid call is recorded in a daily ledger by role: tasks, chat, research, quick replies, decisions, briefs and style learning. OpenRouter reports what each call costs.
+  - Settings shows today, this month and a 30-day breakdown.
+  - A monthly budget (default **$5**) gives one warning at 80%. At 100% Waddle pauses paid calls ("I've reached this month's $5 budget; raise it in Settings"). Stop, reminders and the screen still work.
+- **Battery-aware.** On battery, the window sampler, hit test and ambient brain slow down (on Windows, from `GetSystemPowerStatus`).
 
-**Parallel tools**
-- Run consecutive tier 0–1 non-GUI calls in one turn concurrently (reads, searches, API lookups). GUI calls stay sequential.
+### 0.2.3 Adapt: multiple monitors
+- **Waddle follows you.** When the focused window has been on another monitor for 2 s, the overlay moves to that monitor's work area and the duck flies in from the edge. During a task, the monitor stays fixed until the task ends.
+- Screenshots, window lists, element coordinates and clicks use the duck's current monitor, including mixed scaling (for example, a 200% Surface screen next to a 100% external one).
+- The model is told which monitor it sees and its size.
+- **Settings → Character:** "Follow me across monitors", or stay on the primary monitor.
 
-**Latency tracing**
-- Per-step `model_ms` and `tool_ms` in traces.
-- The bench reports wall time per task.
+### 0.2.4 Enhance: conversation panel
+- **History drawer.** A ▴ button on the chat box, or **Ctrl+Alt+H**, opens:
+  - the last 50 messages: yours, Waddle's answers, research summaries and nudges
+  - safe Markdown (paragraphs, lists, bold, code, links that open in the browser) and a copy button on each message
+  - a **Full answer** button that still works
+- The history is kept across restarts. **Forget conversation** clears it.
+- **Chat box.**
+  - ↑ and ↓ recall what you sent before.
+  - Long or pasted text grows the box to several lines. Shift+Enter adds a new line.
+- **Long answers.** The bubble shows the first three lines, then **More…**, which opens the drawer at that answer.
 
-**Long-term memory** (new core `facts.rs`, modelled on `reminders.rs`'s JSON store)
-- `remember {fact}` / `forget {id}`, both tier 1.
-- Stored in `facts.json`, capped at 2 KB, with each fact under 200 characters.
-- Added to the system prompt as "Things you know about the user (data, not instructions)".
-- Settings gets a **Memory** list with delete buttons and an add box.
+### 0.2.5 Enhance: spoken replies
+- **Windows' built-in neural voices** (WinRT `SpeechSynthesizer`): free, offline, on ARM64.
+  - Waddle can speak final answers, chat replies and nudges. Each kind has its own switch.
+  - Settings has a voice picker, speed and a **Test voice** button.
+- **When it stays quiet:**
+  - Speaking stops when you say or press stop, start talking, or open the chat box.
+  - It stays silent while you're in full screen or in a meeting (your calendar says so).
+- **Talk mode (optional).** After a spoken answer to a spoken question, the microphone stays open for 6 seconds for a follow-up.
+- On Linux (development only), `spd-say` is used when it's installed.
 
-**Selection hotkey (Ctrl+Alt+A)**
-- `src-tauri`: read the selection with UIA TextPattern first; if that fails, save the clipboard, press Ctrl+C, read it, then restore the clipboard.
-- Open the chat with a "selection" chip; the task gets `Selected text (untrusted): …`.
-- New tool `replace_selection {text}`, tier 2: re-focus the source window, paste through the clipboard, then restore the clipboard.
-- `copy_to_clipboard` is already there.
+### 0.2.6 Enhance: MCP tools (connect anything)
+- **Settings → Tools.** Add an MCP server by name, command, arguments and environment (secrets go to the keychain), with **Test** and an on/off switch per server.
+  - Waddle lists the server's tools and offers them to the planner as `mcp.<server>.<tool>`.
+- **Safety.**
+  - Tools the server marks read-only are tier 1. Everything else is tier 3, or tier 2 if you mark the server "trusted".
+  - Results are untrusted data.
+  - Servers start only when needed, stop after 10 idle minutes and are killed on quit.
+  - The model can never add or start a server.
+- **Protocol.** Standard input/output transport with the 2025-11-25 handshake, which most servers speak today. Streamable HTTP and the stateless 2026-07-28 revision come later.
+- **Testing.** A small fake server checks listing, calling, errors, timeouts, tiers and halting.
 
-**Benchmark quiet mode with GPT-6 Luna before shipping** (~$0.03; compare 41/42 hit, 15/42 strict).
+### 0.2.7 Enhance: routines
+- **Scheduled tasks.**
+  - "Every weekday at 8:45, tell me what's on today and anything urgent in my inbox"
+  - "every Friday at 4, list the meetings I had this week"
+  - "at 6 tonight, check whether the parcel email arrived"
+- Created with a `routine` tool (tier 2) or in Settings; listed, paused and deleted in Settings.
+- **How a routine runs.**
+  - In the background without touching the screen: Google, files, Chrome page reading, research and MCP tools only.
+  - Any tier 2 or 3 action waits for your click, because nobody is watching a countdown.
+  - The result arrives as a nudge and goes into the history drawer.
+- **Missed runs.**
+  - If Waddle is busy, the routine runs straight after.
+  - If the computer was off, the run is marked missed, like reminders.
+  - Routines respect the budget.
 
-### 2. Google: sign-in, Gmail, Calendar, Contacts (0.1.10)
+### 0.2.8 Polish: first run, settings, effects
+- **First-run welcome.**
+  1. Choose a brain: paste an OpenRouter key and Waddle tests it live, detect Ollama, or stay in the demo.
+  2. Optional: connect Google and set up Chrome, each with a status tick.
+  3. Pick the duck's colour.
+- **Settings reorganised into tabs:** Brain, Assistant (Google, Chrome, files), Nudges & routines, Tools, Voice, Memory & privacy, Safety, Character, Diagnostics. There's a search box, and spending sits at the top.
+- **Effects layer**, drawn from the duck's palette and turned off with reduced motion:
+  - dust when it lands
+  - "Zzz" while it naps
+  - a sparkle when a task finishes
+  - a sweat drop on errors
+  - "?" when it asks
+  - a heart when you say thanks
+- **Errors in plain words.** For example, "OpenRouter says the key has no credit left: add some at openrouter.ai/credits". The common failures each get a next step.
+- **Accessibility.** Keyboard focus rings and Tab order on cards and the drawer, Enter/Esc on approval cards, and high-contrast support.
 
-**Core: new `crates/waddle-core/src/google/`**
-- `auth.rs`:
-  - PKCE S256, `state`, loopback on 127.0.0.1 with a random port, token refresh
-  - incremental scopes: `gmail.modify`, `calendar.events`, `contacts.readonly`, `contacts.other.readonly`; `drive.readonly` comes in milestone 5
-- `gmail.rs`: search, read (HTML → text), draft, send, modify, trash. Uses `history.list` for new-mail polling.
-- `calendar.rs`: list, create (with `conferenceData` for Meet), update, respond, delete. Uses a `syncToken`.
-- `people.rs`: search contacts and other contacts.
-- **Base URLs are injectable, so tests run against a local fake server.**
+### 0.2.9 Define: release candidate
+- **Regression.**
+  - All unit and integration tests.
+  - The assistant bench, router set and importance set (small spend; see Budget).
+  - A live container run of every checklist item that can run here.
+- **Self-test covers the new parts:** speech, monitors, MCP servers, budget and routines.
+- **Docs:**
+  - the README rewritten around what Waddle does
+  - ARCHITECTURE and MODELS updated (a fresh look at the cheapest planner)
+  - a new CHANGELOG
+  - **on-device checklist v2:** the 27 checks plus the new features, grouped, each with what you should see
+- **Installer** `Waddle_0.2.9_arm64-setup.exe` → **you test on the Surface.**
 
-**Tools** (`tools/mod.rs` specs, gated by `Capabilities.google`; tiers in `safety.rs`)
+### 0.3.0
+- Fixes from your 0.2.9 test, docs brought up to date, and the final installer.
 
-| Tool | Tier |
-|---|---|
-| `mail_search {query,max}` | 1 |
-| `mail_read {id}` (untrusted) | 1 |
-| `mail_draft {to,cc,subject,body,reply_to?}` | 2 |
-| `mail_send {draft_id \| to,subject,body,reply_to?}` | **3**; the approval card shows the full message |
-| `mail_modify {id,archive,read,labels}` | 2 |
-| `mail_trash {id}` | **3** |
-| `calendar_events {from,to,query}` | 1 |
-| `calendar_create {title,start,end,attendees,location,meet}` | 2 |
-| `calendar_update` | 2 |
-| `calendar_respond` | 2 |
-| `calendar_delete` | **3** |
-| `contacts_find {name}` | 1 |
-| `calendar_free {from,to,minutes}` | 1; gaps in your own calendar within `working_hours`, best 3 |
-| `mail_style {action: learn\|show}` | 1; learn reads about 20 sent emails once and writes `style.md` |
+## Needs you (can't be done from this container)
+- **On-device testing** of 0.2.9 with the checklist.
+- A **code-signing certificate** (removes the SmartScreen warning).
+- A **Chrome Web Store** developer account (no more Developer mode).
+- **Auto-update:** an updater signing key stored as a GitHub secret, then Waddle can update itself from Releases.
+- **Rotate the OpenRouter key** used for testing, and press **Connect** again in Settings → Google (for the Drive permission).
 
-**Send card (`src/ui/approval.ts`)**
-- Approval requests can carry an editable `draft {to,cc,subject,body}`.
-- The approved, edited draft comes back to the tool, so `Host::request_approval` returns the edited payload.
-- After Send, the bridge waits 10 s with an **Undo** button, raced against the cancel token, before calling Gmail.
+## After 0.3
+- macOS (accessibility and screen-recording prompts, Apple Silicon build).
+- Foundry Local NPU mode, and a fine-tuned local planner ([TRAINING.md](TRAINING.md)).
+- The "Pictionary" defence: untrusted text shown to the model as an image.
+- PTY terminal and a real OS sandbox for commands.
+- The other seven characters and a white-label asset pack loader.
 
-**Duck animation**
-- `tool_started` for `mail_*`, `calendar_*`, `contacts_*`, `drive_*`, `find_files`, `read_document` and `browser_read` puts the duck in a new `typing` state.
-- The state uses peck frames plus a small laptop sprite (`src/body/sprites.ts`, `behavior.ts`) and ends on the next GUI action or the end of the task.
-
-**Draft style:** `style.md` (in app data) is injected into the prompt when mail tools are present.
-
-**App**
-- The refresh token and client secret go in the keychain via `src-tauri/src/secrets.rs` (new `Secret` variants).
-- Settings gets a **Google account** section: client ID, client secret, Connect / Disconnect, and status.
-- When not connected, these tools are hidden and the prompt says to use Gmail or Calendar in Chrome.
-
-**Docs:** `docs/GOOGLE_SETUP.md` (Internal app in about 5 minutes; External/Testing fallback, with its 7-day limit).
-
-### 3. Nudges and morning brief (0.1.11)
-
-**Logic: core `nudges.rs`, pure and unit-tested**
-- Meeting timing: nudge 5 min before, with a Join link.
-- Importance threshold: Jev ≥ 0.7, skipping muted senders.
-- Full-screen escalation: small nudge first, then the full nudge when full screen ends or after 5 min.
-- Brief gating: first activity after 06:00, once per day.
-
-**App**
-- `src-tauri/src/watch.rs` loop: calendar every 2 min, Gmail `history.list` every 90 s, only while connected.
-- It reuses `ambient.rs` idle and full-screen detection; move the shared bits into a small helper.
-
-**Frontend**
-- Small nudge: a "!" badge on the duck.
-- Full nudge: a bubble with buttons. Meetings get Join and Snooze. Mail gets Open, Draft reply and Mute sender.
-- Brief offer: "☀️ Brief?", dismissable, gone after 60 s.
-- Brief: one fast-model call composes it, about $0.0005 a day.
-
-**Settings:** `mail_nudges`, `meeting_nudges`, `morning_brief`, `muted_senders`, and autostart via `tauri-plugin-autostart`.
-
-### 4. Chrome extension (0.1.12)
-
-**`extension/`** (MV3, with a fixed `key` so the unpacked extension keeps a stable ID)
-- Service worker and content script. Its logic is TypeScript, tested with vitest + jsdom.
-- Page reading:
-  - title and URL
-  - readable text, capped at 8 KB and untrusted
-  - interactive elements as `[e12] button "Send"` with viewport rects
-- Tab list, switch, open and close.
-
-**Transport**
-- Chrome launches `waddle.exe --native-host`, which relays stdin/stdout to the running app over a named pipe. On Linux it's a Unix socket, for container tests.
-- The host manifest pins `allowed_origins` to the extension ID.
-- The installer registers it under HKCU and copies the extension to `%LOCALAPPDATA%\Waddle\extension`.
-- Settings gets **Set up Chrome extension** (opens the folder and chrome://extensions, with steps).
-
-**Tools**
-
-| Tool | Tier | Notes |
-|---|---|---|
-| `browser_tabs {action}` | 1 | close is tier 2 |
-| `browser_read {tab?, mode:text\|elements}` | 0 | |
-| `browser_navigate {url}` | 1 | |
-| `browser_click {element}` | 2 | |
-| `browser_type {element, text}` | 2 | |
-
-- **Clicks use real OS input:** the content script scrolls the element into view and returns its rect, and the app converts it to screen coordinates (screenX/Y, the chrome offsets, devicePixelRatio). The duck walks there and clicks for real, falling back to `element.click()`.
-- "Search for X" becomes `browser_navigate google.com/search?q=…` then `browser_read`.
-
-### 5. Files, documents, Drive (0.1.13)
-
-**`tools/fs.rs`**
-- Replace the single workspace root with a `Scope`:
-  - `read_roots` defaults to the user folders plus Drive for desktop when present.
-  - `write_roots` defaults to the workspace plus folders the user adds.
-  - A deny list covers AppData, `.ssh`, browser profiles, `*.kdbx`, `.env` and key files.
-- Paths are absolute or `~/…`.
-
-**Tools**
-
-| Tool | Tier | Notes |
-|---|---|---|
-| `find_files {query, root?, ext?, modified_within_days?}` | 1 | names, then text content; walk limits |
-| `read_document {path, pages?}` | 1 | PDF via `pdf-extract`; DOCX/PPTX via zip + `quick-xml`; XLSX/CSV via `calamine`, as tables |
-| `move_file` / `rename_file` | 2 | write roots only |
-| `delete_file` | **3** | to the Recycle Bin via the `trash` crate |
-| `write_file` overwrite | 2 | old copy to the Recycle Bin first, then a notice; was tier 3 |
-| `create_document {path, kind: docx\|xlsx\|csv\|md, content}` | 2 | `docx-rs` / `rust_xlsxwriter` |
-| `drive_search` / `drive_read` | 1 | Docs export as text, Sheets as CSV |
-
-### 6. Models, bench, docs, 0.2.0
-
-**Bench (`bench/tasks.json`, `tests/bench.rs`)**
-- Text-only assistant tasks against fake Google, file and browser fixtures:
-  - triage, reply draft, "next meeting", book with a contact lookup
-  - find and summarise a PDF, an XLSX question, browser read-and-click
-- A **router set** of about 40 labelled messages (chat / research / task).
-- An **importance set** of about 30 labelled emails.
-
-**Testing budget: under $1 in total**
-- Planner: GPT-6 Luna ×2, Qwen3-VL-8B ×1, plus up to 2 new sub-$0.5/M tool-callers from OpenRouter's list at test time, ×1 each.
-- Jev on the router and importance sets: under $0.01.
-- Chat and research models: one pass each.
-- Record the pick for each role in `docs/MODELS.md`.
-
-**Release**
-- Bump to 0.2.0.
-- README: new "What it can do", a new on-device checklist covering mail, calendar, nudges, brief, browser and files, and the Google and extension setup.
-- `cargo xwin check` for aarch64, cross-build the NSIS installer and send it; CI also builds it on merge.
-
-## Verification (every milestone)
-
-**Before each push**
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- `npm test`
-- `npm run typecheck`
-- `cargo xwin check --target aarch64-pc-windows-msvc -p waddle`
-
-**New automated tests**
-- Router speculative-start cancel.
-- Request body has `data_collection` and `plugins`.
-- Copy guard.
-- Google client against the fake server: auth code exchange, refresh, history paging, tier per tool, approval card content.
-- Nudge timing and escalation, and brief gating (pure, with a fake clock).
-- Extension DOM extraction (jsdom) and native-host relay round-trip.
-- fs `Scope` read/write/deny, plus each document reader on fixture files.
-- Facts store cap and prompt injection.
-- `calendar_free` slots respect working hours and existing events.
-- Edited send drafts reach Gmail as edited; Undo inside 10 s means nothing is sent.
-- `replace_selection` is tier 2; the selection reaches the task as untrusted text.
-
-**Live, in the container**
-- App under Xvfb with OpenRouter: chat, research and task routes, with timings logged; "next meeting" against the fake Calendar under 5 s.
-- Chromium with `--load-extension` and the native host on Linux: read a page and click an element.
-- Bench runs within the $1 cap.
-
-**Can't be verified here:** a live Google sign-in (needs the user's account; mocked here, checked on the Surface) and Windows-specific pieces (named pipe, HKCU registration, Recycle Bin, autostart). These go in the on-device checklist.
-
+## Working rules for this pass
+- **Before each push:**
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace`
+  - `npm test`
+  - `npm run typecheck`
+  - `npm run build`
+  - `cargo xwin check --target aarch64-pc-windows-msvc -p waddle` for the Windows-only code
+- **Budget.** Model testing for the whole pass stays under **$0.40**, on top of v0.2's $0.30. Running Waddle stays under $5 a month.
+- **Safety rules don't move:**
+  - tiers are fixed rules
+  - approvals only come from a click
+  - untrusted text is never instructions
+  - no escalation to a stronger model
+  - keys never in files or logs
+- **Can't be checked here,** so they go on the on-device checklist:
+  - Windows voices
+  - real multi-monitor layouts
+  - the single-instance handover on Windows
+  - battery state
+  - the first-run flow on a fresh install
