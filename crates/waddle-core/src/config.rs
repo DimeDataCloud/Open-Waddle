@@ -201,6 +201,13 @@ pub struct Settings {
     pub muted_senders: Vec<String>,
     /// Start Waddle when the user signs in to Windows.
     pub autostart: bool,
+    /// Let Waddle read the user's own folders (Documents, Downloads, Desktop,
+    /// Pictures, Music, Videos) and Drive for desktop.
+    pub read_user_folders: bool,
+    /// More folders Waddle may read in.
+    pub read_folders: Vec<PathBuf>,
+    /// Folders Waddle may create, change, move and rename files in, besides its workspace.
+    pub write_folders: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -239,6 +246,9 @@ impl Default for Settings {
             morning_brief: true,
             muted_senders: vec![],
             autostart: true,
+            read_user_folders: true,
+            read_folders: vec![],
+            write_folders: vec![],
         }
     }
 }

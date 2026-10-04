@@ -5,6 +5,7 @@
 //! pixels or a 0..1000 grid (see `CoordMode`); conversion happens only here.
 
 pub mod browser;
+pub mod docs;
 pub mod fs;
 pub mod shell;
 
@@ -333,6 +334,38 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
         &["path", "content"],
     ));
     v.push(spec("list_dir", "List a folder (default: the workspace).", json!({ "path": path }), &[]));
+    let any_path = json!({ "type": "string", "description": "Absolute, ~/..., or relative to your workspace" });
+    v.push(spec(
+        "find_files",
+        "Find the user's files by name (then by text inside), newest first. Searches every folder you may read unless root is given.",
+        json!({
+            "query": { "type": "string", "description": "Words in the name or text" },
+            "root": any_path,
+            "ext": { "type": "string", "description": "Only this extension, e.g. pdf" },
+            "modified_within_days": { "type": "integer" }
+        }),
+        &["query"],
+    ));
+    v.push(spec(
+        "read_document",
+        "Read a PDF, Word, PowerPoint, Excel, CSV or text file as text. pages limits PDF pages or slides, e.g. \"1-3\".",
+        json!({ "path": any_path, "pages": { "type": "string" } }),
+        &["path"],
+    ));
+    v.push(spec(
+        "create_document",
+        "Make a new document. docx: lines become paragraphs (# for headings, - for bullets). xlsx and csv: give the rows as CSV. md: Markdown.",
+        json!({ "path": any_path, "kind": { "type": "string", "enum": ["docx", "xlsx", "csv", "md"] }, "content": { "type": "string" } }),
+        &["path", "kind", "content"],
+    ));
+    v.push(spec(
+        "move_file",
+        "Move a file or folder to another folder or path (never overwrites).",
+        json!({ "from": any_path, "to": any_path }),
+        &["from", "to"],
+    ));
+    v.push(spec("rename_file", "Rename a file in its folder.", json!({ "path": any_path, "new_name": { "type": "string" } }), &["path", "new_name"]));
+    v.push(spec("delete_file", "Send a file or folder to the Recycle Bin (the user has to approve).", json!({ "path": any_path }), &["path"]));
     if caps.delegation {
         v.push(spec(
             "delegate",
@@ -384,7 +417,7 @@ pub fn is_gui_tool(name: &str) -> bool {
 
 /// Tools that only read and never use the screen: several in one turn run at once.
 pub fn is_parallel_read(name: &str) -> bool {
-    matches!(name, "read_file" | "list_dir" | "browser_read") || crate::google::tools::is_parallel_read(name)
+    matches!(name, "read_file" | "list_dir" | "browser_read" | "find_files" | "read_document") || crate::google::tools::is_parallel_read(name)
 }
 
 fn num(args: &Value, k: &str) -> Option<f64> {

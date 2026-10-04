@@ -4,6 +4,7 @@
 
 pub mod auth;
 pub mod calendar;
+pub mod drive;
 pub mod gmail;
 pub mod people;
 pub mod style;
@@ -21,6 +22,7 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/contacts.other.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +34,7 @@ pub struct Endpoints {
     pub gmail: String,
     pub calendar: String,
     pub people: String,
+    pub drive: String,
 }
 
 impl Endpoints {
@@ -43,6 +46,7 @@ impl Endpoints {
             gmail: "https://gmail.googleapis.com/gmail/v1/users/me".into(),
             calendar: "https://www.googleapis.com/calendar/v3".into(),
             people: "https://people.googleapis.com/v1".into(),
+            drive: "https://www.googleapis.com/drive/v3".into(),
         }
     }
 
@@ -56,6 +60,7 @@ impl Endpoints {
             gmail: format!("{base}/gmail/v1/users/me"),
             calendar: format!("{base}/calendar/v3"),
             people: format!("{base}/v1"),
+            drive: format!("{base}/drive/v3"),
         }
     }
 }
@@ -110,6 +115,15 @@ impl Google {
 
     /// One API call with a fresh access token; a 401 refreshes the token and retries once.
     pub(crate) async fn call(&self, method: Method, url: &str, query: &[(&str, String)], body: Option<&Value>) -> anyhow::Result<Value> {
+        let bytes = self.call_raw(method, url, query, body, usize::MAX).await?;
+        if bytes.iter().all(|b| b.is_ascii_whitespace()) {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    /// Like `call`, returning the body as bytes (file downloads, exports), at most `max` of them.
+    pub(crate) async fn call_raw(&self, method: Method, url: &str, query: &[(&str, String)], body: Option<&Value>, max: usize) -> anyhow::Result<Vec<u8>> {
         for attempt in 0..2 {
             let token = self.token().await?;
             let mut req = self.http.request(method.clone(), url).bearer_auth(&token).query(query);
@@ -122,14 +136,16 @@ impl Google {
                 self.access.lock().await.take();
                 continue;
             }
-            let text = resp.text().await?;
             if !status.is_success() {
+                let text = resp.text().await.unwrap_or_default();
                 bail!("{}", api_error(status.as_u16(), &text));
             }
-            if text.trim().is_empty() {
-                return Ok(Value::Null);
+            if resp.content_length().is_some_and(|n| n as usize > max) {
+                bail!("the file is too big to read here ({} MB)", resp.content_length().unwrap_or(0) / 1_000_000);
             }
-            return Ok(serde_json::from_str(&text)?);
+            let bytes = resp.bytes().await?;
+            anyhow::ensure!(bytes.len() <= max, "the file is too big to read here");
+            return Ok(bytes.to_vec());
         }
         bail!("Google rejected the sign-in; reconnect Google in Settings")
     }

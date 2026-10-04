@@ -44,6 +44,8 @@ pub struct State {
     pub challenge: Option<String>,
     /// The next API call gets a 401, as if the access token had expired.
     pub expire_next: bool,
+    /// Drive files: metadata, and the bytes a download or export returns.
+    pub drive: Vec<(Value, Vec<u8>)>,
 }
 
 pub struct FakeGoogle {
@@ -133,6 +135,14 @@ impl FakeGoogle {
                         query: url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect(),
                         body,
                     };
+                    if let Some(bytes) = drive_bytes(&st, &req) {
+                        st.lock().unwrap().requests.push(req);
+                        let head = format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len());
+                        let _ = sock.write_all(head.as_bytes()).await;
+                        let _ = sock.write_all(&bytes).await;
+                        let _ = sock.shutdown().await;
+                        return;
+                    }
                     let (status, out) = route(&st, req, &auth);
                     let text = if out.is_null() { String::new() } else { out.to_string() };
                     let reply = format!(
@@ -183,6 +193,10 @@ impl FakeGoogle {
         self.state.lock().unwrap().contacts.push((name.into(), email.into(), saved));
     }
 
+    pub fn add_drive_file(&self, id: &str, name: &str, mime: &str, content: Vec<u8>) {
+        self.state.lock().unwrap().drive.push((json!({ "id": id, "name": name, "mimeType": mime, "modifiedTime": "2026-10-01T09:00:00Z", "webViewLink": format!("https://drive.example/{id}") }), content));
+    }
+
     pub fn requests(&self, path_part: &str) -> Vec<Req> {
         self.state.lock().unwrap().requests.iter().filter(|r| r.path.contains(path_part)).cloned().collect()
     }
@@ -204,6 +218,20 @@ fn in_range(event: &Value, min: Option<&str>, max: Option<&str>) -> bool {
         (Some(s), Some(e)) => parse(max).is_none_or(|m| s < m) && parse(min).is_none_or(|m| e > m),
         _ => true,
     }
+}
+
+/// Drive answers that aren't JSON: exports and downloads.
+fn drive_bytes(st: &Mutex<State>, req: &Req) -> Option<Vec<u8>> {
+    let s = st.lock().unwrap();
+    let rest = req.path.strip_prefix("/drive/v3/files/")?;
+    let (id, export) = match rest.strip_suffix("/export") {
+        Some(id) => (id, true),
+        None if req.q("alt") == Some("media") => (rest, false),
+        None => return None,
+    };
+    let (meta, bytes) = s.drive.iter().find(|(m, _)| m["id"] == id)?;
+    let google_doc = meta["mimeType"].as_str().unwrap_or("").starts_with("application/vnd.google-apps.");
+    (export == google_doc).then(|| bytes.clone())
 }
 
 fn route(st: &Mutex<State>, req: Req, auth: &str) -> (&'static str, Value) {
@@ -366,6 +394,16 @@ fn route(st: &Mutex<State>, req: Req, auth: &str) -> (&'static str, Value) {
             s.deleted_events.push(id);
             ("204 No Content", Value::Null)
         }
+        ("GET", ["drive", "v3", "files"]) => {
+            let q = req.q("q").unwrap_or("").to_lowercase();
+            let word = q.split('\'').nth(1).unwrap_or("").to_string();
+            let files: Vec<Value> = s.drive.iter().map(|(m, _)| m.clone()).filter(|m| m["name"].as_str().unwrap_or("").to_lowercase().contains(&word)).collect();
+            ("200 OK", json!({ "files": files }))
+        }
+        ("GET", ["drive", "v3", "files", id]) => match s.drive.iter().find(|(m, _)| m["id"] == *id) {
+            Some((m, _)) => ("200 OK", m.clone()),
+            None => ("404 Not Found", json!({ "error": { "code": 404, "message": "File not found" } })),
+        },
         ("GET", ["v1", "people:searchContacts"]) | ("GET", ["v1", "otherContacts:search"]) => {
             let saved = p.contains("people:searchContacts");
             let q = req.q("query").unwrap_or("").to_lowercase();

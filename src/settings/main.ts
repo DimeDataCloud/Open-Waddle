@@ -23,6 +23,9 @@ interface Settings {
   morning_brief: boolean;
   muted_senders: string[];
   autostart: boolean;
+  read_user_folders: boolean;
+  read_folders: string[];
+  write_folders: string[];
   self_source_dir: string | null;
   max_delegation_depth: number;
   character: { id: string; color: string };
@@ -120,11 +123,20 @@ function fill(view: SettingsView): void {
   $("morning_brief").checked = s.morning_brief;
   $<HTMLTextAreaElement>("muted_senders").value = s.muted_senders.join("\n");
   $("autostart").checked = s.autostart;
+  $("read_user_folders").checked = s.read_user_folders;
+  $<HTMLTextAreaElement>("read_folders").value = s.read_folders.join("\n");
+  $<HTMLTextAreaElement>("write_folders").value = s.write_folders.join("\n");
   $("mode").textContent = view.demo
     ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
     : `Using ${s.model}. Workspace: ${view.workspace}`;
   syncVisibility();
 }
+
+const lines = (id: string) =>
+  $<HTMLTextAreaElement>(id)
+    .value.split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 function collect(): Settings {
   const num = (id: string, fallback: number) => {
@@ -158,6 +170,9 @@ function collect(): Settings {
       .map((x) => x.trim())
       .filter(Boolean),
     autostart: $("autostart").checked,
+    read_user_folders: $("read_user_folders").checked,
+    read_folders: lines("read_folders"),
+    write_folders: lines("write_folders"),
     self_source_dir: $("self_source_dir").value.trim() || null,
     max_delegation_depth: num("max_delegation_depth", 2),
     character: { ...current.character, color: $("color").value },

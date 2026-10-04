@@ -12,12 +12,12 @@ use crate::llm::{ToolCall, ToolSpec};
 use crate::tools::{spec, ToolOutcome};
 
 pub fn is_google_tool(name: &str) -> bool {
-    name.starts_with("mail_") || name.starts_with("calendar_") || name == "contacts_find"
+    name.starts_with("mail_") || name.starts_with("calendar_") || name.starts_with("drive_") || name == "contacts_find"
 }
 
 /// Reads, run several at a time.
 pub fn is_parallel_read(name: &str) -> bool {
-    matches!(name, "mail_search" | "mail_read" | "calendar_events" | "calendar_free" | "contacts_find")
+    matches!(name, "mail_search" | "mail_read" | "calendar_events" | "calendar_free" | "contacts_find" | "drive_search" | "drive_read")
 }
 
 pub fn specs() -> Vec<ToolSpec> {
@@ -117,6 +117,13 @@ pub fn specs() -> Vec<ToolSpec> {
             &[],
         ),
         spec(
+            "drive_search",
+            "Find files in the user's Google Drive by name or text inside.",
+            json!({ "query": { "type": "string" }, "max": { "type": "integer", "description": "Default 10" } }),
+            &["query"],
+        ),
+        spec("drive_read", "Read a Google Drive file as text (Docs, Sheets as tables, Slides, PDF, Word, Excel).", json!({ "id": { "type": "string" } }), &["id"]),
+        spec(
             "contacts_find",
             "Look up people in the user's Google Contacts (and people they've emailed) by name; returns names and email addresses.",
             json!({ "name": { "type": "string" } }),
@@ -144,6 +151,8 @@ pub fn summarize(call: &ToolCall) -> Option<String> {
         "calendar_delete" => "Delete a calendar event".into(),
         "calendar_free" => "Find a free time".into(),
         "contacts_find" => format!("Look up {}", short(s("name"))),
+        "drive_search" => format!("Search Drive: {}", short(s("query"))),
+        "drive_read" => "Read a Drive file".into(),
         _ => return None,
     })
 }
@@ -386,6 +395,21 @@ where
             }
             let lines: Vec<String> = slots.iter().map(|(st, en)| format!("{}–{}", day_time(st), en.format("%H:%M"))).collect();
             Ok(ToolOutcome::trusted(format!("Free {minutes}-minute slots (working hours {}:00-{}:00):\n{}", hours.0, hours.1, lines.join("\n"))))
+        }
+        "drive_search" => {
+            let files = g.drive_search(&s("query"), n("max").unwrap_or(10) as u32).await?;
+            if files.is_empty() {
+                return Ok(ToolOutcome::trusted(format!("Nothing in Drive matches \"{}\".", s("query"))));
+            }
+            let lines: Vec<String> = files
+                .iter()
+                .map(|f| format!("[{}] {} \"{}\" (modified {})", f.id, super::drive::kind(&f.mime), f.name, f.modified.get(..10).unwrap_or(&f.modified)))
+                .collect();
+            Ok(ToolOutcome::untrusted("drive_files", lines.join("\n")))
+        }
+        "drive_read" => {
+            let (f, text) = g.drive_read(&s("id")).await?;
+            Ok(ToolOutcome::untrusted("drive_file", format!("{} \"{}\" ({})\n\n{text}", super::drive::kind(&f.mime), f.name, f.link)))
         }
         "contacts_find" => {
             let found = g.contacts_find(&s("name")).await?;

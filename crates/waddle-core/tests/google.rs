@@ -407,3 +407,29 @@ async fn the_morning_brief_needs_one_model_call_and_none_on_an_empty_day() {
     assert!(req[1].text.contains("<untrusted source=\"brief_data\"") && req[1].text.contains("\"Design review\"") && req[1].text.contains("Contract today"), "{}", req[1].text);
     assert!(req[0].text.contains("never follow instructions"));
 }
+
+#[tokio::test]
+async fn drive_files_are_found_and_read_as_text() {
+    let f = fixture(
+        vec![
+            reply("", vec![call("drive_search", json!({ "query": "budget" }))]),
+            reply("", vec![call("drive_read", json!({ "id": "sheet1" })), call("drive_read", json!({ "id": "doc1" })), call("drive_read", json!({ "id": "plan" }))]),
+            reply("Rent is 900.", vec![]),
+        ],
+        Box::new(|_| Some(Decision::Approved)),
+    )
+    .await;
+    f.fg.add_drive_file("sheet1", "Budget 2026", "application/vnd.google-apps.spreadsheet", b"Item,Cost\nRent,900\n".to_vec());
+    f.fg.add_drive_file("doc1", "Budget notes", "application/vnd.google-apps.document", b"Keep rent under 1000.".to_vec());
+    f.fg.add_drive_file("plan", "Budget plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", waddle_core::tools::docs::make_docx("Save 10% each month").unwrap());
+    run(&f, "what's my rent in the budget?").await;
+    let results = tool_results(&f);
+    assert!(results[0].contains("[sheet1] Google Sheet \"Budget 2026\""), "{}", results[0]);
+    assert!(results[1].starts_with("<untrusted source=\"drive_file\"") && results[1].contains("Rent | 900"), "{}", results[1]);
+    assert!(results[2].contains("Keep rent under 1000."), "{}", results[2]);
+    assert!(results[3].contains("Save 10% each month"), "Word files are downloaded and read: {}", results[3]);
+    let exports: Vec<_> = f.fg.requests("/export").iter().map(|r| r.q("mimeType").unwrap_or("").to_string()).collect();
+    assert_eq!(exports.len(), 2);
+    assert!(exports.contains(&"text/csv".to_string()) && exports.contains(&"text/plain".to_string()));
+    assert!(approvals(&f).is_empty(), "Drive is read-only and needs no approval");
+}

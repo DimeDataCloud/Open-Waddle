@@ -40,6 +40,7 @@ use crate::overlay::{Geometry, OverlayState};
 use crate::secrets::{Secret, Secrets};
 
 pub struct AppState {
+    pub app: AppHandle,
     pub session: Arc<Session>,
     pub host: Arc<TauriHost>,
     pub overlay: Arc<OverlayState>,
@@ -112,6 +113,31 @@ pub(crate) fn google_for(settings: &Settings, secrets: &Secrets) -> Option<Arc<G
     Some(Arc::new(Google::new(google_endpoints(), client, refresh)))
 }
 
+/// The folders Waddle may read: the user's own folders and Drive for desktop, plus any they added.
+pub(crate) fn read_folders(app: &AppHandle, settings: &Settings) -> Vec<PathBuf> {
+    let mut out = settings.read_folders.clone();
+    if settings.read_user_folders {
+        let p = app.path();
+        out.extend([p.document_dir(), p.download_dir(), p.desktop_dir(), p.picture_dir(), p.audio_dir(), p.video_dir()].into_iter().flatten());
+        let home = p.home_dir().ok();
+        // Drive for desktop: a G: drive (or another letter) on Windows, a folder elsewhere.
+        #[cfg(windows)]
+        out.extend(('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\My Drive"))).filter(|d| d.is_dir()));
+        if let Some(h) = home {
+            out.extend(["Google Drive", "My Drive"].iter().map(|n| h.join(n)).filter(|d| d.is_dir()));
+            if let Ok(entries) = std::fs::read_dir(h.join("Library").join("CloudStorage")) {
+                out.extend(entries.flatten().map(|e| e.path()).filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("GoogleDrive"))));
+            }
+        }
+    }
+    out
+}
+
+/// The workspace with the folders the user allowed around it.
+pub(crate) fn workspace_for(app: &AppHandle, settings: &Settings, dir: PathBuf) -> anyhow::Result<Arc<Workspace>> {
+    Ok(Arc::new(Workspace::new(dir)?.with_roots(&read_folders(app, settings), &settings.write_folders)))
+}
+
 /// Waddle's own source folder, if the user turned self-editing on.
 fn self_source_for(settings: &Settings) -> anyhow::Result<Option<Arc<Workspace>>> {
     match &settings.self_source_dir {
@@ -132,7 +158,7 @@ impl AppState {
 
     pub fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
         let ws_dir = settings.workspace_dir.clone().unwrap_or_else(|| self.workspace().root().to_path_buf());
-        let workspace = Arc::new(Workspace::new(ws_dir)?);
+        let workspace = workspace_for(&self.app, &settings, ws_dir)?;
         let (provider, demo) = provider_for(&settings, &self.secrets);
         let decider = decider_for(&settings, &self.secrets, demo);
         let self_source = self_source_for(&settings)?;
@@ -295,7 +321,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         .unwrap_or_default();
     let secrets = Secrets::new(&config_dir);
     let audit = Arc::new(AuditLog::open(&data_dir.join("audit.sqlite"))?);
-    let workspace = Arc::new(Workspace::new(settings.workspace_dir.clone().unwrap_or_else(|| default_workspace(&handle)))?);
+    let workspace = workspace_for(&handle, &settings, settings.workspace_dir.clone().unwrap_or_else(|| default_workspace(&handle)))?;
 
     let geometry = place_overlay(&handle)?;
     let overlay = OverlayState::new(geometry);
@@ -346,6 +372,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     );
 
     app.manage(AppState {
+        app: handle.clone(),
         session,
         host: host.clone(),
         overlay: overlay.clone(),

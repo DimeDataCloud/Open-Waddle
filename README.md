@@ -55,6 +55,12 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - In full screen (a film, a presentation) the duck shows a small "!" and waits until you're back or five minutes have passed. Meetings always arrive before they start.
   - The first time you're at the computer after 6 am, it offers a **brief**: today's meetings and important unread email, in one short paragraph (about $0.0005).
   - Waddle starts with Windows (switch it off in Settings), so the nudges work without you opening it.
+- **Find and read your files.** "Find my train ticket from October and tell me what I paid", "summarise the PDF I downloaded this morning", "what's the total in budget.xlsx?"
+  - Waddle searches your Documents, Downloads, Desktop, Pictures, Music, Videos and Google Drive folders by name, then by text inside.
+  - It reads PDF, Word, PowerPoint, Excel and CSV files as text, and with Google connected, your Google Drive too (Docs, Sheets and Slides).
+  - It makes new Word, Excel, CSV and Markdown files, and moves and renames files, only in its workspace and folders you allow (Settings → Files). Each change shows a 2 s notice.
+  - Deleting sends things to the Recycle Bin and waits for your click. Overwriting a file keeps the old copy in the Recycle Bin.
+  - App data, SSH keys, password databases, browser profiles and `.env` files are always off limits.
 - **Use Chrome properly** (with Waddle's extension: Settings → Chrome → **Set up Chrome extension**).
   - Waddle reads the page's text, or its buttons, links and fields, instead of squinting at screenshots, and acts on them by name. "Fill in this form with my work address", "open the second result", "what does this page say about returns?"
   - Clicks are real mouse clicks: the duck walks to the button and presses it, so pages behave just as they do for you.
@@ -77,9 +83,9 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
 | Tier | What | What happens |
 |---|---|---|
 | 0 | Reading the screen or a web page, pointing at things | Runs silently |
-| 1 | Opening apps, going to web pages and switching tabs, scrolling, reading the workspace or clipboard, reading your mail, calendar and contacts, reminders, remembering facts, starting sub-tasks | Runs, logged |
-| 2 | Clicks and typing (in apps or on web pages), closing tabs, dragging, copying to the clipboard, replacing a selection, new files, read-only commands (`dir`, `git status`…), mail drafts, archiving and labels, new or changed events, invitations and replies to them | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
-| 3 | Deleting/overwriting, any other command, network, self-changes (skills, settings, own code), sending email (the card shows the whole message, editable, then 10 s to Undo), binning mail, deleting events | Waddle turns red and **waits for your click** |
+| 1 | Opening apps, going to web pages and switching tabs, scrolling, finding and reading your files and Google Drive, reading the clipboard, reading your mail, calendar and contacts, reminders, remembering facts, starting sub-tasks | Runs, logged |
+| 2 | Clicks and typing (in apps or on web pages), closing tabs, dragging, copying to the clipboard, replacing a selection, new files and documents, overwriting (old copy to the Recycle Bin), moving and renaming files, read-only commands (`dir`, `git status`…), mail drafts, archiving and labels, new or changed events, invitations and replies to them | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
+| 3 | Deleting (to the Recycle Bin), any other command, network, self-changes (skills, settings, own code), sending email (the card shows the whole message, editable, then 10 s to Undo), binning mail, deleting events | Waddle turns red and **waits for your click** |
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
 - **Screen and file contents are treated as data.** Text from the screen, files and command output is wrapped in tags with an unguessable id. The model is told never to follow instructions inside them.
@@ -151,6 +157,10 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 21. Settings → Chrome → **Set up Chrome extension**, then follow the three steps → "Connected (extension 0.1.12)".
 22. On any sign-up or search page: "fill in the search box with rubber ducks and press search" → the duck walks to the field and button on screen and the page reacts as if you'd clicked.
 23. "Search for the weather in Paris and tell me tomorrow's forecast" → Google's results open in Chrome and Waddle answers from them.
+24. Download any PDF, then ask "what's the PDF I just downloaded about?" → Waddle finds it in Downloads and summarises it, with no approval needed.
+25. "Make a spreadsheet of my last three electricity bills" (with the bills in Documents) → a 2 s notice, then an .xlsx in `Documents\Waddle` that opens in Excel.
+26. Settings → Files: add a folder to the "create, change" list, then "move the receipts from my workspace into <that folder>" → notices, and the files move. "Delete the old one" → a red card; after you approve, the file is in the Recycle Bin.
+27. With Google connected (press **Connect** again after this update, to allow Drive), "what does my Drive say about the budget?" → it finds and reads Docs and Sheets.
 
 ## Something not working?
 

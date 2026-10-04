@@ -72,13 +72,19 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "drag" => assess(Tier::ScopedMutation, "drags in another application"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
         "read_file" | "list_dir" => assess(Tier::NonDestructive, "reads the workspace"),
+        "find_files" | "read_document" => assess(Tier::NonDestructive, "reads your files"),
+        "drive_search" | "drive_read" => assess(Tier::NonDestructive, "reads your Google Drive"),
+        "move_file" | "rename_file" => assess(Tier::ScopedMutation, "moves or renames a file in a folder you allowed"),
+        "create_document" if ctx.file_exists(arg("path")) => assess(Tier::ScopedMutation, "replaces a file (the old copy goes to the Recycle Bin)"),
+        "create_document" => assess(Tier::ScopedMutation, "creates a new document"),
+        "delete_file" => assess(Tier::Destructive, "sends a file to the Recycle Bin"),
         "save_skill" | "forget_skill" => assess(Tier::Destructive, "changes Waddle's long-term memory (loaded into every task)"),
         "update_settings" => assess(Tier::Destructive, "changes Waddle's own settings"),
         "delegate" => assess(Tier::NonDestructive, "starts a sub-task; each of its actions is gated on its own"),
         "write_file" if is_self_path(arg("path")) => assess(Tier::Destructive, "edits Waddle's own source code"),
         "write_file" => {
             if ctx.file_exists(arg("path")) {
-                assess(Tier::Destructive, "overwrites an existing file")
+                assess(Tier::ScopedMutation, "overwrites a file (the old copy goes to the Recycle Bin)")
             } else {
                 assess(Tier::ScopedMutation, "creates a new file in the workspace")
             }
@@ -232,7 +238,12 @@ mod tests {
     #[test]
     fn write_file_escalates_when_overwriting() {
         assert_eq!(tier_of("write_file", json!({"path":"new.txt"}), false), Tier::ScopedMutation);
-        assert_eq!(tier_of("write_file", json!({"path":"old.txt"}), true), Tier::Destructive);
+        assert_eq!(tier_of("write_file", json!({"path":"old.txt"}), true), Tier::ScopedMutation, "the old copy goes to the Recycle Bin");
+        assert_eq!(tier_of("write_file", json!({"path":"self/src/lib.rs"}), true), Tier::Destructive, "own code still needs a click");
+        assert_eq!(tier_of("delete_file", json!({"path":"x"}), true), Tier::Destructive);
+        assert_eq!(tier_of("move_file", json!({}), true), Tier::ScopedMutation);
+        assert_eq!(tier_of("find_files", json!({}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("drive_read", json!({}), false), Tier::NonDestructive);
     }
 
     #[test]

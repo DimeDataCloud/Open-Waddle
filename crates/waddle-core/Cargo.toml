@@ -23,6 +23,11 @@ hex = "0.4"
 getrandom = "0.3"
 regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+calamine = "0.36.1"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+quick-xml = "0.42.0"
+pdf-extract = "0.12.1"
+trash = "5.2.9"
 
 [dev-dependencies]
 tempfile = "3"

@@ -4,6 +4,7 @@ Once connected, Waddle can:
 - read and tidy your Gmail
 - check and book your Google Calendar
 - look up your Google Contacts
+- read your Google Drive
 
 | What Waddle does | What you see |
 |---|---|
@@ -21,10 +22,11 @@ Waddle talks to Google directly from your computer, using an OAuth client you cr
 
 1. Open [console.cloud.google.com](https://console.cloud.google.com/) signed in with the account you'll connect.
 2. Create a project and call it **Waddle**.
-3. Open **APIs & Services → Library** and enable these three:
+3. Open **APIs & Services → Library** and enable these four:
    - **Gmail API**
    - **Google Calendar API**
    - **People API**
+   - **Google Drive API**
 
 ## 2. Set up the consent screen
 
@@ -62,6 +64,7 @@ Google calls it a secret, but an installed app can't really keep one. What prote
    - Gmail (read, send, organise)
    - Calendar events
    - Contacts (read-only)
+   - Drive (read-only)
 5. The browser tab says "Waddle is connected", and Settings shows **Connected as you@…**.
 
 Try it: "what's my next meeting?", "any important unread email?", "reply to Sam that Thursday works", "find 45 minutes with Ana next week".
@@ -88,4 +91,5 @@ If you don't connect, Waddle still helps with email and calendar. It works in Gm
 | `access_denied` / "app is being tested" | Add your address under **Test users** (External apps). |
 | "sign-in has expired or was revoked" | Press **Connect** again. External apps in Testing expire every 7 days. |
 | "insufficient authentication scopes" | Press **Disconnect**, then **Connect**, and tick every box Google offers. |
-| A Gmail, Calendar or People API "has not been used in project" error | Enable that API (step 1) and wait a minute. |
+| A Gmail, Calendar, People or Drive API "has not been used in project" error | Enable that API (step 1) and wait a minute. |
+| Drive searches say to reconnect | You connected before Waddle 0.1.13, which added Drive. Press **Disconnect**, then **Connect**. |

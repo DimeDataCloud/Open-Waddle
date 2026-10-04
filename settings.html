@@ -96,6 +96,18 @@
         </fieldset>
 
         <fieldset>
+          <legend>Files</legend>
+          <p class="muted">Waddle always works freely in its own workspace folder. Here you choose what else it may reach. Deleting always sends files to the Recycle Bin and waits for your OK. App data, keys, passwords and browser profiles stay off limits.</p>
+          <label class="check"><input id="read_user_folders" type="checkbox" /> Let Waddle read my Documents, Downloads, Desktop, Pictures, Music, Videos and Google Drive folders</label>
+          <label>Also let it read (one folder per line)
+            <textarea id="read_folders" rows="2" placeholder="D:\Projects"></textarea>
+          </label>
+          <label>Let it create, change, move and rename files in (one folder per line)
+            <textarea id="write_folders" rows="2" placeholder="C:\Users\you\Documents\Sorted"></textarea>
+          </label>
+        </fieldset>
+
+        <fieldset>
           <legend>Chrome</legend>
           <p class="muted">With Waddle's extension, Waddle reads web pages and clicks links and buttons by name instead of guessing from screenshots: faster and more reliable. It only acts when you've asked it to do something.</p>
           <p id="browser-status" class="muted"></p>
