@@ -16,12 +16,13 @@ use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
 use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
 use waddle_core::tools::fs::Workspace;
-use waddle_core::tools::GuiAction;
+use waddle_core::tools::{GuiAction, WindowInfo};
 use waddle_core::skills::SkillStore;
 use waddle_core::{AgentEvent, Decision, Host, Lane, Outcome, Session, SessionConfig, Settings};
 
 fn settings() -> Settings {
-    Settings { model: "test-model".into(), tier2_countdown_ms: 20, ..Settings::default() }
+    // Most tests script exact tool sequences; the opening look has its own test.
+    Settings { model: "test-model".into(), tier2_countdown_ms: 20, look_first: false, ..Settings::default() }
 }
 
 struct Fixture {
@@ -155,6 +156,51 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
     assert!(matches!(gui[1], GuiAction::Click { x, y, .. } if x == 720.0 && y == 240.0), "{:?}", gui[1]);
     let second = provider.requests.lock().unwrap()[1].clone();
     assert!(second.iter().any(|m| m.role == Role::User && !m.images.is_empty()));
+}
+
+#[tokio::test]
+async fn the_first_request_shows_the_screen() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Clicking Play.", vec![call("click", json!({"x": 100, "y": 100}))]), reply("Done.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    *host.windows.lock().unwrap() = vec![WindowInfo { title: "DuckTube".into(), app: "chrome".into(), x: 0.0, y: 0.0, w: 1440.0, h: 960.0, focused: true }];
+    let deps = AgentDeps { settings: Settings { look_first: true, ..settings() }, ..deps_with(&f, host.clone(), provider.clone(), None, None) };
+    let env = host.env();
+    let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    agent.run("play my playlist", &[], &mut rx).await;
+
+    let first = provider.requests.lock().unwrap()[0].clone();
+    let goal = first.last().unwrap();
+    assert_eq!(goal.role, Role::User);
+    assert!(goal.text.starts_with("play my playlist"), "{}", goal.text);
+    assert!(goal.text.contains("DuckTube") && goal.text.contains("<untrusted"), "window titles arrive wrapped: {}", goal.text);
+    assert_eq!(goal.images.len(), 1);
+    // Having seen the screen, the click is allowed straight away.
+    let gui = host.gui_calls.lock().unwrap().clone();
+    assert_eq!(gui[..2], [GuiAction::ListWindows, GuiAction::LookAtScreen]);
+    assert!(matches!(gui[2], GuiAction::Click { .. }), "{gui:?}");
+}
+
+#[tokio::test]
+async fn a_third_identical_click_is_refused() {
+    let f = fixture();
+    let click = || call("click", json!({"x": 10, "y": 10}));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Looking.", vec![call("list_windows", json!({}))]),
+        reply("Clicking.", vec![click()]),
+        reply("Again.", vec![click()]),
+        reply("Again.", vec![click()]),
+        reply("Trying elsewhere.", vec![call("click", json!({"x": 20, "y": 10}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let clicks = host.gui_calls.lock().unwrap().iter().filter(|a| matches!(a, GuiAction::Click { .. })).count();
+    assert_eq!(clicks, 3, "the third identical click is refused, a different one goes through");
+    let fifth = provider.requests.lock().unwrap()[4].clone();
+    assert!(fifth.last().unwrap().text.contains("already done exactly this twice"), "{:?}", fifth.last());
 }
 
 #[tokio::test]

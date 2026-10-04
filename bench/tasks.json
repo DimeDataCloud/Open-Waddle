@@ -1,0 +1,29 @@
+{
+  "_doc": "Waddle model benchmark. Each task shows one screenshot (bench/screens/<screen>.png, boxes from boxes.json plus any listed here) and checks the agent's actions. `expect` is a sequence of steps; each step lists alternatives, any of which satisfies it. See crates/waddle-core/tests/bench.rs.",
+  "extra_boxes": { "signup": { "name": [254, 336, 594, 380], "subscribe": [360, 404, 530, 458] } },
+  "windows": {
+    "video": "DuckTube - Google Chrome", "inbox": "Inbox - Mail - Google Chrome", "settings": "Settings", "editor": "Report.docx - Writer",
+    "dialog": "*Untitled - Notepad", "explorer": "Documents - File Explorer", "signup": "Signup form - Google Chrome"
+  },
+  "tasks": [
+    { "id": "playlist", "screen": "video", "goal": "Play my Lo-fi Study Mix playlist", "expect": [[{ "click": "lofi-play" }, { "click": "lofi-card" }]] },
+    { "id": "search", "screen": "video", "goal": "Search DuckTube for rubber duck debugging",
+      "expect": [[{ "type": "rubber duck debugging", "into": "search" }], [{ "keys": "enter" }, { "click": "search-btn" }]] },
+    { "id": "open-email", "screen": "inbox", "goal": "Open Grace's email about the Q3 budget", "expect": [[{ "click": "grace-row" }]] },
+    { "id": "compose", "screen": "inbox", "goal": "Start writing a new email", "expect": [[{ "click": "compose" }]] },
+    { "id": "delete-icon", "screen": "inbox", "goal": "Delete the email I'm reading", "expect": [[{ "click": "trash" }, { "keys": "delete" }, { "keys": "#" }]] },
+    { "id": "toggle", "screen": "settings", "goal": "Turn on Night light", "expect": [[{ "click": "night-toggle" }]] },
+    { "id": "nav", "screen": "settings", "goal": "Open the Bluetooth settings", "expect": [[{ "click": "nav-bt" }]] },
+    { "id": "bold", "screen": "editor", "goal": "Make the selected text bold", "expect": [[{ "click": "bold" }, { "keys": "ctrl+b" }]] },
+    { "id": "dialog", "screen": "dialog", "goal": "Close it without saving", "expect": [[{ "click": "dont-save" }, { "keys": "alt+n" }]] },
+    { "id": "file-row", "screen": "explorer", "goal": "Open budget-2026.xlsx", "expect": [[{ "click": "budget-2026" }]] },
+    { "id": "sidebar", "screen": "explorer", "goal": "Show me my Downloads folder", "expect": [[{ "click": "nav-downloads" }]] },
+    { "id": "form", "screen": "signup", "goal": "Type Ada in the name box on the signup page, then press Subscribe",
+      "expect": [[{ "type": "Ada", "into": "name" }], [{ "click": "subscribe" }]] },
+    { "id": "just-answer", "screen": "inbox", "goal": "What's the subject of the email I have open? Just tell me, don't click anything.", "answer": "offsite", "no_input": true },
+    { "id": "write-file", "goal": "Create a file named hello.txt that contains the text hi", "file": ["hello.txt", "hi"], "no_input": true },
+    { "id": "a11y", "screen": "dialog", "goal": "Close Notepad without saving",
+      "elements": [[1, "button", "Save", "save"], [2, "button", "Don't save", "dont-save"], [3, "button", "Cancel", "cancel"], [4, "edit", "Text editor", null]],
+      "expect": [[{ "element": 2 }, { "click": "dont-save" }]] }
+  ]
+}

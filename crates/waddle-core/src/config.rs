@@ -97,6 +97,34 @@ impl Default for VoiceSettings {
     }
 }
 
+/// How much hidden thinking a hosted model may do before answering (OpenRouter's
+/// `reasoning.effort`). Thinking makes each step slower and dearer; Waddle's steps
+/// are small, so most models do best with it off or low.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Reasoning {
+    /// Don't say; the model's own default applies.
+    #[default]
+    Default,
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl Reasoning {
+    /// The OpenRouter effort name, or None to leave the request unchanged.
+    pub fn effort(self) -> Option<&'static str> {
+        match self {
+            Reasoning::Default => None,
+            Reasoning::Off => Some("none"),
+            Reasoning::Low => Some("low"),
+            Reasoning::Medium => Some("medium"),
+            Reasoning::High => Some("high"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CharacterSettings {
@@ -121,6 +149,10 @@ pub struct Settings {
     /// Quick-reply model (System 1 lane): answers while a task is running. Empty = same as `model`.
     pub fast_model: String,
     pub coord_mode: CoordMode,
+    /// Hidden thinking for hosted models (OpenAI-compatible endpoints only).
+    pub reasoning: Reasoning,
+    /// Start every task with a screenshot (and the window list) attached to the request.
+    pub look_first: bool,
     pub tier2_mode: Tier2Mode,
     pub tier2_countdown_ms: u64,
     pub max_steps: u32,
@@ -147,6 +179,8 @@ impl Default for Settings {
             model: "qwen/qwen3-vl-8b-instruct".into(),
             fast_model: "google/gemini-2.5-flash-lite".into(),
             coord_mode: CoordMode::Auto,
+            reasoning: Reasoning::Default,
+            look_first: true,
             tier2_mode: Tier2Mode::Countdown,
             tier2_countdown_ms: 2000,
             max_steps: 20,
@@ -200,6 +234,8 @@ pub const SELF_EDITABLE: &[&str] = &[
     "model",
     "fast_model",
     "coord_mode",
+    "reasoning",
+    "look_first",
     "wander",
     "color",
     "tier2_mode",
@@ -234,6 +270,8 @@ pub fn apply_patch(base: &Settings, patch: &serde_json::Value) -> anyhow::Result
             "model" => next.model = text()?,
             "fast_model" => next.fast_model = text()?,
             "coord_mode" => next.coord_mode = parse_enum(k, v)?,
+            "reasoning" => next.reasoning = parse_enum(k, v)?,
+            "look_first" => next.look_first = v.as_bool().ok_or_else(|| anyhow::anyhow!("`look_first` must be true or false"))?,
             "wander" => next.wander = v.as_bool().ok_or_else(|| anyhow::anyhow!("`wander` must be true or false"))?,
             "color" => next.character.color = text()?,
             "tier2_mode" => next.tier2_mode = parse_enum(k, v)?,

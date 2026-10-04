@@ -12,6 +12,7 @@ use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, 
 pub struct OpenAiCompat {
     base_url: String,
     api_key: Option<String>,
+    reasoning: Option<&'static str>,
     http: reqwest::Client,
 }
 
@@ -21,7 +22,13 @@ impl OpenAiCompat {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("http client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, http }
+        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, http }
+    }
+
+    /// Sends OpenRouter's `reasoning.effort` with every request ("none", "low", ...).
+    pub fn with_reasoning(mut self, effort: Option<&'static str>) -> Self {
+        self.reasoning = effort;
+        self
     }
 }
 
@@ -67,7 +74,7 @@ pub(crate) fn message_to_json(m: &Message) -> Value {
     }
 }
 
-pub(crate) fn request_body(req: &ChatRequest<'_>) -> Value {
+pub(crate) fn request_body(req: &ChatRequest<'_>, reasoning: Option<&str>) -> Value {
     let mut body = json!({
         "model": req.model,
         "messages": req.messages.iter().map(message_to_json).collect::<Vec<_>>(),
@@ -75,6 +82,9 @@ pub(crate) fn request_body(req: &ChatRequest<'_>) -> Value {
         "temperature": req.temperature,
         "max_tokens": req.max_tokens,
     });
+    if let Some(effort) = reasoning {
+        body["reasoning"] = json!({ "effort": effort });
+    }
     if !req.tools.is_empty() {
         body["tools"] = req
             .tools
@@ -201,7 +211,7 @@ impl Provider for OpenAiCompat {
             .post(&url)
             .header("HTTP-Referer", "https://github.com/DimeDataCloud/Waddle")
             .header("X-Title", "Project Waddle")
-            .json(&request_body(&req));
+            .json(&request_body(&req, self.reasoning));
         if let Some(key) = self.api_key.as_deref().filter(|k| !k.is_empty()) {
             builder = builder.bearer_auth(key);
         }
@@ -298,11 +308,14 @@ mod tests {
             Message::user_with_image("screen", ImageData { mime: "image/png".into(), base64: "AAA".into() }),
         ];
         let tools = vec![ToolSpec { name: "x".into(), description: "d".into(), parameters: json!({"type":"object"}) }];
-        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 });
+        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 }, None);
         assert_eq!(body["messages"][1]["tool_calls"][0]["function"]["arguments"], "{}");
         assert_eq!(body["messages"][2]["tool_call_id"], "c9");
         assert_eq!(body["messages"][3]["content"][1]["image_url"]["url"], "data:image/png;base64,AAA");
         assert_eq!(body["tools"][0]["function"]["name"], "x");
         assert_eq!(body["stream"], true);
+        assert!(body.get("reasoning").is_none());
+        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 }, Some("none"));
+        assert_eq!(body["reasoning"]["effort"], "none");
     }
 }

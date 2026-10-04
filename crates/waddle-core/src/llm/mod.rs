@@ -157,7 +157,7 @@ pub trait Provider: Send + Sync {
 pub fn build_provider(settings: &Settings, api_key: Option<String>) -> Arc<dyn Provider> {
     match settings.provider {
         ProviderKind::OpenaiCompat => {
-            Arc::new(openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key))
+            Arc::new(openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key).with_reasoning(settings.reasoning.effort()))
         }
         ProviderKind::Ollama => Arc::new(ollama::Ollama::new(settings.base_url.clone(), settings.ollama.clone())),
         ProviderKind::Mock => Arc::new(mock::MockProvider::demo()),
