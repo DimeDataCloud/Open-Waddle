@@ -374,7 +374,12 @@ pub fn summarize(call: &ToolCall) -> String {
         "look_at_screen" => "Take a screenshot".into(),
         "find_elements" => "Read the buttons and fields on screen".into(),
         "open_app" => format!("Open {}", s("name")),
-        "click" => format!("Click at ({}, {})", num(a, "x").unwrap_or(0.0).round(), num(a, "y").unwrap_or(0.0).round()),
+        // The duck walks to the spot, so the model's raw coordinates would only confuse.
+        "click" => match (s("button").as_str(), a.get("double").and_then(Value::as_bool).unwrap_or(false)) {
+            ("right", _) => "Right-click here".into(),
+            (_, true) => "Double-click here".into(),
+            _ => "Click here".into(),
+        },
         "click_element" => format!("Click element {}", num(a, "id").unwrap_or(0.0)),
         "type_text" => format!("Type \"{}\"", short(s("text"))),
         "press_keys" => format!("Press {}", s("keys")),

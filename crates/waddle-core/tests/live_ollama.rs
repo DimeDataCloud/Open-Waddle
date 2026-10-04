@@ -54,6 +54,8 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
     let dir = tempfile::tempdir().unwrap();
     let workspace = Arc::new(Workspace::new(dir.path().join("ws")).unwrap());
     let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    // A real image even when the task needn't look: the stub image would make Ollama fail the step.
+    *host.screenshot.lock().unwrap() = Some(screen_png());
     setup(&host);
     let settings = live_settings();
     let deps = AgentDeps {
