@@ -71,6 +71,8 @@ struct Answer {
     id: String,
     question: String,
     markdown: String,
+    /// Where it was saved, so asking for it again reopens the same file.
+    saved: Option<PathBuf>,
 }
 
 /// Everything a task needs that the user can change between tasks.
@@ -243,19 +245,29 @@ impl Session {
 
     /// Saves a research answer as Markdown in the workspace and opens it.
     pub fn open_answer(&self, id: &str) -> anyhow::Result<PathBuf> {
-        let (question, markdown) = {
+        let (question, markdown, saved) = {
             let answers = self.answers.lock().unwrap();
             let a = answers.iter().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("that answer is no longer available"))?;
-            (a.question.clone(), a.markdown.clone())
+            (a.question.clone(), a.markdown.clone(), a.saved.clone())
         };
-        let workspace = self.config.read().unwrap().workspace.clone();
-        let rel = format!("research/{}.md", slug(&question));
-        let path = workspace.root().join(&rel);
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+        if let Some(path) = saved.filter(|p| p.exists()) {
+            self.host.open_path(&path);
+            return Ok(path);
         }
-        std::fs::write(&path, markdown)?;
+        let workspace = self.config.read().unwrap().workspace.clone();
+        let dir = workspace.root().join("research");
+        let base = slug(&question);
+        // An earlier answer to the same question keeps its file.
+        let path = (1..)
+            .map(|n| dir.join(if n == 1 { format!("{base}.md") } else { format!("{base}-{n}.md") }))
+            .find(|p| !p.exists())
+            .expect("a free file name");
+        crate::store::write_atomic(&path, markdown)?;
+        let rel = path.strip_prefix(workspace.root()).unwrap_or(&path).display().to_string();
         let _ = self.audit.append(AuditEntry { task_id: "research".into(), kind: "file_write".into(), detail: Some(rel), ..Default::default() });
+        if let Some(a) = self.answers.lock().unwrap().iter_mut().find(|a| a.id == id) {
+            a.saved = Some(path.clone());
+        }
         self.host.open_path(&path);
         Ok(path)
     }
@@ -435,7 +447,7 @@ Don't write a source list; it's added for you.{facts}",
         let id = format!("answer_{}", &new_task_id()[5..]);
         {
             let mut answers = self.answers.lock().unwrap();
-            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown });
+            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown, saved: None });
             let excess = answers.len().saturating_sub(KEEP_ANSWERS);
             answers.drain(..excess);
         }

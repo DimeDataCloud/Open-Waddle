@@ -98,7 +98,14 @@ async fn expired_tokens_refresh_once_and_revoked_ones_say_reconnect() {
 
     let revoked = Google::new(fg.endpoints(), FakeGoogle::client(), "rt-revoked".into());
     let err = revoked.mail_search("x", 5).await.unwrap_err().to_string();
-    assert!(err.contains("reconnect Google"), "{err}");
+    assert!(err.contains("signed me out") && err.contains("Press Connect"), "{err}");
+    assert!(revoked.is_signed_out());
+    // Once refused, Waddle stops asking Google.
+    let token_calls = || fg.state.lock().unwrap().requests.iter().filter(|r| r.path == "/token").count();
+    let asked = token_calls();
+    assert!(revoked.calendar_events(&local(chrono::Duration::zero()), &local(chrono::Duration::hours(1)), "", 5).await.is_err());
+    assert_eq!(token_calls(), asked);
+    assert!(!g.is_signed_out());
     let wrong_client = Google::new(fg.endpoints(), OAuthClient { id: "other".into(), secret: None }, "rt-1".into());
     assert!(wrong_client.mail_search("x", 5).await.is_err());
 }

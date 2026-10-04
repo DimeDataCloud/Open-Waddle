@@ -27,15 +27,12 @@ pub struct ReminderStore {
 impl ReminderStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let items = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let items = crate::store::load_json(&path);
         Self { path, items: Mutex::new(items) }
     }
 
     fn save(&self, items: &[Reminder]) -> anyhow::Result<()> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&self.path, serde_json::to_string_pretty(items)?).with_context(|| format!("saving {}", self.path.display()))
+        crate::store::write_atomic(&self.path, serde_json::to_string_pretty(items)?).with_context(|| format!("saving {}", self.path.display()))
     }
 
     pub fn list(&self) -> Vec<Reminder> {

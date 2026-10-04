@@ -103,12 +103,43 @@ pub fn is_self_path(path: &str) -> bool {
     p == "self" || p.starts_with("self/") || p.starts_with("self\\")
 }
 
+/// A shortcut in one standard spelling: lower case, modifiers first in the order
+/// ctrl, alt, shift, meta, and one name per key (`control` → `ctrl`, `win`/`cmd`/`super` → `meta`,
+/// `del` → `delete`, `esc` → `escape`). "F4 + Alt" and "alt+f4" are the same shortcut.
+pub fn canonical_keys(keys: &str) -> String {
+    const MODIFIERS: [&str; 4] = ["ctrl", "alt", "shift", "meta"];
+    let mut mods = [false; 4];
+    let mut rest: Vec<&str> = vec![];
+    let lower = keys.to_ascii_lowercase();
+    for part in lower.split('+').map(str::trim).filter(|p| !p.is_empty()) {
+        let name = match part {
+            "control" | "ctl" | "strg" => "ctrl",
+            "option" | "opt" | "altgr" => "alt",
+            "win" | "windows" | "cmd" | "command" | "super" | "logo" | "os" => "meta",
+            "del" => "delete",
+            "esc" => "escape",
+            "return" => "enter",
+            "ins" => "insert",
+            "pgup" => "pageup",
+            "pgdn" => "pagedown",
+            other => other,
+        };
+        match MODIFIERS.iter().position(|m| *m == name) {
+            Some(i) => mods[i] = true,
+            None if !rest.contains(&name) => rest.push(name),
+            None => {}
+        }
+    }
+    MODIFIERS.iter().zip(mods).filter(|(_, on)| *on).map(|(m, _)| *m).chain(rest).collect::<Vec<_>>().join("+")
+}
+
 fn classify_keys(keys: &str) -> Assessment {
-    let norm: String = keys.to_ascii_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    let norm = canonical_keys(keys);
+    // In canonical spelling (see `canonical_keys`).
     const DANGEROUS: &[&str] = &[
-        "alt+f4", "ctrl+w", "ctrl+shift+w", "ctrl+q", "cmd+q", "cmd+w", "meta+q", "meta+w",
-        "delete", "shift+delete", "ctrl+shift+delete", "ctrl+alt+delete", "win+r", "meta+r",
-        "win+l", "meta+l", "ctrl+shift+esc",
+        "alt+f4", "ctrl+f4", "ctrl+w", "ctrl+shift+w", "ctrl+q", "meta+q", "meta+w",
+        "delete", "shift+delete", "ctrl+shift+delete", "ctrl+alt+delete", "meta+r",
+        "meta+l", "ctrl+shift+escape",
     ];
     if DANGEROUS.contains(&norm.as_str()) {
         assess(Tier::Destructive, format!("`{keys}` can close windows or delete data"))
@@ -263,6 +294,11 @@ mod tests {
     #[test]
     fn dangerous_key_combos() {
         assert_eq!(tier_of("press_keys", json!({"keys":"Alt + F4"}), false), Tier::Destructive);
+        for spelled in ["f4+alt", "Control+W", "W+ctrl", "shift+del", "Win + R", "cmd+q", "esc+shift+ctrl", "Ctrl+Alt+Del", "ctrl+F4"] {
+            assert_eq!(tier_of("press_keys", json!({ "keys": spelled }), false), Tier::Destructive, "{spelled}");
+        }
+        assert_eq!(canonical_keys("Shift + Control + Left"), "ctrl+shift+left");
+        assert_eq!(canonical_keys("super+ctrl+ctrl+d"), "ctrl+meta+d");
         assert_eq!(tier_of("press_keys", json!({"keys":"ctrl+s"}), false), Tier::ScopedMutation);
     }
 

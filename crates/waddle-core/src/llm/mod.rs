@@ -98,6 +98,8 @@ pub struct ChatResponse {
     pub usage: Usage,
     /// Pages a web search found, as the server cited them.
     pub citations: Vec<Citation>,
+    /// The reply stopped at `max_tokens`: its text or tool-call arguments may be cut off.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -169,7 +171,9 @@ pub fn build_provider(settings: &Settings, api_key: Option<String>) -> Arc<dyn P
         ProviderKind::OpenaiCompat => Arc::new(
             openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key)
                 .with_reasoning(settings.reasoning.effort())
-                .with_no_training(settings.no_training && settings.is_openrouter()),
+                .with_no_training(settings.no_training && settings.is_openrouter())
+                // A local server can read a long prompt for minutes before the first token.
+                .with_stall_timeout(std::time::Duration::from_secs(if settings.is_local() { 300 } else { 60 })),
         ),
         ProviderKind::Ollama => Arc::new(ollama::Ollama::new(settings.base_url.clone(), settings.ollama.clone())),
         ProviderKind::Mock => Arc::new(mock::MockProvider::demo()),

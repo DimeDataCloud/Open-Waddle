@@ -161,6 +161,25 @@ export class Duck {
     this.body.y = y;
   }
 
+  /**
+   * After the screen changed size (rotated, docked, new scale): back inside it,
+   * falling onto whatever is below. A duck left below the new floor would fall forever.
+   */
+  keepOnScreen(screen: { w: number; h: number }): void {
+    if (this.mode === "dragged") return;
+    const b = this.body;
+    const x = Math.max(this.size.w / 2, Math.min(screen.w - this.size.w / 2, b.x));
+    const y = Math.max(this.size.h, Math.min(screen.h, b.y));
+    if (x === b.x && y === b.y) return;
+    this.cancelMove();
+    b.x = x;
+    b.y = y;
+    b.vy = 0;
+    b.grounded = false;
+    b.supportId = null;
+    this.mode = "falling";
+  }
+
   release(): void {
     if (this.mode !== "dragged") return;
     this.mode = "falling";

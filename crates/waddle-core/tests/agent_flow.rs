@@ -759,10 +759,17 @@ async fn current_facts_and_research_search_the_web() {
         AgentEvent::Offer { id, .. } => Some(id.clone()),
         _ => None,
     });
-    let path = session.open_answer(&id.unwrap()).unwrap();
-    assert!(path.ends_with("research/heat-pumps-or-gas-boilers.md"), "{}", path.display());
+    // An older answer to the same question keeps its file; asking again reopens the new one.
+    let older = f.workspace.root().join("research").join("heat-pumps-or-gas-boilers.md");
+    std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+    std::fs::write(&older, "yesterday's answer").unwrap();
+    let id = id.unwrap();
+    let path = session.open_answer(&id).unwrap();
+    assert!(path.ends_with("research/heat-pumps-or-gas-boilers-2.md"), "{}", path.display());
     assert!(std::fs::read_to_string(&path).unwrap().contains("## Running costs"));
-    assert_eq!(*host.opened.lock().unwrap(), vec![path]);
+    assert_eq!(std::fs::read_to_string(&older).unwrap(), "yesterday's answer");
+    assert_eq!(session.open_answer(&id).unwrap(), path);
+    assert_eq!(*host.opened.lock().unwrap(), vec![path.clone(), path]);
     assert!(host.busy.lock().unwrap().is_empty(), "neither started a task");
 }
 
@@ -859,4 +866,22 @@ async fn a_selection_arrives_as_untrusted_text_and_can_be_replaced_after_a_notic
     let approvals = host.approvals.lock().unwrap().clone();
     assert_eq!((approvals[0].tool.as_str(), approvals[0].tier, approvals[0].countdown_ms.is_some()), ("replace_selection", 2, true));
     assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::ReplaceSelection { text: "Would you mind sending it?".into() }));
+}
+
+#[tokio::test]
+async fn a_cut_off_tool_call_is_not_run() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| None));
+    let cut = ChatResponse { truncated: true, ..reply("", vec![call("write_file", json!({"path":"long.txt","content":"half of it"}))]) };
+    let provider = Arc::new(MockProvider::scripted(vec![
+        cut,
+        reply("", vec![call("write_file", json!({"path":"long.txt","content":"all of it"}))]),
+        reply("Saved it.", vec![]),
+    ]));
+    let (outcome, _) = run_agent(&f, host, provider.clone(), CancellationToken::new()).await;
+    assert_eq!(outcome, Outcome::Done);
+    assert_eq!(std::fs::read_to_string(f.workspace.root().join("long.txt")).unwrap(), "all of it");
+    let second = &provider.requests.lock().unwrap()[1];
+    let answer = second.iter().rev().find(|m| m.role == Role::Tool).unwrap();
+    assert!(answer.text.contains("length limit"), "{}", answer.text);
 }

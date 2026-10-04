@@ -74,6 +74,7 @@ export interface Bootstrap {
   demo: boolean;
   voice_backend: "system" | "whisper_api" | "off";
   windows: Platform[];
+  notices: string[];
 }
 
 export interface HitRect {

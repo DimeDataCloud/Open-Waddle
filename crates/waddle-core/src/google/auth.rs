@@ -87,7 +87,8 @@ async fn token_request(http: &reqwest::Client, ep: &Endpoints, client: &OAuthCli
     if !status.is_success() {
         let msg = super::api_error(status.as_u16(), &body);
         if body.contains("invalid_grant") {
-            bail!("Google sign-in has expired or was revoked; reconnect Google in Settings ({msg})");
+            log::warn!("Google refused the sign-in: {msg}");
+            return Err(anyhow::Error::msg(msg).context(super::SignedOut));
         }
         bail!(msg);
     }

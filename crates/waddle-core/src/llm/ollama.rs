@@ -79,17 +79,18 @@ pub(crate) fn request_body(req: &ChatRequest<'_>, opts: &OllamaSettings) -> Valu
     body
 }
 
-/// Applies one NDJSON line; returns true when the stream reports `done`.
+/// Applies one NDJSON line. Once the stream reports `done`, returns whether the
+/// reply stopped at the token limit.
 pub(crate) fn apply_line(
     line: &str,
     text: &mut String,
     calls: &mut Vec<ToolCall>,
     usage: &mut Usage,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<Option<bool>> {
     let line = line.trim();
     if line.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let v: Value = serde_json::from_str(line).with_context(|| format!("bad stream chunk: {line}"))?;
     if let Some(err) = v.get("error").and_then(Value::as_str) {
@@ -113,12 +114,13 @@ pub(crate) fn apply_line(
         }
     }
     let done = v.get("done").and_then(Value::as_bool).unwrap_or(false);
-    if done {
-        // Counts only the prompt tokens the server had to read, not the cached ones.
-        let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
-        *usage = Usage { prompt_tokens: n("prompt_eval_count"), completion_tokens: n("eval_count"), cost: None };
+    if !done {
+        return Ok(None);
     }
-    Ok(done)
+    // Counts only the prompt tokens the server had to read, not the cached ones.
+    let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    *usage = Usage { prompt_tokens: n("prompt_eval_count"), completion_tokens: n("eval_count"), cost: None };
+    Ok(Some(v.get("done_reason").and_then(Value::as_str) == Some("length")))
 }
 
 /// The warm-up request: the real request's opening, one token, thinking on.
@@ -168,26 +170,28 @@ impl Provider for Ollama {
         let mut calls = vec![];
         let mut usage = Usage::default();
         let mut buffer = String::new();
+        let mut truncated = false;
         let mut stream = resp.bytes_stream();
         'outer: while let Some(chunk) = stream.next().await {
             buffer.push_str(&String::from_utf8_lossy(&chunk.context("stream interrupted")?));
             while let Some(pos) = buffer.find('\n') {
                 let line: String = buffer.drain(..=pos).collect();
-                if apply_line(&line, &mut text, &mut calls, &mut usage, on_event)? {
+                if let Some(cut) = apply_line(&line, &mut text, &mut calls, &mut usage, on_event)? {
+                    truncated = cut;
                     break 'outer;
                 }
             }
         }
         if !buffer.trim().is_empty() {
-            apply_line(&buffer, &mut text, &mut calls, &mut usage, on_event)?;
+            truncated |= apply_line(&buffer, &mut text, &mut calls, &mut usage, on_event)?.unwrap_or(false);
         }
         if calls.is_empty() {
             let (cleaned, extracted) = textcalls::extract(&text);
             if !extracted.is_empty() {
-                return Ok(ChatResponse { text: cleaned, tool_calls: extracted, usage, ..Default::default() });
+                return Ok(ChatResponse { text: cleaned, tool_calls: extracted, usage, truncated, ..Default::default() });
             }
         }
-        Ok(ChatResponse { text, tool_calls: calls, usage, ..Default::default() })
+        Ok(ChatResponse { text, tool_calls: calls, usage, truncated, ..Default::default() })
     }
 }
 
@@ -209,7 +213,7 @@ mod tests {
         };
         let mut done = false;
         for l in lines {
-            done = apply_line(l, &mut text, &mut calls, &mut usage, &mut sink).unwrap();
+            done = apply_line(l, &mut text, &mut calls, &mut usage, &mut sink).unwrap().is_some();
         }
         assert!(done);
         assert_eq!(text, "Writing it.");

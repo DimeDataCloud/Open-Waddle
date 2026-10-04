@@ -77,6 +77,8 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>, shared: Shared) {
         let mut last_calendar: Option<Instant> = None;
         let mut last_mail: Option<Instant> = None;
         let mut warned_no_jev = false;
+        // The account Waddle already told the user about, so the notice comes once per sign-in.
+        let mut told_signed_out: Option<usize> = None;
         loop {
             tokio::time::sleep(TICK).await;
             let Some(state) = app.try_state::<AppState>() else { continue };
@@ -87,6 +89,19 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>, shared: Shared) {
             let now = chrono::Local::now();
             let now_ms = now.timestamp_millis();
 
+            // A refused sign-in stays refused: stop asking Google and tell the user once.
+            let google = match google {
+                Some(g) if g.is_signed_out() => {
+                    let key = Arc::as_ptr(&g) as usize;
+                    if told_signed_out != Some(key) {
+                        told_signed_out = Some(key);
+                        use waddle_core::agent::Host;
+                        host.emit(waddle_core::AgentEvent::Notice { text: "Google signed me out, so no meeting or mail nudges for now. Press Connect in Settings → Google account to sign in again.".into() });
+                    }
+                    None
+                }
+                other => other,
+            };
             if let Some(g) = &google {
                 if settings.meeting_nudges && last_calendar.is_none_or(|t| t.elapsed() >= CALENDAR_EVERY) {
                     last_calendar = Some(Instant::now());

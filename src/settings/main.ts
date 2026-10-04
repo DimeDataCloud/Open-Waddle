@@ -275,13 +275,16 @@ interface GoogleStatus {
   connected: boolean;
   email: string | null;
   error: string | null;
+  expired: boolean;
 }
 
 function showGoogle(g: GoogleStatus): void {
-  $("google-connect").classList.toggle("hidden", g.connected);
+  $("google-connect").classList.toggle("hidden", g.connected && !g.expired);
   $("google-disconnect").classList.toggle("hidden", !g.connected);
   $("google_client_secret").placeholder = g.has_secret ? "saved (leave blank to keep)" : "from the same page as the client ID";
-  $("google-status").textContent = g.connected
+  $("google-status").textContent = g.expired
+    ? "Sign-in expired: Google signed Waddle out. Press Connect to sign in again."
+    : g.connected
     ? g.email
       ? `Connected as ${g.email}.`
       : `Connected, but Google didn't answer: ${g.error ?? "unknown error"}`

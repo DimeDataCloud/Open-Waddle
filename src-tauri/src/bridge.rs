@@ -160,6 +160,12 @@ impl TauriHost {
         self.emit_overlay("desktop:windows", platforms);
     }
 
+    /// Sends the platforms again after the display changed (same windows, new conversion).
+    pub fn refresh_platforms(&self) {
+        let platforms = self.platforms();
+        self.emit_overlay("desktop:windows", platforms);
+    }
+
     fn to_platforms(&self, list: &[DesktopWindow]) -> Vec<Platform> {
         let g = self.geometry();
         list.iter()

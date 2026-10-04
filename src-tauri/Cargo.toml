@@ -33,6 +33,7 @@ keyring = "4"
 cpal = "0.18"
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [target.'cfg(not(windows))'.dependencies]

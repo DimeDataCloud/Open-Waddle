@@ -74,7 +74,7 @@ impl SkillStore {
         }
         let path = self.dir.join(format!("{name}.md"));
         let existed = path.exists();
-        std::fs::write(&path, body)?;
+        crate::store::write_atomic(&path, body)?;
         Ok(format!("{} skill \"{name}\".", if existed { "Updated" } else { "Learned" }))
     }
 

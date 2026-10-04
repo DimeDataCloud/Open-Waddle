@@ -70,6 +70,7 @@ function resize(): void {
   ctx.imageSmoothingEnabled = false;
   lastRect = null;
   rebuildSegments();
+  duck.keepOnScreen(screen);
 }
 
 function rebuildSegments(): void {
@@ -469,6 +470,7 @@ async function start(): Promise<void> {
     } else {
       bubble.say("planner", "Hi! Click me (or press Ctrl+Alt+Space) and tell me what to do.");
     }
+    for (const n of boot.notices) bubble.say("error", n);
   } catch (e) {
     bubble.say("error", `Couldn't reach the backend: ${e}`);
   }

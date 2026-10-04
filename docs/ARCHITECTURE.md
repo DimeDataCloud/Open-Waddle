@@ -69,6 +69,8 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
   - native Ollama NDJSON, with `num_thread`, `keep_alive` and `num_ctx` controls
   - a mock provider for tests and demo mode
   - tool calls written as text (`<tool_call>` blocks from local Qwen servers) are recovered
+  - rate limits, server errors and dropped connections are retried twice on the same model (1 s, then 3 s, or what `Retry-After` asks for, up to 8 s), but only before any words have reached the user; a stream silent for 60 s (300 s for local servers) counts as dropped
+  - a reply that stops at the token limit is flagged, and its tool calls are answered "cut off" instead of being run
 - **Planner (System 2):**
   - the agent loop: stream → for each tool call: approach → classify the tier → gate → act → wrap untrusted output → feed back
   - limits: 20 steps per task; a step budget shared across sub-tasks; a 5-minute task timeout
