@@ -132,6 +132,8 @@ fn check_steps(expect: &[Value], actions: &[GuiAction], boxes: &HashMap<String, 
 struct TaskResult {
     id: String,
     pass: bool,
+    /// Did the right things, but may have kept re-checking the (static) test screen until the step limit.
+    hit: bool,
     secs: f64,
     cost: f64,
     tokens: u64,
@@ -207,7 +209,11 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     let actions = host.gui_calls.lock().unwrap().clone();
     let steps = host.timeline.lock().unwrap().iter().filter(|(_, l)| l == "model call").count();
 
-    let mut pass = r.outcome == Outcome::Done || r.outcome == Outcome::Failed;
+    // The fake screen never changes after a click, so a model that checks its work
+    // sees "nothing happened" and may retry until the step limit. `hit` forgives that.
+    let provider_error = r.message.starts_with("I couldn't reach my brain");
+    let finished = (r.outcome == Outcome::Done || r.outcome == Outcome::Failed) && !provider_error;
+    let mut pass = true;
     if let Some(expect) = task["expect"].as_array() {
         pass &= check_steps(expect, &actions, boxes);
     }
@@ -224,6 +230,8 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         let body = std::fs::read_to_string(workspace.root().join(f[0].as_str().unwrap())).unwrap_or_default();
         pass &= body.trim().eq_ignore_ascii_case(f[1].as_str().unwrap());
     }
+    let hit = pass && !provider_error && r.outcome != Outcome::TimedOut;
+    let pass = pass && finished;
     if let (true, Ok(dir)) = (pass, std::env::var("WADDLE_BENCH_TRACES")) {
         let store = waddle_core::traces::TraceStore::new(dir.into());
         let (messages, tools) = agent.transcript();
@@ -250,7 +258,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         })
         .collect();
     let note = format!("{:?} [{}] {}", r.outcome, did.join(" "), r.message.chars().take(400).collect::<String>().replace('\n', " "));
-    TaskResult { id, pass, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
+    TaskResult { id, pass, hit, secs, cost: usage.cost.unwrap_or(0.0), tokens: usage.prompt_tokens + usage.completion_tokens, steps, note }
 }
 
 fn local() -> bool {
@@ -267,13 +275,19 @@ async fn benchmark_models() {
     let tag = std::env::var("WADDLE_BENCH_TAG").unwrap_or_default();
     std::fs::create_dir_all(bench_dir().join("results")).unwrap();
     let mut summary = vec![];
+    // New OpenRouter accounts get a low per-model requests-per-minute cap.
+    let limit = std::env::var("WADDLE_BENCH_CONCURRENCY").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+    let gate = Arc::new(tokio::sync::Semaphore::new(limit));
     for model in &models {
         // Tasks run concurrently (each has its own fake desktop) to keep the bench quick.
         let mut handles = vec![];
         for _ in 0..repeat {
             for task in suite.tasks.clone() {
-                let (model, suite, key) = (model.clone(), suite.clone(), key.clone());
-                let h = tokio::spawn(async move { run_task(&model, &task, &suite, &key).await });
+                let (model, suite, key, gate) = (model.clone(), suite.clone(), key.clone(), gate.clone());
+                let h = tokio::spawn(async move {
+                    let _permit = gate.acquire_owned().await.unwrap();
+                    run_task(&model, &task, &suite, &key).await
+                });
                 // A local server works through one request at a time; queueing would only add timeouts.
                 if local() {
                     let _ = h.await.map(|r| handles.push(tokio::spawn(async move { r })));
@@ -288,23 +302,24 @@ async fn benchmark_models() {
         }
         println!("\n### {model} {tag}");
         for r in &results {
-            println!("{} {:12} {:5.1}s ${:.5} {}", if r.pass { "PASS" } else { "FAIL" }, r.id, r.secs, r.cost, r.note);
+            println!("{} {:12} {:5.1}s ${:.5} {}", if r.pass { "PASS" } else if r.hit { "HIT " } else { "FAIL" }, r.id, r.secs, r.cost, r.note);
         }
         let n = results.len() as f64;
         let passed = results.iter().filter(|r| r.pass).count();
+        let hits = results.iter().filter(|r| r.hit).count();
         let secs = results.iter().map(|r| r.secs).sum::<f64>() / n;
         let cost = results.iter().map(|r| r.cost).sum::<f64>() / n;
         let tokens = results.iter().map(|r| r.tokens).sum::<u64>() as f64 / n;
         let steps = results.iter().map(|r| r.steps).sum::<usize>() as f64 / n;
-        let line = format!("{model:45} {tag:8} {passed:3}/{:<3} {secs:6.1}s/task ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
+        let line = format!("{model:45} {tag:8} {passed:3}/{:<3} hit {hits:3} {secs:6.1}s/task ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
         println!("{line}");
         summary.push(line);
         let file = bench_dir().join(format!("results/{}{}.json", model.replace('/', "__"), if tag.is_empty() { String::new() } else { format!("@{tag}") }));
         let rows: Vec<Value> = results
             .iter()
-            .map(|r| json!({ "id": r.id, "pass": r.pass, "secs": r.secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
+            .map(|r| json!({ "id": r.id, "pass": r.pass, "hit": r.hit, "secs": r.secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
             .collect();
-        std::fs::write(file, serde_json::to_string_pretty(&json!({ "model": model, "tag": tag, "passed": passed, "runs": results.len(), "secs": secs, "cost": cost, "results": rows })).unwrap()).unwrap();
+        std::fs::write(file, serde_json::to_string_pretty(&json!({ "model": model, "tag": tag, "passed": passed, "hits": hits, "runs": results.len(), "secs": secs, "cost": cost, "results": rows })).unwrap()).unwrap();
     }
     println!("\n## Summary");
     for l in summary {

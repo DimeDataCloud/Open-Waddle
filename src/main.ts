@@ -251,7 +251,7 @@ void on("reminder", ({ text, late }) => {
   touch();
   chime();
   duck.doAct("peck", performance.now(), 900);
-  bubble.say("reminder", `⏰ ${late ? "(While I was away) " : ""}${text}`);
+  bubble.say("reminder", `⏰ Reminder${late ? " (from while I was off)" : ""}: ${text}`);
 });
 
 void on("busy", (b) => {
