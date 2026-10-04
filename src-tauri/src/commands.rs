@@ -268,6 +268,12 @@ pub async fn browser_setup(state: State<'_, AppState>) -> CmdResult<BrowserStatu
     browser_status(state).await
 }
 
+/// What Waddle has spent: today, this month by purpose, the last 30 days, and the budget.
+#[tauri::command]
+pub fn spending(state: State<'_, AppState>) -> waddle_core::ledger::Summary {
+    state.ledger.summary(&chrono::Local::now())
+}
+
 #[tauri::command]
 pub async fn style_get(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(state.style.get().unwrap_or_default())

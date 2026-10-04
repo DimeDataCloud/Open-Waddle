@@ -15,6 +15,8 @@ import { chime, Pointer } from "./ui/pointer";
 
 const SCALE = 4; // sprite pixels → logical pixels (16x14 → 64x56)
 const IDLE_TICK_MS = 120;
+/** Idle frames are further apart on battery. */
+let idleTick = IDLE_TICK_MS;
 const SLEEP_AFTER_MS = 120_000;
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
@@ -119,7 +121,7 @@ function schedule(now: number): void {
   scheduled = true;
   // Full frame rate while anything moves; a slow tick when idle keeps CPU near zero.
   if (duck.isAnimating(now) || bubble.visible || approval.visible) requestAnimationFrame(loop);
-  else window.setTimeout(() => requestAnimationFrame(loop), IDLE_TICK_MS);
+  else window.setTimeout(() => requestAnimationFrame(loop), idleTick);
 }
 
 function think(now: number): void {
@@ -273,6 +275,7 @@ canvas.addEventListener("contextmenu", (e) => {
 // ---------- backend events ----------
 
 void on("desktop:windows", setWindows);
+void on("power:battery", (b) => (idleTick = b ? 250 : IDLE_TICK_MS));
 
 void on("duck:move", ({ id, x, y, purpose }) => {
   touch();

@@ -34,9 +34,17 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>) {
         let mut front = String::new();
         let mut previous: Option<String> = None;
         let mut asked: Option<(Instant, String, bool, u8)> = None;
+        let mut battery = None;
         loop {
-            tokio::time::sleep(TICK).await;
+            // Half as often on battery.
+            tokio::time::sleep(crate::power::pace(TICK, TICK * 2)).await;
             let Some(state) = app.try_state::<AppState>() else { continue };
+            // The overlay slows its idle frames on battery too.
+            let now_battery = crate::power::on_battery();
+            if battery != Some(now_battery) {
+                battery = Some(now_battery);
+                host.emit_overlay("power:battery", now_battery);
+            }
             let (on, decider) = {
                 let s = state.settings.read().unwrap();
                 (s.ambient_brain && s.wander, state.decider.read().unwrap().clone())
@@ -52,7 +60,7 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>) {
                 None => true,
                 Some((at, a, f, lvl)) => {
                     let gap = at.elapsed();
-                    gap >= MAX_GAP || (gap >= MIN_GAP && (*a != app_name || *f != fullscreen || *lvl != idle_level(idle)))
+                    gap >= MAX_GAP || (gap >= crate::power::pace(MIN_GAP, MIN_GAP * 2) && (*a != app_name || *f != fullscreen || *lvl != idle_level(idle)))
                 }
             };
             if !changed {

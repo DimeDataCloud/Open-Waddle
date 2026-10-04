@@ -67,7 +67,7 @@ pub async fn probe_model(provider: &dyn Provider, model: &str) -> anyhow::Result
     let mut on_event = |_: StreamEvent| {
         first_token.get_or_insert_with(|| started.elapsed());
     };
-    let resp = provider.chat(req, &mut on_event).await?;
+    let resp = crate::ledger::scoped(crate::ledger::Purpose::Check, provider.chat(req, &mut on_event)).await?;
     let secs = started.elapsed().as_secs_f64();
     if resp.tool_calls.iter().any(|c| c.name == "ping") {
         Ok((Status::Pass, format!("{model} answered in {secs:.1}s and called a tool")))

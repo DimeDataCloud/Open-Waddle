@@ -171,7 +171,7 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
         .await,
     );
 
-    let (provider, demo) = crate::provider_for(&settings, &state.secrets);
+    let (provider, demo) = crate::provider_for(&settings, &state.secrets, &state.ledger);
     let model = settings.model.clone();
     checks.push(
         run_check("Model", || async move {

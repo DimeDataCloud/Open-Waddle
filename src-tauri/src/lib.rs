@@ -8,6 +8,7 @@ mod browser;
 mod commands;
 mod desktop;
 mod overlay;
+mod power;
 mod presence;
 mod secrets;
 mod selftest;
@@ -29,6 +30,7 @@ use waddle_core::decide::{Decider, Jev};
 use waddle_core::facts::FactStore;
 use waddle_core::google::style::StyleNote;
 use waddle_core::google::{Endpoints, Google, OAuthClient};
+use waddle_core::ledger::{Ledger, Metered};
 use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
@@ -56,6 +58,8 @@ pub struct AppState {
     /// The signed-in Google account, if any.
     pub google: RwLock<Option<Arc<Google>>>,
     pub style: Arc<StyleNote>,
+    /// What Waddle spends on model calls, and the monthly budget.
+    pub ledger: Arc<Ledger>,
     /// Cancels a Google sign-in that's waiting for the browser.
     pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
     /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
@@ -78,22 +82,27 @@ fn default_workspace(app: &AppHandle) -> PathBuf {
 
 /// Picks the provider for these settings. Without a key for a hosted API,
 /// Waddle runs its scripted demo instead of failing on the first message.
-pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets) -> (Arc<dyn Provider>, bool) {
+/// Hosted providers are metered: every call goes in the ledger, and calls pause over budget.
+pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets, ledger: &Arc<Ledger>) -> (Arc<dyn Provider>, bool) {
     let forced_mock = std::env::var("WADDLE_PROVIDER").map(|v| v == "mock").unwrap_or(false);
     let key = secrets.get(Secret::LlmKey);
     if forced_mock || settings.provider == ProviderKind::Mock || (key.is_none() && commands::needs_key(settings)) {
         return (Arc::new(MockProvider::demo()), true);
     }
-    (build_provider(settings, key), false)
+    let provider = build_provider(settings, key);
+    if settings.is_local() {
+        return (provider, false);
+    }
+    (Arc::new(Metered::new(provider, ledger.clone())), false)
 }
 
 /// Quick decisions (Jev) need an OpenRouter key; the demo and other endpoints get none.
-pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool) -> Option<Arc<dyn Decider>> {
+pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool, ledger: &Arc<Ledger>) -> Option<Arc<dyn Decider>> {
     if demo {
         return None;
     }
     let key = secrets.get(Secret::LlmKey);
-    Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn Decider>)
+    Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j.with_ledger(ledger.clone())) as Arc<dyn Decider>)
 }
 
 /// Google's servers, or a fake on this machine for development (`WADDLE_GOOGLE_BASE`).
@@ -161,8 +170,9 @@ impl AppState {
     pub fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
         let ws_dir = settings.workspace_dir.clone().unwrap_or_else(|| self.workspace().root().to_path_buf());
         let workspace = workspace_for(&self.app, &settings, ws_dir)?;
-        let (provider, demo) = provider_for(&settings, &self.secrets);
-        let decider = decider_for(&settings, &self.secrets, demo);
+        self.ledger.set_budget(settings.monthly_budget);
+        let (provider, demo) = provider_for(&settings, &self.secrets, &self.ledger);
+        let decider = decider_for(&settings, &self.secrets, demo, &self.ledger);
         let self_source = self_source_for(&settings)?;
         let google = google_for(&settings, &self.secrets);
         waddle_core::store::write_atomic(&self.settings_path, serde_json::to_string_pretty(&settings)?)?;
@@ -377,8 +387,15 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         Err(e) => log::warn!("couldn't register the Chrome link: {e:#}"),
     }
     let host = TauriHost::new(handle.clone(), overlay.clone(), link);
-    let (provider, demo) = provider_for(&settings, &secrets);
-    let decider = decider_for(&settings, &secrets, demo);
+    let ledger = Arc::new(Ledger::new(Some(data_dir.join("spending.json"))));
+    ledger.set_budget(settings.monthly_budget);
+    {
+        use waddle_core::agent::Host;
+        let host = host.clone();
+        ledger.on_notice(move |text| host.emit(waddle_core::AgentEvent::Notice { text }));
+    }
+    let (provider, demo) = provider_for(&settings, &secrets, &ledger);
+    let decider = decider_for(&settings, &secrets, demo, &ledger);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
@@ -411,6 +428,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         },
     );
 
+    session.keep_memory_in(data_dir.join("memory.json"));
+
     app.manage(AppState {
         app: handle.clone(),
         session,
@@ -427,6 +446,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         traces,
         google: RwLock::new(google),
         style,
+        ledger,
         google_signin: Mutex::default(),
         nudges: nudges.clone(),
         data_dir: data_dir.clone(),
@@ -528,6 +548,7 @@ pub fn run() {
             commands::google_disconnect,
             commands::style_get,
             commands::style_set,
+            commands::spending,
             commands::drop_selection,
             commands::rate_task,
             commands::traces_summary,

@@ -1,7 +1,7 @@
 {
   "name": "waddle",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Project Waddle: an embodied desktop AI agent that walks to what it acts on.",
   "type": "module",
   "scripts": {

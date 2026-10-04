@@ -7,9 +7,12 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::config::{ProviderKind, Settings};
+use crate::ledger::{Ledger, Purpose};
+use crate::llm::Usage;
 
 /// What the duck does between tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -120,7 +123,12 @@ pub struct Jev {
     http: reqwest::Client,
     url: String,
     key: String,
+    /// Where each decision's cost goes; decisions stop when the budget is used up.
+    ledger: Option<Arc<Ledger>>,
 }
+
+/// What a decision costs when the answer doesn't say (measured: about $0.00002).
+const DECISION_COST: f64 = 0.00002;
 
 impl Jev {
     /// Jev is reachable with an OpenRouter key; other endpoints get no decider.
@@ -131,11 +139,21 @@ impl Jev {
         }
         let key = key.filter(|k| !k.trim().is_empty())?.to_string();
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(2)).build().ok()?;
-        Some(Self { http, url: format!("{origin}/api/alpha/decisions"), key })
+        Some(Self { http, url: format!("{origin}/api/alpha/decisions"), key, ledger: None })
+    }
+
+    /// Records each decision in the ledger, and skips decisions over budget.
+    pub fn with_ledger(mut self, ledger: Arc<Ledger>) -> Self {
+        self.ledger = Some(ledger);
+        self
     }
 
     /// Asks several questions about one state in a single call (same latency as one).
     async fn ask_all(&self, state: String, questions: Value) -> Option<Value> {
+        // Over budget, every caller falls back to its careful default.
+        if self.ledger.as_ref().is_some_and(|l| l.paused(&chrono::Local::now()).is_some()) {
+            return None;
+        }
         let body = json!({ "model": "typesafe/jev-1.13", "state": state, "questions": questions });
         let send = self.http.post(&self.url).bearer_auth(&self.key).json(&body).send();
         let res = tokio::time::timeout(Duration::from_secs(2), send).await.ok()?.ok()?;
@@ -144,6 +162,10 @@ impl Jev {
             return None;
         }
         let v: Value = tokio::time::timeout(Duration::from_secs(1), res.json()).await.ok()?.ok()?;
+        if let Some(l) = &self.ledger {
+            let cost = v.pointer("/usage/cost").and_then(Value::as_f64).unwrap_or(DECISION_COST);
+            l.record(Purpose::Decision, Usage { cost: Some(cost), ..Usage::default() }, &chrono::Local::now());
+        }
         Some(v["answers"].clone())
     }
 

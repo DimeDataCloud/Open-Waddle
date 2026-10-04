@@ -19,6 +19,7 @@ pub mod tools;
 pub mod decide;
 pub mod facts;
 pub mod google;
+pub mod ledger;
 pub mod nudges;
 pub mod reminders;
 pub mod traces;
