@@ -149,6 +149,8 @@ These are "System One" models: one quick pass that returns a yes/no probability,
   - Tasks start before the answer comes back: the planner looks at the screen while Jev decides and is dropped silently if the message turns out to be chat or research. The first model call waits for the decision, so nothing on screen happens until it's a task.
   - Measured costs: a chat reply about $0.00002, a web chat about $0.007, a research answer about $0.008 (5 sources).
 
+- **Mail importance (0.1.11):** Jev scores each new email from only the sender, subject and first line ("deserves interrupting the user now"). On the 30 labelled emails in `crates/waddle-core/tests/fixtures/importance.json`, all 18 that can wait scored 0.10 or less, and the 12 important ones scored 0.19–0.90. The nudge bar is therefore 0.4, not the planned 0.7: 29/30 right, no false alarms. The miss was "Call me when you can" from a parent (0.19). About $0.000015 per email.
+
 **Jev Router (`typesafe/jev-router`)** is a different product: it picks a chat model for each request. It isn't tested here, because its per-request model choice makes cost unpredictable.
 
 **Laya: later, for the local brain.**

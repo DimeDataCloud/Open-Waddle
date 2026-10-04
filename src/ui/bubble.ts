@@ -102,6 +102,36 @@ export class Bubble {
     this.show(REMINDER_LINGER_MS);
   }
 
+  /** A nudge with buttons (Join, Snooze, Reply…). A button's answer, if any, replaces them. */
+  nudge(text: string, actions: { id: string; label: string }[], onAction: (id: string) => Promise<string | null>): void {
+    const row = this.add("reminder", plain(text));
+    const buttons = document.createElement("div");
+    buttons.className = "nudge-actions";
+    for (const a of actions) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rate offer";
+      b.textContent = a.label;
+      b.addEventListener("click", () => {
+        buttons.querySelectorAll("button").forEach((x) => (x.disabled = true));
+        onAction(a.id).then(
+          (answer) => {
+            buttons.remove();
+            if (answer) this.say("planner", answer);
+            else if (a.id === "dismiss") this.hide();
+          },
+          (e) => {
+            buttons.remove();
+            this.say("error", String(e));
+          },
+        );
+      });
+      buttons.appendChild(b);
+    }
+    row.appendChild(buttons);
+    this.show(REMINDER_LINGER_MS);
+  }
+
   /** Appends streamed text to the open line for this lane, starting one if needed. */
   stream(lane: "planner" | "quick", text: string): void {
     let el = this.streaming.get(lane);

@@ -7,12 +7,14 @@ mod bridge;
 mod commands;
 mod desktop;
 mod overlay;
+mod presence;
 mod secrets;
 mod selftest;
 mod shortcuts;
 #[cfg(windows)]
 mod uia;
 mod voice;
+mod watch;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -54,6 +56,8 @@ pub struct AppState {
     pub style: Arc<StyleNote>,
     /// Cancels a Google sign-in that's waiting for the browser.
     pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
+    /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
+    pub nudges: watch::Shared,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -154,6 +158,23 @@ impl AppState {
         *self.demo.write().unwrap() = demo;
         *self.decider.write().unwrap() = decider;
         Ok(())
+    }
+}
+
+/// Starts Waddle at sign-in, or stops doing so. Release builds only: a development
+/// build shouldn't register itself to start with the computer.
+pub fn sync_autostart(app: &AppHandle, on: bool) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    if launcher.is_enabled().unwrap_or(!on) == on {
+        return;
+    }
+    let r = if on { launcher.enable() } else { launcher.disable() };
+    if let Err(e) = r {
+        log::warn!("autostart: {e}");
     }
 }
 
@@ -279,6 +300,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
     let facts = Arc::new(FactStore::new(data_dir.join("facts.json")));
     let style = Arc::new(StyleNote::new(data_dir.join("style.md")));
+    let nudges = watch::load(data_dir.join("nudges.json"));
+    sync_autostart(&handle, settings.autostart);
     let google = google_for(&settings, &secrets);
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
@@ -320,6 +343,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         google: RwLock::new(google),
         style,
         google_signin: Mutex::default(),
+        nudges: nudges.clone(),
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
@@ -328,6 +352,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     overlay::spawn_hit_test(handle.clone(), overlay);
     bridge::spawn_reminder_clock(host.clone(), reminders);
     ambient::spawn(handle.clone(), host.clone());
+    watch::spawn(handle.clone(), host.clone(), nudges);
     bridge::spawn_window_sampler(host);
     build_tray(&handle)?;
     {
@@ -359,6 +384,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(shortcuts::handle).build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             setup(app).map_err(|e| {
                 eprintln!("Waddle failed to start: {e:#}");
@@ -389,6 +415,7 @@ pub fn run() {
             commands::fact_forget,
             commands::open_answer,
             commands::undo_send,
+            commands::nudge_action,
             commands::google_status,
             commands::google_connect,
             commands::google_cancel,

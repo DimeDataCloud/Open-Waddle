@@ -38,6 +38,7 @@ pub struct MailSummary {
     pub internal_ms: i64,
     pub snippet: String,
     pub unread: bool,
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -105,6 +106,7 @@ fn summary(m: &Value) -> MailSummary {
         internal_ms: m["internalDate"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0),
         snippet: decode_entities(m["snippet"].as_str().unwrap_or("")),
         unread: labels(m).iter().any(|l| l == "UNREAD"),
+        labels: labels(m),
     }
 }
 
@@ -207,6 +209,11 @@ impl Google {
     pub async fn mail_search(&self, query: &str, max: u32) -> anyhow::Result<Vec<MailSummary>> {
         let list = self.get(&self.gmail("messages"), &[("q", query.to_string()), ("maxResults", max.clamp(1, 25).to_string())]).await?;
         let ids: Vec<String> = list["messages"].as_array().map(|a| a.iter().filter_map(|m| m["id"].as_str().map(str::to_string)).collect()).unwrap_or_default();
+        self.mail_summaries(&ids).await
+    }
+
+    /// Sender, subject, snippet and labels of these messages.
+    pub async fn mail_summaries(&self, ids: &[String]) -> anyhow::Result<Vec<MailSummary>> {
         let query: [(&str, String); 4] = [
             ("format", "metadata".into()),
             ("metadataHeaders", "From".into()),

@@ -18,6 +18,11 @@ interface Settings {
   google_client_id: string;
   working_hours: [number, number];
   send_undo_secs: number;
+  meeting_nudges: boolean;
+  mail_nudges: boolean;
+  morning_brief: boolean;
+  muted_senders: string[];
+  autostart: boolean;
   self_source_dir: string | null;
   max_delegation_depth: number;
   character: { id: string; color: string };
@@ -110,6 +115,11 @@ function fill(view: SettingsView): void {
   $("work_start").value = String(s.working_hours[0]);
   $("work_end").value = String(s.working_hours[1]);
   $("send_undo_secs").value = String(s.send_undo_secs);
+  $("meeting_nudges").checked = s.meeting_nudges;
+  $("mail_nudges").checked = s.mail_nudges;
+  $("morning_brief").checked = s.morning_brief;
+  $<HTMLTextAreaElement>("muted_senders").value = s.muted_senders.join("\n");
+  $("autostart").checked = s.autostart;
   $("mode").textContent = view.demo
     ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
     : `Using ${s.model}. Workspace: ${view.workspace}`;
@@ -140,6 +150,14 @@ function collect(): Settings {
     google_client_id: $("google_client_id").value.trim(),
     working_hours: [num("work_start", 9), num("work_end", 17)],
     send_undo_secs: num("send_undo_secs", 10),
+    meeting_nudges: $("meeting_nudges").checked,
+    mail_nudges: $("mail_nudges").checked,
+    morning_brief: $("morning_brief").checked,
+    muted_senders: $<HTMLTextAreaElement>("muted_senders")
+      .value.split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean),
+    autostart: $("autostart").checked,
     self_source_dir: $("self_source_dir").value.trim() || null,
     max_delegation_depth: num("max_delegation_depth", 2),
     character: { ...current.character, color: $("color").value },

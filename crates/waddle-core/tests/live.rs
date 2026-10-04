@@ -358,3 +358,28 @@ async fn the_screen_check_knows_when_google_is_reachable() {
         assert_eq!(with < 0.6, skip, "{goal}: {with:.2}");
     }
 }
+
+#[tokio::test]
+#[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.0005)"]
+async fn mail_importance_on_the_labelled_set() {
+    use waddle_core::decide::Decider;
+    assert!(openrouter(), "importance needs Jev on OpenRouter");
+    let key = std::env::var("OPENROUTER_API_KEY").ok();
+    let jev = Arc::new(waddle_core::decide::Jev::for_settings(&live_settings(), key.as_deref()).unwrap());
+    let set: Vec<serde_json::Value> = serde_json::from_str(include_str!("fixtures/importance.json")).unwrap();
+    let scores = futures_util::future::join_all(set.iter().map(|m| {
+        let jev = jev.clone();
+        async move { jev.mail_importance(m["from"].as_str().unwrap(), m["subject"].as_str().unwrap(), m["line"].as_str().unwrap()).await }
+    }))
+    .await;
+    let mut right = 0;
+    for (m, s) in set.iter().zip(&scores) {
+        let s = s.expect("Jev answered");
+        let want = m["important"].as_bool().unwrap();
+        let ok = (s >= waddle_core::nudges::IMPORTANT_ABOVE) == want;
+        right += ok as usize;
+        println!("{} {s:.2} {} — {}", if ok { "  " } else { "✗ " }, if want { "important" } else { "can wait " }, m["subject"].as_str().unwrap());
+    }
+    println!("{right}/{} at {}", set.len(), waddle_core::nudges::IMPORTANT_ABOVE);
+    assert!(right * 10 >= set.len() * 8, "at least 80% right");
+}

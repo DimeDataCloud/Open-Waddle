@@ -191,6 +191,16 @@ pub struct Settings {
     pub working_hours: (u32, u32),
     /// After Send on the send card, how long Undo stays available before the email goes.
     pub send_undo_secs: u64,
+    /// Tap the user on the shoulder five minutes before a meeting (needs Google).
+    pub meeting_nudges: bool,
+    /// Tell the user about important new email as it arrives (needs Google).
+    pub mail_nudges: bool,
+    /// Offer a morning brief on the first activity after 06:00 (needs Google).
+    pub morning_brief: bool,
+    /// Senders never nudged about: addresses, or whole domains as `@example.com`.
+    pub muted_senders: Vec<String>,
+    /// Start Waddle when the user signs in to Windows.
+    pub autostart: bool,
 }
 
 impl Default for Settings {
@@ -224,6 +234,11 @@ impl Default for Settings {
             google_client_id: String::new(),
             working_hours: (9, 17),
             send_undo_secs: 10,
+            meeting_nudges: true,
+            mail_nudges: true,
+            morning_brief: true,
+            muted_senders: vec![],
+            autostart: true,
         }
     }
 }

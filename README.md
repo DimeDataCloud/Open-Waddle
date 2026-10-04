@@ -49,6 +49,12 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - "Learn how I write emails" makes a short style note from about 20 of your sent emails, so drafts sound like you.
   - While it works through Google, the duck pecks at a little laptop.
   - Not connected? Waddle uses Gmail and Calendar in Chrome on screen instead.
+- **Taps you on the shoulder** (with Google connected):
+  - Five minutes before a meeting, with **Join** (the Meet link) and **Snooze**.
+  - When important email arrives, with **Open**, **Reply** and **Mute sender**. A tiny decision model judges importance from only the sender, subject and first line: on 30 test emails it flagged 11 of 12 important ones and none of the 18 that could wait.
+  - In full screen (a film, a presentation) the duck shows a small "!" and waits until you're back or five minutes have passed. Meetings always arrive before they start.
+  - The first time you're at the computer after 6 am, it offers a **brief**: today's meetings and important unread email, in one short paragraph (about $0.0005).
+  - Waddle starts with Windows (switch it off in Settings), so the nudges work without you opening it.
 - **Work on what you selected.** Select text anywhere and press **Ctrl+Alt+A**: the chat opens with the selection attached ("make this friendlier", "translate to French"). Waddle puts the result on your clipboard or, after a 2 s notice, replaces the selection.
 - **Remember what matters.** "Remember that I take my coffee black" or "my manager is Sam" go into a short list of facts (2 KB at most) that every later task can see. Waddle may save useful facts on its own, never from the screen, files or web pages. See and edit the list in Settings → Memory & privacy.
 - **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Each decision costs about $0.00002.
@@ -133,6 +139,10 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 14. "What's my next meeting?" → the answer comes in under 5 seconds, with the Meet link if there is one.
 15. "Reply to <someone>'s last email saying thanks" → the send card shows the whole reply; **Edit** a word, **Send**, then press **Undo** within 10 s → nothing is sent. Do it again without Undo → the reply shows up in the thread in Gmail.
 16. "Find 30 minutes with <a contact> next week and send an invite with a Meet link" → three free slots inside 9–17, then a 2 s notice, then the event and the invite.
+17. Put a meeting with a Meet link in your calendar 6 minutes from now → about 5 minutes before, the duck says "📅 … starts in 5 min." with **Join** (opens Meet) and **Snooze** (back in 2 minutes).
+18. Send yourself an email from another account with the subject "Can you call me today?" → within about 2 minutes a ✉️ nudge; **Mute sender** stops further ones (Settings → Nudges lists them).
+19. Start a full-screen video, then repeat step 17 → a red "!" over the duck instead of the bubble; leave full screen → the full nudge.
+20. Restart Windows → Waddle starts on its own. The next morning, the first time you use the computer → "☀️ Good morning! Want a quick brief of today?"
 
 ## Something not working?
 

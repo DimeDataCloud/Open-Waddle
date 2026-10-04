@@ -7,7 +7,7 @@ import { planIntent, type Plan } from "./body/intent";
 import { standBeside } from "./body/pathfind";
 import { computeSegments, type Segment, type WinRect } from "./body/platforms";
 import { SpriteRenderer } from "./body/renderer";
-import { api, on, type HitRect, type Platform } from "./ipc";
+import { api, on, type HitRect, type NudgePayload, type Platform } from "./ipc";
 import { ApprovalCard } from "./ui/approval";
 import { Bubble } from "./ui/bubble";
 import { Chat } from "./ui/chat";
@@ -122,7 +122,8 @@ function schedule(now: number): void {
 }
 
 function think(now: number): void {
-  if (duck.mode !== "idle" || busy || approval.visible || chat.visible) {
+  // Stay put while the bubble is up: its buttons are hard to hit on a moving duck.
+  if (duck.mode !== "idle" || busy || approval.visible || chat.visible || bubble.visible) {
     nextWander = Math.max(nextWander, now + 3000);
     return;
   }
@@ -206,7 +207,10 @@ function layoutUi(): void {
   approval.place(r, screen, avoid);
   // Tell the backend which areas should catch the mouse.
   const rects: HitRect[] = [r];
-  for (const el of [bubble.el, chat.el, approval.el]) {
+  if (!badge.classList.contains("hidden")) {
+    badge.style.transform = `translate(${Math.round(r.x + r.w - 6)}px, ${Math.round(r.y - 22)}px)`;
+  }
+  for (const el of [bubble.el, chat.el, approval.el, badge]) {
     if (el.classList.contains("hidden")) continue;
     const b = el.getBoundingClientRect();
     rects.push({ x: b.left, y: b.top, w: b.width, h: b.height });
@@ -294,6 +298,38 @@ void on("duck:point", ({ x, y, label }) => {
   touch();
   pointer.show(x, y, label, screen);
   duck.doAct("look", performance.now(), 800);
+});
+
+// Nudges: a "!" badge while the user is in full screen, the full nudge in the bubble otherwise.
+const badge = document.getElementById("badge") as HTMLButtonElement;
+const waiting = new Map<string, NudgePayload>();
+const shownFull = new Set<string>();
+
+function showNudge(n: NudgePayload): void {
+  waiting.delete(n.id);
+  badge.classList.toggle("hidden", waiting.size === 0);
+  if (shownFull.has(n.id)) return;
+  shownFull.add(n.id);
+  duck.doAct("peck", performance.now(), 900);
+  bubble.nudge(n.text, n.actions, (action) => api.nudgeAction(n.id, action));
+}
+
+void on("nudge", (n) => {
+  if (n.stage === "full") {
+    showNudge(n);
+    return;
+  }
+  if (shownFull.has(n.id)) return;
+  waiting.set(n.id, n);
+  badge.classList.remove("hidden");
+  badge.title = n.text;
+});
+
+void on("nudge:chime", () => chime());
+
+badge.addEventListener("click", () => {
+  touch();
+  for (const n of [...waiting.values()]) showNudge({ ...n, stage: "full" });
 });
 
 void on("reminder", ({ text, late }) => {

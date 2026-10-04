@@ -260,7 +260,13 @@ impl Session {
         Ok(path)
     }
 
-    /// Entry point for everything the user says or types.
+    /// The current provider and quick-reply model, for one-off calls like the morning brief.
+    pub fn fast(&self) -> (Arc<dyn Provider>, String) {
+        let c = self.config.read().unwrap();
+        (c.provider.clone(), c.settings.fast_model().to_string())
+    }
+
+        /// Entry point for everything the user says or types.
     pub fn user_message(self: &Arc<Self>, text: String) {
         let text = text.trim().to_string();
         if text.is_empty() {

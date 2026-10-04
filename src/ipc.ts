@@ -43,6 +43,15 @@ export interface MailDraft {
   reply_to?: string;
 }
 
+/** A tap on the shoulder: a meeting soon, important mail, or the morning brief offer. */
+export interface NudgePayload {
+  id: string;
+  kind: "meeting" | "mail" | "brief";
+  stage: "small" | "full";
+  text: string;
+  actions: { id: string; label: string }[];
+}
+
 /** Text grabbed with Ctrl+Alt+A, as the chat box shows it. */
 export interface SelectionPreview {
   chars: number;
@@ -83,6 +92,7 @@ export const api = {
   halt: () => invoke<boolean>("halt"),
   answerApproval: (id: string, approved: boolean, draft: MailDraft | null = null) => invoke<void>("answer_approval", { id, approved, draft }),
   undoSend: (id: string) => invoke<void>("undo_send", { id }),
+  nudgeAction: (id: string, action: string) => invoke<string | null>("nudge_action", { id, action }),
   duckArrived: (id: string) => invoke<void>("duck_arrived", { id }),
   setHitRects: (rects: HitRect[]) => invoke<void>("set_hit_rects", { rects }),
   setCapture: (on: boolean) => invoke<void>("set_capture", { on }),
@@ -106,6 +116,8 @@ export interface Events {
   "chat:open": { voice: boolean; selection?: SelectionPreview | null };
   "wander:toggle": null;
   undo: { id: string; secs: number };
+  nudge: NudgePayload;
+  "nudge:chime": null;
   "undo:done": { id: string; undone: boolean };
 }
 

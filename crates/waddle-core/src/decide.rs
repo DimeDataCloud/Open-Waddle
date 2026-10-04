@@ -109,6 +109,11 @@ pub trait Decider: Send + Sync {
     async fn duck_intent(&self, _situation: &Situation) -> Option<(DuckIntent, f64)> {
         None
     }
+    /// How much a new email needs the user's attention soon, from only its sender,
+    /// subject and first line.
+    async fn mail_importance(&self, _from: &str, _subject: &str, _first_line: &str) -> Option<f64> {
+        None
+    }
 }
 
 pub struct Jev {
@@ -178,6 +183,20 @@ impl Decider for Jev {
             .noul(format!("User request to a desktop assistant: {goal}"), "Doing this request needs looking at or acting on what is on the user's screen", visible, without)
             .await;
         log::info!("screen check: {p:?}");
+        p
+    }
+
+    async fn mail_importance(&self, from: &str, subject: &str, first_line: &str) -> Option<f64> {
+        let line: String = first_line.chars().take(160).collect();
+        let p = self
+            .noul(
+                format!("New email. From: {from}\nSubject: {subject}\nFirst line: {line}"),
+                "This email deserves interrupting the user now",
+                "A real person writing to them personally and expecting an answer, or something time-sensitive: a meeting change, a deadline today, a security alert, a payment problem, a delivery that needs them",
+                "Newsletters, promotions, marketing, social media, receipts, automated notifications and updates, or anything that can wait until they check their inbox",
+            )
+            .await;
+        log::info!("mail importance: {p:?}");
         p
     }
 

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/waddle-core", "src-tauri"]
 
 [workspace.package]
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/DimeDataCloud/Waddle"
@@ -26,3 +26,11 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Debug builds of a Tauri app are huge with full debug info (gigabytes per build).
+# Line tables keep useful backtraces for our own code.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

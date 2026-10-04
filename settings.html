@@ -96,6 +96,18 @@
         </fieldset>
 
         <fieldset>
+          <legend>Nudges</legend>
+          <p class="muted">With Google connected, Waddle taps you on the shoulder. In full screen it shows a small "!" first and waits until you're back (or five minutes); meetings always arrive before they start.</p>
+          <label class="check"><input id="meeting_nudges" type="checkbox" /> Five minutes before a meeting, with a Join button</label>
+          <label class="check"><input id="mail_nudges" type="checkbox" /> When important email arrives (judged from the sender, subject and first line only)</label>
+          <label class="check"><input id="morning_brief" type="checkbox" /> Offer a morning brief (today's meetings and important mail) when I start my day</label>
+          <label>Never nudge me about mail from (one address or @domain per line)
+            <textarea id="muted_senders" rows="2" placeholder="news@shop.example&#10;@marketing.example"></textarea>
+          </label>
+          <label class="check"><input id="autostart" type="checkbox" /> Start Waddle when I sign in to Windows (nudges need it running)</label>
+        </fieldset>
+
+        <fieldset>
           <legend>Memory &amp; privacy</legend>
           <label class="check"><input id="no_training" type="checkbox" /> Only use AI providers that don't keep or train on what I send (OpenRouter)</label>
           <h4>What Waddle remembers about you</h4>

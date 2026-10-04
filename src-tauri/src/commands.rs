@@ -185,6 +185,55 @@ pub async fn google_disconnect(state: State<'_, AppState>) -> CmdResult<GoogleSt
     google_status(state).await
 }
 
+/// A button on a nudge. Returns text to show in the bubble, if any.
+#[tauri::command]
+pub async fn nudge_action(state: State<'_, AppState>, id: String, action: String) -> CmdResult<Option<String>> {
+    use waddle_core::nudges::{self, Topic};
+    let topic = state.nudges.lock().unwrap().shown.get(&id).cloned();
+    let Some(topic) = topic else { return Ok(None) };
+    if action == "dismiss" {
+        state.nudges.lock().unwrap().shown.remove(&id);
+        return Ok(None);
+    }
+    match (action.as_str(), &topic) {
+        ("join", Topic::Meeting { join: Some(url), .. }) => {
+            crate::desktop::open_url(url).map_err(err)?;
+            Ok(None)
+        }
+        ("snooze", Topic::Meeting { .. }) => {
+            let now = chrono::Local::now().timestamp_millis();
+            let ok = state.nudges.lock().unwrap().state.snooze(topic.clone(), now);
+            Ok(Some(if ok { "I'll remind you again in 2 minutes.".into() } else { "It's about to start!".into() }))
+        }
+        ("open", Topic::Mail { thread_id, .. }) => {
+            crate::desktop::open_url(&format!("https://mail.google.com/mail/u/0/#all/{thread_id}")).map_err(err)?;
+            Ok(None)
+        }
+        ("reply", Topic::Mail { id, .. }) => {
+            // Only the id: the sender and subject are untrusted and mustn't become the user's words.
+            state.session.user_message(format!("Help me reply to the email with id {id}: read it, then write the reply on the send card. If what to say isn't clear, ask me first."));
+            Ok(None)
+        }
+        ("mute", Topic::Mail { from, .. }) => {
+            let addr = nudges::address(from);
+            let mut settings = state.settings.read().unwrap().clone();
+            if !settings.muted_senders.iter().any(|m| m.eq_ignore_ascii_case(&addr)) {
+                settings.muted_senders.push(addr.clone());
+                state.apply_settings(settings).map_err(err)?;
+            }
+            Ok(Some(format!("Okay, no more nudges about mail from {addr}. (Settings → Nudges to undo.)")))
+        }
+        ("brief", Topic::Brief) => {
+            let google = state.google.read().unwrap().clone().ok_or("Google isn't connected")?;
+            let (provider, model) = state.session.fast();
+            let decider = state.decider.read().unwrap().clone();
+            let text = nudges::compose_brief(&google, provider.as_ref(), &model, decider.as_deref(), chrono::Local::now()).await.map_err(|e| format!("{e:#}"))?;
+            Ok(Some(text))
+        }
+        _ => Err(format!("`{action}` doesn't apply to that nudge")),
+    }
+}
+
 #[tauri::command]
 pub async fn style_get(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(state.style.get().unwrap_or_default())
@@ -245,6 +294,7 @@ pub async fn save_settings(
     }
     state.apply_settings(settings).map_err(err)?;
     let s = state.settings.read().unwrap().clone();
+    crate::sync_autostart(&app, s.autostart);
     let _ = app.emit_to("overlay", "settings", serde_json::json!({ "color": s.character.color, "wander": s.wander, "demo": state.is_demo() }));
     Ok(view(&state, storage))
 }

@@ -418,3 +418,27 @@ body {
   gap: 10px;
   font-weight: 600;
 }
+
+/* "!" over the duck: a nudge waits while the user is in full screen. */
+.badge {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--tier3);
+  color: #fff;
+  font: 700 13px/16px system-ui, sans-serif;
+  cursor: pointer;
+  animation: pulse 1.2s infinite;
+}
+
+.bubble .nudge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
