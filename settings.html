@@ -108,6 +108,13 @@
       </form>
 
       <section>
+        <h2>Diagnostics <button type="button" id="selftest" class="link">Run self-test</button></h2>
+        <p class="muted">Checks each part of Waddle on this computer (including one small model call) and saves a report to your workspace folder. If something isn't working, send that file. It leaves out keys, file contents, window titles and what you've typed.</p>
+        <ul id="checks" class="checks"></ul>
+        <p id="selftest-result" class="muted"></p>
+      </section>
+
+      <section>
         <h2>Activity log <button type="button" id="verify" class="link">Verify integrity</button></h2>
         <p id="verify-result" class="muted"></p>
         <table>

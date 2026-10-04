@@ -192,3 +192,40 @@ h4 {
   font: 12px/1.35 inherit;
   color: var(--muted);
 }
+
+.checks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.checks li {
+  display: grid;
+  grid-template-columns: 3.2em 9.5em 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.checks .mark {
+  font-weight: 700;
+}
+
+.checks .pass .mark {
+  color: #2f8a3a;
+}
+
+.checks .warn .mark {
+  color: #b07800;
+}
+
+.checks .fail .mark {
+  color: #c0392b;
+}
+
+.checks .skip .mark,
+.checks .detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

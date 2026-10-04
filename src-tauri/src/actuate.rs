@@ -12,6 +12,11 @@ fn enigo() -> anyhow::Result<Enigo> {
     Enigo::new(&Settings::default()).map_err(|e| anyhow!("input simulation unavailable: {e}"))
 }
 
+/// Self-test: input simulation can start and read the cursor (physical pixels).
+pub fn probe_input() -> anyhow::Result<(i32, i32)> {
+    enigo()?.location().map_err(|e| anyhow!("can't read the cursor: {e}"))
+}
+
 pub fn click(x: i32, y: i32, button: MouseButton, double: bool) -> anyhow::Result<()> {
     let mut e = enigo()?;
     let home = e.location().ok();

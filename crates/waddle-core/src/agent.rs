@@ -322,6 +322,7 @@ impl<'a> Agent<'a> {
             let resp = match resp {
                 Ok(r) => r,
                 Err(e) => {
+                    log::warn!("model call failed ({}): {e:#}", self.deps.settings.model);
                     let message = format!("I couldn't reach my brain: {e:#}");
                     self.audit(AuditEntry { kind: "provider_error".into(), detail: Some(message.clone()), ..Default::default() });
                     return RunResult { outcome: Outcome::Failed, message };
@@ -510,7 +511,10 @@ Use list_windows, find_elements or look_at_screen first. If the task is already 
         };
         let (ok, outcome) = match result {
             Ok(o) => (true, o),
-            Err(e) => (false, ToolOutcome::trusted(format!("Error: {e:#}"))),
+            Err(e) => {
+                log::warn!("{} failed: {e:#}", call.name);
+                (false, ToolOutcome::trusted(format!("Error: {e:#}")))
+            }
         };
         self.emit(AgentEvent::ToolFinished {
             task_id: self.task_id.clone(),

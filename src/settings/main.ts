@@ -212,6 +212,45 @@ $("verify").addEventListener("click", async () => {
     : `Tampering detected at entry ${r.first_bad_id}.`;
 });
 
+interface Check {
+  name: string;
+  status: "pass" | "warn" | "fail" | "skip";
+  detail: string;
+  millis: number;
+}
+
+const MARKS: Record<Check["status"], string> = { pass: "OK", warn: "!", fail: "FAIL", skip: "–" };
+
+$("selftest").addEventListener("click", async () => {
+  const button = $<HTMLButtonElement>("selftest");
+  const result = $("selftest-result");
+  button.disabled = true;
+  result.textContent = "Running… (the model check can take a little while)";
+  $("checks").replaceChildren();
+  try {
+    const r = await invoke<{ checks: Check[]; report: string }>("run_self_test");
+    $("checks").replaceChildren(
+      ...r.checks.map((c) => {
+        const li = document.createElement("li");
+        li.className = c.status;
+        for (const [cls, text] of [["mark", MARKS[c.status]], ["name", c.name], ["detail", c.detail]]) {
+          const span = document.createElement("span");
+          span.className = cls;
+          span.textContent = text;
+          li.appendChild(span);
+        }
+        return li;
+      }),
+    );
+    const bad = r.checks.filter((c) => c.status === "fail" || c.status === "warn").length;
+    result.textContent = `${bad ? `${bad} item(s) need attention. ` : "Everything checks out. "}Report saved to ${r.report}`;
+  } catch (err) {
+    result.textContent = `Self-test couldn't run: ${err}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 $<HTMLFormElement>("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const status = $("status");

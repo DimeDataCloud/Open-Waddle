@@ -18,6 +18,13 @@ pub struct Recording {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+/// Self-test: the default microphone's name, without recording anything.
+pub fn probe() -> anyhow::Result<String> {
+    let device = cpal::default_host().default_input_device().ok_or_else(|| anyhow!("no microphone found"))?;
+    device.default_input_config().context("microphone config")?;
+    Ok(device.to_string())
+}
+
 pub fn start() -> anyhow::Result<Recording> {
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
     let (stop_tx, stop_rx) = mpsc::channel::<()>();

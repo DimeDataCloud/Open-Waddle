@@ -7,6 +7,7 @@ mod commands;
 mod desktop;
 mod overlay;
 mod secrets;
+mod selftest;
 mod shortcuts;
 #[cfg(windows)]
 mod uia;
@@ -52,7 +53,7 @@ fn default_workspace(app: &AppHandle) -> PathBuf {
 
 /// Picks the provider for these settings. Without a key for a hosted API,
 /// Waddle runs its scripted demo instead of failing on the first message.
-fn provider_for(settings: &Settings, secrets: &Secrets) -> (Arc<dyn Provider>, bool) {
+pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets) -> (Arc<dyn Provider>, bool) {
     let forced_mock = std::env::var("WADDLE_PROVIDER").map(|v| v == "mock").unwrap_or(false);
     let key = secrets.get(Secret::LlmKey);
     if forced_mock || settings.provider == ProviderKind::Mock || (key.is_none() && commands::needs_key(settings)) {
@@ -197,6 +198,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
 fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let handle = app.handle().clone();
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic: {info}");
+        default_hook(info);
+    }));
+    log::info!("Waddle {} starting on {} {}", app.package_info().version, std::env::consts::OS, std::env::consts::ARCH);
     let config_dir = handle.path().app_config_dir()?;
     let data_dir = handle.path().app_data_dir()?;
     let settings_path = config_dir.join("settings.json");
@@ -254,6 +261,19 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A log file in the OS log folder: release builds on Windows have no console.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: Some("waddle".into()) }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(shortcuts::handle).build())
         .setup(|app| {
             setup(app).map_err(|e| {
@@ -264,6 +284,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::send_message,
             commands::warm_up,
+            commands::run_self_test,
             commands::halt,
             commands::answer_approval,
             commands::duck_arrived,

@@ -223,6 +223,19 @@ pub async fn voice_stop(state: State<'_, AppState>) -> CmdResult<Option<String>>
     Ok(if text.is_empty() { None } else { Some(text) })
 }
 
+#[derive(Serialize)]
+pub struct SelfTestView {
+    pub checks: Vec<waddle_core::diagnostics::Check>,
+    pub report: String,
+}
+
+/// Runs every check (including one small model call) and saves the report in the workspace.
+#[tauri::command]
+pub async fn run_self_test(app: AppHandle) -> CmdResult<SelfTestView> {
+    let (checks, path) = crate::selftest::report(&app).await.map_err(err)?;
+    Ok(SelfTestView { checks, report: path.display().to_string() })
+}
+
 #[tauri::command]
 pub fn quit(app: AppHandle) {
     app.exit(0);
