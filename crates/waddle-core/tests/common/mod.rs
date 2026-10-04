@@ -42,6 +42,9 @@ pub struct FakeHost {
     /// Whether the user presses Undo after Send.
     pub undo: Mutex<bool>,
     pub undo_offers: Mutex<Vec<u64>>,
+    /// Answers from the Chrome extension by command; any entry means it's connected.
+    pub browser_replies: Mutex<std::collections::HashMap<String, serde_json::Value>>,
+    pub browser_calls: Mutex<Vec<(String, serde_json::Value)>>,
     started: Instant,
 }
 
@@ -63,6 +66,8 @@ impl FakeHost {
             draft_edit: Mutex::default(),
             undo: Mutex::new(false),
             undo_offers: Mutex::default(),
+            browser_replies: Mutex::default(),
+            browser_calls: Mutex::default(),
             started: Instant::now(),
         })
     }
@@ -88,7 +93,8 @@ impl Host for FakeHost {
     fn env(&self) -> EnvInfo {
         // Like Windows: the accessibility fast path exists when there are elements to list.
         let accessibility = !self.elements.lock().unwrap().is_empty();
-        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, accessibility, ..Default::default() } }
+        let browser = !self.browser_replies.lock().unwrap().is_empty();
+        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, accessibility, browser, ..Default::default() } }
     }
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {
         self.approvals.lock().unwrap().push(req.clone());
@@ -102,6 +108,10 @@ impl Host for FakeHost {
         let shown = req.draft.clone();
         let decision = self.request_approval(req).await;
         (decision, self.draft_edit.lock().unwrap().clone().or(shown))
+    }
+    async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        self.browser_calls.lock().unwrap().push((cmd.to_string(), args));
+        self.browser_replies.lock().unwrap().get(cmd).cloned().ok_or_else(|| anyhow::anyhow!("the page didn't answer `{cmd}`"))
     }
     async fn offer_undo(&self, _id: &str, secs: u64) -> bool {
         self.undo_offers.lock().unwrap().push(secs);

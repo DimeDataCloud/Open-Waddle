@@ -4,6 +4,7 @@
 //! Coordinates: the host works in logical screen pixels. The model may use
 //! pixels or a 0..1000 grid (see `CoordMode`); conversion happens only here.
 
+pub mod browser;
 pub mod fs;
 pub mod shell;
 
@@ -33,6 +34,8 @@ pub struct Capabilities {
     pub selection: bool,
     /// Gmail, Calendar and Contacts are connected.
     pub google: bool,
+    /// Chrome is reachable through Waddle's extension.
+    pub browser: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -280,6 +283,9 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
     if caps.google {
         v.extend(crate::google::tools::specs());
     }
+    if caps.browser {
+        v.extend(browser::specs());
+    }
     if caps.memory {
         v.push(spec(
             "remember",
@@ -378,7 +384,7 @@ pub fn is_gui_tool(name: &str) -> bool {
 
 /// Tools that only read and never use the screen: several in one turn run at once.
 pub fn is_parallel_read(name: &str) -> bool {
-    matches!(name, "read_file" | "list_dir") || crate::google::tools::is_parallel_read(name)
+    matches!(name, "read_file" | "list_dir" | "browser_read") || crate::google::tools::is_parallel_read(name)
 }
 
 fn num(args: &Value, k: &str) -> Option<f64> {
@@ -537,7 +543,7 @@ pub fn summarize(call: &ToolCall) -> String {
         "forget_skill" => format!("Forget skill \"{}\"", s("name")),
         "update_settings" => format!("Change my settings: {}", a.get("changes").map(|c| c.to_string()).unwrap_or_default()),
         "list_dir" => format!("List {}", if s("path").is_empty() { "the workspace".into() } else { s("path") }),
-        other => crate::google::tools::summarize(call).unwrap_or_else(|| format!("Use {other}")),
+        other => crate::google::tools::summarize(call).or_else(|| browser::summarize(call)).unwrap_or_else(|| format!("Use {other}")),
     }
 }
 
@@ -612,7 +618,8 @@ mod tests {
         let names = |caps| specs(caps, &c).into_iter().map(|s| s.name).collect::<Vec<_>>();
         let headless = names(Capabilities::default());
         assert!(headless.contains(&"run_command".to_string()) && !headless.contains(&"click".to_string()));
-        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true, google: true });
+        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true, google: true, browser: true });
+        assert!(full.contains(&"browser_click".to_string()) && !headless.contains(&"browser_read".to_string()));
         assert!(full.contains(&"mail_send".to_string()) && full.contains(&"calendar_free".to_string()));
         assert!(!headless.contains(&"mail_search".to_string()), "Google tools only when connected");
         assert!(full.contains(&"reminder".to_string()) && full.contains(&"point_at".to_string()));

@@ -5,7 +5,7 @@
 #[cfg(not(windows))]
 mod fallback;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 use serde::Serialize;
 

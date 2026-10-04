@@ -4,6 +4,7 @@
 mod ambient;
 mod actuate;
 mod bridge;
+mod browser;
 mod commands;
 mod desktop;
 mod overlay;
@@ -58,6 +59,7 @@ pub struct AppState {
     pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
     /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
     pub nudges: watch::Shared,
+    pub data_dir: PathBuf,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -178,6 +180,11 @@ pub fn sync_autostart(app: &AppHandle, on: bool) {
     }
 }
 
+/// The relay Chrome starts (`waddle.exe chrome-extension://…/`).
+pub fn native_host() -> i32 {
+    browser::run_native_host()
+}
+
 /// Gives the overlay keyboard focus so the chat box can take typing.
 pub fn focus_overlay(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("overlay") {
@@ -292,7 +299,18 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
 
     let geometry = place_overlay(&handle)?;
     let overlay = OverlayState::new(geometry);
-    let host = TauriHost::new(handle.clone(), overlay.clone());
+    let link = browser::BrowserLink::new();
+    link.serve();
+    match browser::register_host(&data_dir) {
+        Ok(_) => {
+            // Keep an already set-up extension in step with this version of the app.
+            if data_dir.join("extension").exists() {
+                let _ = browser::install_extension(&data_dir);
+            }
+        }
+        Err(e) => log::warn!("couldn't register the Chrome link: {e:#}"),
+    }
+    let host = TauriHost::new(handle.clone(), overlay.clone(), link);
     let (provider, demo) = provider_for(&settings, &secrets);
     let decider = decider_for(&settings, &secrets, demo);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
@@ -344,6 +362,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         style,
         google_signin: Mutex::default(),
         nudges: nudges.clone(),
+        data_dir: data_dir.clone(),
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
@@ -416,6 +435,8 @@ pub fn run() {
             commands::open_answer,
             commands::undo_send,
             commands::nudge_action,
+            commands::browser_status,
+            commands::browser_setup,
             commands::google_status,
             commands::google_connect,
             commands::google_cancel,

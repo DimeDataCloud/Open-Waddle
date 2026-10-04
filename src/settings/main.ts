@@ -312,6 +312,38 @@ $("style-save").addEventListener("click", async () => {
   setTimeout(() => ($("style-save").textContent = "Save note"), 1500);
 });
 
+interface BrowserStatus {
+  connected: boolean;
+  version: string | null;
+  folder: string | null;
+}
+
+function showBrowser(b: BrowserStatus): void {
+  $("browser-status").textContent = b.connected
+    ? `Connected (extension ${b.version ?? "?"}).`
+    : b.folder
+      ? "Not connected. Is Chrome open with the extension loaded?"
+      : "Not set up yet.";
+  if (b.folder) $("browser-folder").textContent = b.folder;
+  $("browser-steps").classList.toggle("hidden", b.connected || !b.folder);
+}
+
+async function loadBrowser(): Promise<void> {
+  try {
+    showBrowser(await invoke<BrowserStatus>("browser_status"));
+  } catch (err) {
+    $("browser-status").textContent = String(err);
+  }
+}
+
+$("browser-setup").addEventListener("click", async () => {
+  try {
+    showBrowser(await invoke<BrowserStatus>("browser_setup"));
+  } catch (err) {
+    $("browser-status").textContent = `Couldn't set up: ${err}`;
+  }
+});
+
 async function loadStyle(): Promise<void> {
   const note = $<HTMLTextAreaElement>("style-note");
   if (document.activeElement !== note) note.value = await invoke<string>("style_get");
@@ -443,7 +475,9 @@ void loadSkills();
 void loadFacts();
 void loadGoogle();
 void loadStyle();
+void loadBrowser();
 setInterval(() => {
+  void loadBrowser();
   void loadStyle();
   void loadAudit();
   void loadSkills();

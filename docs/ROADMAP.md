@@ -3,7 +3,7 @@
 ## Context
 
 **Where things stand**
-- v0.1.8 is on main, including Jev ambient behaviour, the instant chat lane and quiet mode. Milestone 1 (0.1.9) adds routing, research, memory and the selection hotkey; milestone 2 (0.1.10) adds Gmail, Calendar and Contacts; milestone 3 (0.1.11) adds nudges, the morning brief and autostart.
+- v0.1.8 is on main, including Jev ambient behaviour, the instant chat lane and quiet mode. Milestone 1 (0.1.9) adds routing, research, memory and the selection hotkey; milestone 2 (0.1.10) adds Gmail, Calendar and Contacts; milestone 3 (0.1.11) adds nudges, the morning brief and autostart; milestone 4 (0.1.12) adds the Chrome extension.
 - The duck can drive the screen, point, scroll, drag, use the clipboard and set reminders. Jev makes the ~0.3 s decisions.
 - Nothing has run on the Surface yet.
 

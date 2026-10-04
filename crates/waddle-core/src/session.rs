@@ -660,6 +660,13 @@ impl Host for Held {
     async fn offer_undo(&self, id: &str, secs: u64) -> bool {
         self.inner.offer_undo(id, secs).await
     }
+    async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        // Reading is fine while undecided; anything else waits for the go-ahead.
+        if !matches!(cmd, "read" | "tabs") && !self.confirmed().await {
+            anyhow::bail!("cancelled");
+        }
+        self.inner.browser(cmd, args).await
+    }
     async fn approach(&self, action: &GuiAction, cancel: &CancellationToken) {
         if self.confirmed().await {
             self.inner.approach(action, cancel).await

@@ -55,6 +55,11 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - In full screen (a film, a presentation) the duck shows a small "!" and waits until you're back or five minutes have passed. Meetings always arrive before they start.
   - The first time you're at the computer after 6 am, it offers a **brief**: today's meetings and important unread email, in one short paragraph (about $0.0005).
   - Waddle starts with Windows (switch it off in Settings), so the nudges work without you opening it.
+- **Use Chrome properly** (with Waddle's extension: Settings → Chrome → **Set up Chrome extension**).
+  - Waddle reads the page's text, or its buttons, links and fields, instead of squinting at screenshots, and acts on them by name. "Fill in this form with my work address", "open the second result", "what does this page say about returns?"
+  - Clicks are real mouse clicks: the duck walks to the button and presses it, so pages behave just as they do for you.
+  - "Search for…" goes straight to Google's results and reads them.
+  - Without the extension, Waddle still drives Chrome from the screen.
 - **Work on what you selected.** Select text anywhere and press **Ctrl+Alt+A**: the chat opens with the selection attached ("make this friendlier", "translate to French"). Waddle puts the result on your clipboard or, after a 2 s notice, replaces the selection.
 - **Remember what matters.** "Remember that I take my coffee black" or "my manager is Sam" go into a short list of facts (2 KB at most) that every later task can see. Waddle may save useful facts on its own, never from the screen, files or web pages. See and edit the list in Settings → Memory & privacy.
 - **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Each decision costs about $0.00002.
@@ -71,9 +76,9 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
 
 | Tier | What | What happens |
 |---|---|---|
-| 0 | Reading the screen, pointing at things | Runs silently |
-| 1 | Opening apps, scrolling, reading the workspace or clipboard, reading your mail, calendar and contacts, reminders, remembering facts, starting sub-tasks | Runs, logged |
-| 2 | Clicks, typing, dragging, copying to the clipboard, replacing a selection, new files, read-only commands (`dir`, `git status`…), mail drafts, archiving and labels, new or changed events, invitations and replies to them | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
+| 0 | Reading the screen or a web page, pointing at things | Runs silently |
+| 1 | Opening apps, going to web pages and switching tabs, scrolling, reading the workspace or clipboard, reading your mail, calendar and contacts, reminders, remembering facts, starting sub-tasks | Runs, logged |
+| 2 | Clicks and typing (in apps or on web pages), closing tabs, dragging, copying to the clipboard, replacing a selection, new files, read-only commands (`dir`, `git status`…), mail drafts, archiving and labels, new or changed events, invitations and replies to them | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
 | 3 | Deleting/overwriting, any other command, network, self-changes (skills, settings, own code), sending email (the card shows the whole message, editable, then 10 s to Undo), binning mail, deleting events | Waddle turns red and **waits for your click** |
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
@@ -143,6 +148,9 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 18. Send yourself an email from another account with the subject "Can you call me today?" → within about 2 minutes a ✉️ nudge; **Mute sender** stops further ones (Settings → Nudges lists them).
 19. Start a full-screen video, then repeat step 17 → a red "!" over the duck instead of the bubble; leave full screen → the full nudge.
 20. Restart Windows → Waddle starts on its own. The next morning, the first time you use the computer → "☀️ Good morning! Want a quick brief of today?"
+21. Settings → Chrome → **Set up Chrome extension**, then follow the three steps → "Connected (extension 0.1.12)".
+22. On any sign-up or search page: "fill in the search box with rubber ducks and press search" → the duck walks to the field and button on screen and the page reacts as if you'd clicked.
+23. "Search for the weather in Paris and tell me tomorrow's forecast" → Google's results open in Chrome and Waddle answers from them.
 
 ## Something not working?
 

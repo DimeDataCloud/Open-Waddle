@@ -234,6 +234,35 @@ pub async fn nudge_action(state: State<'_, AppState>, id: String, action: String
     }
 }
 
+#[derive(Serialize)]
+pub struct BrowserStatus {
+    pub connected: bool,
+    pub version: Option<String>,
+    pub folder: Option<String>,
+}
+
+#[tauri::command]
+pub async fn browser_status(state: State<'_, AppState>) -> CmdResult<BrowserStatus> {
+    let folder = state.data_dir.join("extension");
+    Ok(BrowserStatus {
+        connected: state.host.browser.connected(),
+        version: state.host.browser.version(),
+        folder: folder.exists().then(|| folder.display().to_string()),
+    })
+}
+
+/// Puts the extension in a folder Chrome can load it from, registers the relay,
+/// and opens the folder. Chrome needs one manual step: Load unpacked.
+#[tauri::command]
+pub async fn browser_setup(state: State<'_, AppState>) -> CmdResult<BrowserStatus> {
+    let folder = crate::browser::install_extension(&state.data_dir).map_err(err)?;
+    crate::browser::register_host(&state.data_dir).map_err(err)?;
+    if let Err(e) = crate::desktop::open_path(&folder) {
+        log::warn!("{e:#}");
+    }
+    browser_status(state).await
+}
+
 #[tauri::command]
 pub async fn style_get(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(state.style.get().unwrap_or_default())

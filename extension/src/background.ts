@@ -1,0 +1,137 @@
+// Waddle's Chrome extension: a native-messaging link to the desktop app.
+// The app sends {id, cmd, args}; this answers {id, ok, result | error}.
+// Nothing runs unless the app asks, and the app only asks when the user gave Waddle a task.
+
+import { clickElement, locateElement, readPage, typeInto } from "./page.js";
+
+const HOST = "dev.waddle.app";
+const LOAD_TIMEOUT_MS = 15_000;
+
+interface Request {
+  id: number;
+  cmd: string;
+  args: Record<string, unknown>;
+}
+
+let port: chrome.runtime.Port | null = null;
+
+function connect(): void {
+  if (port) return;
+  try {
+    port = chrome.runtime.connectNative(HOST);
+  } catch {
+    port = null;
+    return;
+  }
+  port.onMessage.addListener((msg: Request) => {
+    handle(msg).then(
+      (result) => port?.postMessage({ id: msg.id, ok: true, result: result ?? null }),
+      (e: unknown) => port?.postMessage({ id: msg.id, ok: false, error: e instanceof Error ? e.message : String(e) }),
+    );
+  });
+  port.onDisconnect.addListener(() => {
+    // Usually: Waddle isn't running. The alarm tries again in a minute.
+    void chrome.runtime.lastError;
+    port = null;
+  });
+  port.postMessage({ type: "hello", version: chrome.runtime.getManifest().version });
+}
+
+chrome.runtime.onStartup.addListener(connect);
+chrome.runtime.onInstalled.addListener(() => {
+  void chrome.alarms.create("waddle-reconnect", { periodInMinutes: 1 });
+  connect();
+});
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "waddle-reconnect") connect();
+});
+connect();
+
+function webUrl(u: unknown): string {
+  const url = new URL(String(u ?? ""));
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("only http and https addresses");
+  return url.href;
+}
+
+async function targetTab(tab: unknown): Promise<chrome.tabs.Tab> {
+  if (typeof tab === "number") return chrome.tabs.get(tab);
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!active) throw new Error("no Chrome tab is open");
+  return active;
+}
+
+async function inPage<A extends unknown[], R>(tabId: number, func: (...args: A) => R, args: A): Promise<R> {
+  const [frame] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
+  return frame?.result as R;
+}
+
+/** Waits until a tab has finished loading (or gives up after 15 s). */
+function loaded(tabId: number): Promise<chrome.tabs.Tab> {
+  return new Promise((resolve) => {
+    const done = () => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      void chrome.tabs.get(tabId).then(resolve);
+    };
+    const listener = (id: number, info: chrome.tabs.OnUpdatedInfo) => {
+      if (id === tabId && info.status === "complete") done();
+    };
+    const timer = setTimeout(done, LOAD_TIMEOUT_MS);
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function handle({ cmd, args }: Request): Promise<unknown> {
+  switch (cmd) {
+    case "tabs": {
+      const action = String(args.action ?? "list");
+      if (action === "list") {
+        const tabs = await chrome.tabs.query({});
+        return tabs.map((t) => ({ id: t.id, title: t.title ?? "", url: t.url ?? "", active: t.active, windowId: t.windowId }));
+      }
+      if (action === "open") {
+        const t = await chrome.tabs.create({ url: webUrl(args.url) });
+        const done = await loaded(t.id!);
+        return { id: done.id, title: done.title ?? "", url: done.url ?? "" };
+      }
+      const t = await targetTab(args.tab);
+      if (action === "switch") {
+        await chrome.tabs.update(t.id!, { active: true });
+        await chrome.windows.update(t.windowId, { focused: true });
+        return { id: t.id, title: t.title ?? "" };
+      }
+      if (action === "close") {
+        await chrome.tabs.remove(t.id!);
+        return { id: t.id };
+      }
+      throw new Error(`unknown tabs action ${action}`);
+    }
+    case "read": {
+      const t = await targetTab(args.tab);
+      return inPage(t.id!, readPage, [args.mode === "elements" ? "elements" : "text"]);
+    }
+    case "navigate": {
+      const t = await targetTab(args.tab);
+      await chrome.tabs.update(t.id!, { url: webUrl(args.url) });
+      const done = await loaded(t.id!);
+      return { title: done.title ?? "", url: done.url ?? "" };
+    }
+    case "locate": {
+      // The tab must be in front for a real click to land on it.
+      const t = await targetTab(args.tab);
+      await chrome.tabs.update(t.id!, { active: true });
+      await chrome.windows.update(t.windowId, { focused: true });
+      return inPage(t.id!, locateElement, [String(args.element ?? "")]);
+    }
+    case "click": {
+      const t = await targetTab(args.tab);
+      return inPage(t.id!, clickElement, [String(args.element ?? "")]);
+    }
+    case "type": {
+      const t = await targetTab(args.tab);
+      return inPage(t.id!, typeInto, [String(args.element ?? ""), String(args.text ?? ""), args.submit === true]);
+    }
+    default:
+      throw new Error(`unknown command ${cmd}`);
+  }
+}

@@ -42,6 +42,8 @@ pub struct Platform {
 pub struct TauriHost {
     app: AppHandle,
     overlay: Arc<OverlayState>,
+    /// Waddle's Chrome extension, when it's connected.
+    pub browser: Arc<crate::browser::BrowserLink>,
     approvals: Mutex<HashMap<String, oneshot::Sender<Answer>>>,
     /// Undo buttons showing after Send, by approval id.
     undos: Mutex<HashMap<String, oneshot::Sender<()>>>,
@@ -63,10 +65,11 @@ fn now_ms() -> u64 {
 }
 
 impl TauriHost {
-    pub fn new(app: AppHandle, overlay: Arc<OverlayState>) -> Arc<Self> {
+    pub fn new(app: AppHandle, overlay: Arc<OverlayState>, browser: Arc<crate::browser::BrowserLink>) -> Arc<Self> {
         Arc::new(Self {
             app,
             overlay,
+            browser,
             approvals: Mutex::default(),
             undos: Mutex::default(),
             moves: Mutex::default(),
@@ -283,7 +286,21 @@ impl Host for TauriHost {
         } else {
             "Linux"
         };
-        EnvInfo { os: os.into(), screen_w: w, screen_h: h, caps: Capabilities { gui: true, accessibility: cfg!(windows), ..Default::default() } }
+        let caps = Capabilities { gui: true, accessibility: cfg!(windows), browser: self.browser.connected(), ..Default::default() };
+        EnvInfo { os: os.into(), screen_w: w, screen_h: h, caps }
+    }
+
+    async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let mut r = self.browser.request(cmd, args).await?;
+        if cmd == "locate" {
+            anyhow::ensure!(!r.is_null(), "that element isn't on the page any more");
+            // Page coordinates → logical screen pixels, for a real click.
+            if let Some((x, y)) = waddle_core::tools::browser::screen_point(&r, self.geometry().scale) {
+                r["screen_x"] = json!(x);
+                r["screen_y"] = json!(y);
+            }
+        }
+        Ok(r)
     }
 
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {

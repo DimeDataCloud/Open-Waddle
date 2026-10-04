@@ -60,6 +60,11 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "calendar_create" => assess(Tier::ScopedMutation, "adds an event to your calendar (attendees get an invitation)"),
         "calendar_update" => assess(Tier::ScopedMutation, "changes a calendar event (attendees are told)"),
         "calendar_respond" => assess(Tier::ScopedMutation, "answers an invitation"),
+        "browser_read" => assess(Tier::Passive, "reads a web page"),
+        "browser_tabs" if arg("action") == "close" => assess(Tier::ScopedMutation, "closes a Chrome tab"),
+        "browser_tabs" | "browser_navigate" => assess(Tier::NonDestructive, "moves around in Chrome"),
+        "browser_click" => assess(Tier::ScopedMutation, "clicks on a web page"),
+        "browser_type" => assess(Tier::ScopedMutation, "types into a web page"),
         "mail_send" => assess(Tier::Destructive, "sends an email from your account"),
         "mail_trash" => assess(Tier::Destructive, "moves an email to the bin"),
         "calendar_delete" => assess(Tier::Destructive, "deletes a calendar event (attendees are told)"),
@@ -199,6 +204,16 @@ mod tests {
         assert_eq!(tier_of("remember", json!({"fact":"x"}), false), Tier::NonDestructive);
         assert_eq!(tier_of("forget", json!({"id":"x"}), false), Tier::NonDestructive);
         assert_eq!(tier_of("replace_selection", json!({"text":"x"}), false), Tier::ScopedMutation);
+    }
+
+    #[test]
+    fn browser_tiers() {
+        assert_eq!(tier_of("browser_read", json!({}), false), Tier::Passive);
+        assert_eq!(tier_of("browser_tabs", json!({"action":"list"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("browser_tabs", json!({"action":"close"}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("browser_navigate", json!({"url":"x"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("browser_click", json!({}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("browser_type", json!({}), false), Tier::ScopedMutation);
     }
 
     #[test]
