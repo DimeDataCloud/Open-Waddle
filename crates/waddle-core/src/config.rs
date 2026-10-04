@@ -191,6 +191,8 @@ pub struct Settings {
     pub working_hours: (u32, u32),
     /// After Send on the send card, how long Undo stays available before the email goes.
     pub send_undo_secs: u64,
+    /// Paid model calls pause when this month's spending reaches this many US dollars. 0 = no limit.
+    pub monthly_budget: f64,
     /// Tap the user on the shoulder five minutes before a meeting (needs Google).
     pub meeting_nudges: bool,
     /// Tell the user about important new email as it arrives (needs Google).
@@ -241,6 +243,7 @@ impl Default for Settings {
             google_client_id: String::new(),
             working_hours: (9, 17),
             send_undo_secs: 10,
+            monthly_budget: 5.0,
             meeting_nudges: true,
             mail_nudges: true,
             morning_brief: true,

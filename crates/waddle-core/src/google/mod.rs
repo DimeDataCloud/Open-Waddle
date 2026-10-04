@@ -13,7 +13,7 @@ pub mod tools;
 use anyhow::bail;
 use reqwest::Method;
 use serde_json::Value;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Scopes asked for at sign-in. Drive (read-only) joins them in milestone 5.
@@ -24,6 +24,18 @@ pub const SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/contacts.other.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ];
+
+/// Google refused the saved sign-in: it expired or was revoked, so the user has to connect again.
+#[derive(Debug)]
+pub struct SignedOut;
+
+impl std::fmt::Display for SignedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Google signed me out (the sign-in expired or was revoked). Press Connect in Settings → Google account to sign in again")
+    }
+}
+
+impl std::error::Error for SignedOut {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Endpoints {
@@ -83,6 +95,8 @@ pub struct Google {
     access: tokio::sync::Mutex<Option<(String, Instant)>>,
     /// People API search needs one empty "warm-up" query per session before it finds anyone.
     contacts_warm: AtomicBool,
+    /// Set once Google refuses the refresh token; nothing is sent to Google after that.
+    signed_out: AtomicBool,
 }
 
 pub(crate) fn http_client() -> reqwest::Client {
@@ -98,7 +112,13 @@ impl Google {
             refresh_token,
             access: tokio::sync::Mutex::new(None),
             contacts_warm: AtomicBool::new(false),
+            signed_out: AtomicBool::new(false),
         }
+    }
+
+    /// Whether Google refused the saved sign-in; the user has to connect again.
+    pub fn is_signed_out(&self) -> bool {
+        self.signed_out.load(Ordering::SeqCst)
     }
 
     async fn token(&self) -> anyhow::Result<String> {
@@ -108,7 +128,18 @@ impl Google {
                 return Ok(token.clone());
             }
         }
-        let fresh = auth::refresh(&self.http, &self.endpoints, &self.client, &self.refresh_token).await?;
+        if self.is_signed_out() {
+            return Err(SignedOut.into());
+        }
+        let fresh = match auth::refresh(&self.http, &self.endpoints, &self.client, &self.refresh_token).await {
+            Ok(t) => t,
+            Err(e) => {
+                if e.downcast_ref::<SignedOut>().is_some() {
+                    self.signed_out.store(true, Ordering::SeqCst);
+                }
+                return Err(e);
+            }
+        };
         *access = Some((fresh.access_token.clone(), Instant::now() + Duration::from_secs(fresh.expires_in)));
         Ok(fresh.access_token)
     }

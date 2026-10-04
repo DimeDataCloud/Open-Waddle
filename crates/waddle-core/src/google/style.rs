@@ -25,10 +25,7 @@ impl StyleNote {
             let _ = std::fs::remove_file(&self.path);
             return Ok(());
         }
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&self.path, text)?;
+        crate::store::write_atomic(&self.path, text)?;
         Ok(())
     }
 

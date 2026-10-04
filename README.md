@@ -220,16 +220,4 @@ Linux build dependencies: `libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatan
 
 ## Roadmap
 
-v0.2 (Gmail, Calendar, Chrome, files, nudges, memory) is done: see [docs/ROADMAP.md](docs/ROADMAP.md) for what it covered. Next:
-
-- Spoken replies and the visual FX layer (both deferred from v0.2).
-- A signed installer, and the Chrome extension published to the Chrome Web Store so it doesn't need Developer mode.
-
-- macOS: Accessibility and Screen Recording permission prompts, the macOS accessibility fast path, Apple Silicon build.
-- Multiple monitors and mixed display scaling.
-- OmniParser as an optional local vision service. Its detector is AGPL-licensed; keep it separate from paid tiers.
-- Benchmark Laya (local "System 1" decision model) on real activity-log data for screenshot-needed and task-done decisions.
-- Foundry Local NPU mode with text-only accessibility grounding.
-- The "Pictionary" defence against injected instructions: render untrusted text as an image instead of passing it as text.
-- PTY terminal and a real OS sandbox for commands.
-- The other seven characters, several characters at once, and a white-label asset pack loader.
+v0.2 (Gmail, Calendar, Chrome, files, nudges, memory) is done. The v0.3 production pass is planned in [docs/ROADMAP.md](docs/ROADMAP.md): reliability fixes, a spending meter and budget, multiple monitors, a conversation panel, spoken replies, MCP tools, routines, a first-run guide and visual effects, released as 0.2.1 → 0.2.9 for on-device testing, then 0.3.0.

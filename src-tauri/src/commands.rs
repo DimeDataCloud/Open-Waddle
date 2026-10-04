@@ -27,6 +27,8 @@ pub struct Bootstrap {
     pub demo: bool,
     pub voice_backend: VoiceBackend,
     pub windows: Vec<Platform>,
+    /// Problems found while starting (an unreadable settings file), said once.
+    pub notices: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -115,17 +117,19 @@ pub struct GoogleStatus {
     pub connected: bool,
     pub email: Option<String>,
     pub error: Option<String>,
+    /// Google refused the saved sign-in; Connect signs in again.
+    pub expired: bool,
 }
 
 #[tauri::command]
 pub async fn google_status(state: State<'_, AppState>) -> CmdResult<GoogleStatus> {
     let google = state.google.read().unwrap().clone();
-    let (email, error) = match google {
+    let (email, error, expired) = match google {
         Some(g) => match g.mail_profile().await {
-            Ok((email, _)) => (Some(email), None),
-            Err(e) => (None, Some(format!("{e:#}"))),
+            Ok((email, _)) => (Some(email), None, false),
+            Err(e) => (None, Some(format!("{e}")), g.is_signed_out()),
         },
-        None => (None, None),
+        None => (None, None, false),
     };
     Ok(GoogleStatus {
         client_id: state.settings.read().unwrap().google_client_id.clone(),
@@ -133,6 +137,7 @@ pub async fn google_status(state: State<'_, AppState>) -> CmdResult<GoogleStatus
         connected: state.google.read().unwrap().is_some(),
         email,
         error,
+        expired,
     })
 }
 
@@ -263,6 +268,12 @@ pub async fn browser_setup(state: State<'_, AppState>) -> CmdResult<BrowserStatu
     browser_status(state).await
 }
 
+/// What Waddle has spent: today, this month by purpose, the last 30 days, and the budget.
+#[tauri::command]
+pub fn spending(state: State<'_, AppState>) -> waddle_core::ledger::Summary {
+    state.ledger.summary(&chrono::Local::now())
+}
+
 #[tauri::command]
 pub async fn style_get(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(state.style.get().unwrap_or_default())
@@ -298,6 +309,7 @@ pub fn bootstrap(state: State<'_, AppState>) -> Bootstrap {
         demo: state.is_demo(),
         voice_backend: s.voice.backend,
         windows: state.host.platforms(),
+        notices: std::mem::take(&mut *state.startup_notices.lock().unwrap()),
     }
 }
 

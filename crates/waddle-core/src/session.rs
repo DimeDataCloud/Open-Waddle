@@ -26,6 +26,15 @@ use crate::tools::GuiResult;
 use crate::untrusted;
 
 const MEMORY_MESSAGES: usize = 20;
+/// The conversation kept on disk is forgotten after this long without a message.
+const MEMORY_STALE_MS: i64 = 12 * 3600 * 1000;
+
+/// The conversation as saved between runs.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct SavedMemory {
+    saved_ms: i64,
+    messages: Vec<Message>,
+}
 /// Conversation goes straight to the fast model when the router is at least this sure.
 /// On 45 labelled messages, every chat scored 0.82 or more; the one task that
 /// looked like chat ("make this sound more polite") scored 0.76.
@@ -71,6 +80,8 @@ struct Answer {
     id: String,
     question: String,
     markdown: String,
+    /// Where it was saved, so asking for it again reopens the same file.
+    saved: Option<PathBuf>,
 }
 
 /// Everything a task needs that the user can change between tasks.
@@ -98,6 +109,8 @@ pub struct Session {
     audit: Arc<AuditLog>,
     config: RwLock<SessionConfig>,
     memory: Mutex<Vec<Message>>,
+    /// Where the conversation is kept between runs, if anywhere.
+    memory_file: Mutex<Option<PathBuf>>,
     active: Mutex<Option<Active>>,
     /// Some while the router runs; messages arriving meanwhile wait here.
     deciding: Mutex<Option<Deciding>>,
@@ -135,6 +148,7 @@ impl Session {
             audit,
             config: RwLock::new(config),
             memory: Mutex::default(),
+            memory_file: Mutex::default(),
             active: Mutex::default(),
             deciding: Mutex::default(),
             answers: Mutex::default(),
@@ -168,6 +182,44 @@ impl Session {
 
     pub fn clear_memory(&self) {
         self.memory.lock().unwrap().clear();
+        if let Some(path) = self.memory_file.lock().unwrap().as_ref() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// Keeps the conversation in `path` so it survives a restart. What's there
+    /// is picked up again unless it's more than 12 hours old.
+    pub fn keep_memory_in(&self, path: PathBuf) {
+        let saved: SavedMemory = crate::store::load_json(&path);
+        let fresh = chrono::Utc::now().timestamp_millis() - saved.saved_ms < MEMORY_STALE_MS;
+        if fresh && !saved.messages.is_empty() {
+            let mut mem = self.memory.lock().unwrap();
+            if mem.is_empty() {
+                *mem = saved.messages;
+            }
+        }
+        *self.memory_file.lock().unwrap() = Some(path);
+    }
+
+    /// Adds exchanges to the conversation, keeps the last few, and saves them.
+    fn push_memory(&self, entries: impl IntoIterator<Item = Message>) {
+        let snapshot = {
+            let mut mem = self.memory.lock().unwrap();
+            mem.extend(entries);
+            let excess = mem.len().saturating_sub(MEMORY_MESSAGES);
+            mem.drain(..excess);
+            mem.clone()
+        };
+        let Some(path) = self.memory_file.lock().unwrap().clone() else { return };
+        let saved = SavedMemory { saved_ms: chrono::Utc::now().timestamp_millis(), messages: snapshot };
+        match serde_json::to_string(&saved) {
+            Ok(text) => {
+                if let Err(e) = crate::store::write_atomic(&path, text) {
+                    log::warn!("saving the conversation: {e}");
+                }
+            }
+            Err(e) => log::warn!("saving the conversation: {e}"),
+        }
     }
 
     /// Called when the user starts talking. A local model loads and reads the
@@ -243,19 +295,29 @@ impl Session {
 
     /// Saves a research answer as Markdown in the workspace and opens it.
     pub fn open_answer(&self, id: &str) -> anyhow::Result<PathBuf> {
-        let (question, markdown) = {
+        let (question, markdown, saved) = {
             let answers = self.answers.lock().unwrap();
             let a = answers.iter().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("that answer is no longer available"))?;
-            (a.question.clone(), a.markdown.clone())
+            (a.question.clone(), a.markdown.clone(), a.saved.clone())
         };
-        let workspace = self.config.read().unwrap().workspace.clone();
-        let rel = format!("research/{}.md", slug(&question));
-        let path = workspace.root().join(&rel);
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+        if let Some(path) = saved.filter(|p| p.exists()) {
+            self.host.open_path(&path);
+            return Ok(path);
         }
-        std::fs::write(&path, markdown)?;
+        let workspace = self.config.read().unwrap().workspace.clone();
+        let dir = workspace.root().join("research");
+        let base = slug(&question);
+        // An earlier answer to the same question keeps its file.
+        let path = (1..)
+            .map(|n| dir.join(if n == 1 { format!("{base}.md") } else { format!("{base}-{n}.md") }))
+            .find(|p| !p.exists())
+            .expect("a free file name");
+        crate::store::write_atomic(&path, markdown)?;
+        let rel = path.strip_prefix(workspace.root()).unwrap_or(&path).display().to_string();
         let _ = self.audit.append(AuditEntry { task_id: "research".into(), kind: "file_write".into(), detail: Some(rel), ..Default::default() });
+        if let Some(a) = self.answers.lock().unwrap().iter_mut().find(|a| a.id == id) {
+            a.saved = Some(path.clone());
+        }
         self.host.open_path(&path);
         Ok(path)
     }
@@ -375,16 +437,41 @@ If it actually asks you to do, check or show something on their computer (apps, 
             web: web.then_some(CHAT_RESULTS),
         };
         let started = std::time::Instant::now();
-        let reply = match provider.chat(req, &mut |_| {}).await {
+        // The reply streams into the bubble as it's written; only a possible "[task]" is held back.
+        let host = self.host.clone();
+        let mut gate = HandOffGate::default();
+        let mut first_word: Option<u128> = None;
+        let mut on_event = |e: StreamEvent| {
+            let StreamEvent::TextDelta(t) = e;
+            if let Some(show) = gate.push(&t) {
+                first_word.get_or_insert_with(|| started.elapsed().as_millis());
+                host.emit(AgentEvent::TextDelta { task_id: "chat".into(), lane: Lane::Planner, text: show });
+            }
+        };
+        let result = crate::ledger::scoped(crate::ledger::Purpose::Chat, provider.chat(req, &mut on_event)).await;
+        let shown = gate.shown;
+        let reply = match result {
             Ok(r) if !r.text.trim().is_empty() && !r.text.contains(HAND_OFF) => r.text.trim().to_string(),
-            Ok(_) => return false,
-            Err(e) => {
-                log::warn!("chat reply failed: {e:#}");
+            Ok(_) | Err(_) => {
+                if let Err(e) = &result {
+                    log::warn!("chat reply failed: {e:#}");
+                }
+                if shown {
+                    self.host.emit(AgentEvent::TextDone { task_id: "chat".into(), lane: Lane::Planner });
+                }
                 return false;
             }
         };
-        log::info!("chat reply{} in {} ms", if web { " with web search" } else { "" }, started.elapsed().as_millis());
-        self.say("chat", &reply);
+        if let Some(rest) = gate.finish() {
+            self.host.emit(AgentEvent::TextDelta { task_id: "chat".into(), lane: Lane::Planner, text: rest });
+        }
+        self.host.emit(AgentEvent::TextDone { task_id: "chat".into(), lane: Lane::Planner });
+        log::info!(
+            "chat reply{} in {} ms (first words at {} ms)",
+            if web { " with web search" } else { "" },
+            started.elapsed().as_millis(),
+            first_word.map_or("-".to_string(), |ms| ms.to_string())
+        );
         let _ = self.audit.append(AuditEntry { task_id: "chat".into(), kind: "chat".into(), detail: Some(format!("{text} → {reply}")), ..Default::default() });
         self.remember(text, reply);
         true
@@ -418,7 +505,7 @@ Don't write a source list; it's added for you.{facts}",
             }
         };
         let started = std::time::Instant::now();
-        let resp = match provider.chat(req, &mut on_event).await {
+        let resp = match crate::ledger::scoped(crate::ledger::Purpose::Research, provider.chat(req, &mut on_event)).await {
             Ok(r) if !r.text.trim().is_empty() => r,
             Ok(_) => return false,
             Err(e) => {
@@ -435,7 +522,7 @@ Don't write a source list; it's added for you.{facts}",
         let id = format!("answer_{}", &new_task_id()[5..]);
         {
             let mut answers = self.answers.lock().unwrap();
-            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown });
+            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown, saved: None });
             let excess = answers.len().saturating_sub(KEEP_ANSWERS);
             answers.drain(..excess);
         }
@@ -445,17 +532,8 @@ Don't write a source list; it's added for you.{facts}",
         true
     }
 
-    /// Shows a finished reply in the bubble.
-    fn say(&self, task_id: &str, text: &str) {
-        self.host.emit(AgentEvent::TextDelta { task_id: task_id.into(), lane: Lane::Planner, text: text.into() });
-        self.host.emit(AgentEvent::TextDone { task_id: task_id.into(), lane: Lane::Planner });
-    }
-
     fn remember(&self, said: &str, reply: String) {
-        let mut mem = self.memory.lock().unwrap();
-        mem.extend([Message::user(said), Message::assistant(reply, vec![])]);
-        let excess = mem.len().saturating_sub(MEMORY_MESSAGES);
-        mem.drain(..excess);
+        self.push_memory([Message::user(said), Message::assistant(reply, vec![])]);
     }
 
     fn start_task(self: &Arc<Self>, goal: String) {
@@ -515,12 +593,7 @@ Don't write a source list; it's added for you.{facts}",
                     *active = None;
                 }
             }
-            {
-                let mut mem = this.memory.lock().unwrap();
-                mem.extend(agent::memory_entries(&goal, &result));
-                let excess = mem.len().saturating_sub(MEMORY_MESSAGES);
-                mem.drain(..excess);
-            }
+            this.push_memory(agent::memory_entries(&goal, &result));
             // Anything said after the last step boundary would otherwise be lost.
             let mut leftover = vec![];
             while let Ok(s) = steer_rx.try_recv() {
@@ -581,7 +654,7 @@ Current task: {goal}\nStep: {step}\nLast thing you said: {narration}\nCurrent ac
                 host.emit(AgentEvent::TextDelta { task_id: task_id.clone(), lane: Lane::Quick, text: t });
             };
             let req = ChatRequest { model: settings.fast_model(), messages: &messages, tools: &[], temperature: 0.4, max_tokens: 120, web: None };
-            match provider.chat(req, &mut on_event).await {
+            match crate::ledger::scoped(crate::ledger::Purpose::Quick, provider.chat(req, &mut on_event)).await {
                 Ok(resp) if !resp.text.trim().is_empty() => status.lock().unwrap().acks.push(resp.text.trim().to_string()),
                 Ok(_) => {}
                 Err(e) => log::warn!("quick reply failed: {e:#}"),
@@ -704,6 +777,53 @@ impl Host for Held {
     }
 }
 
+/// Lets a chat reply stream into the bubble, holding back only text that could
+/// still turn out to be the "[task]" hand-off.
+#[derive(Default)]
+struct HandOffGate {
+    held: String,
+    /// None while it could still be the hand-off.
+    show: Option<bool>,
+    shown: bool,
+}
+
+impl HandOffGate {
+    /// Returns the text to show now, if any.
+    fn push(&mut self, delta: &str) -> Option<String> {
+        match self.show {
+            Some(true) => {
+                self.shown = true;
+                return Some(delta.to_string());
+            }
+            Some(false) => return None,
+            None => self.held.push_str(delta),
+        }
+        let t = self.held.trim_start();
+        if t.is_empty() || (HAND_OFF.starts_with(t) && t.len() < HAND_OFF.len()) {
+            return None;
+        }
+        if t.starts_with(HAND_OFF) {
+            self.show = Some(false);
+            return None;
+        }
+        self.show = Some(true);
+        self.shown = true;
+        Some(std::mem::take(&mut self.held))
+    }
+
+    /// Whatever was still held when the reply ended (a very short reply).
+    fn finish(&mut self) -> Option<String> {
+        if self.show.is_some() {
+            return None;
+        }
+        let rest = std::mem::take(&mut self.held);
+        (!rest.trim().is_empty() && !rest.contains(HAND_OFF)).then(|| {
+            self.shown = true;
+            rest
+        })
+    }
+}
+
 /// Streams a research answer's summary to the bubble and holds back what follows
 /// the `---` line (the full write-up), which only goes into the saved file.
 #[derive(Default)]
@@ -814,6 +934,26 @@ mod tests {
         let mut plain = SummarySplit::default();
         let first = plain.push("Short answer.").unwrap_or_default();
         assert_eq!(format!("{first}{}", plain.finish().unwrap()), "Short answer.");
+    }
+
+    #[test]
+    fn chat_streams_unless_it_is_the_hand_off() {
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push(" "), None);
+        assert_eq!(g.push("Hi"), Some(" Hi".into()));
+        assert_eq!(g.push(" there"), Some(" there".into()));
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push("[ta"), None);
+        assert_eq!(g.push("sk]"), None);
+        assert_eq!(g.finish(), None);
+        assert!(!g.shown);
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push("[1] is"), Some("[1] is".into()), "a bracket that isn't the hand-off shows");
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push("Ok"), Some("Ok".into()));
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push("["), None);
+        assert_eq!(g.finish(), Some("[".into()));
     }
 
     #[test]

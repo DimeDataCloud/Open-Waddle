@@ -128,7 +128,7 @@ pub fn spawn_hit_test(app: AppHandle, state: Arc<OverlayState>) {
             let _ = window.set_ignore_cursor_events(true);
             state.ignoring.store(true, Ordering::SeqCst);
             loop {
-                std::thread::sleep(Duration::from_millis(25));
+                std::thread::sleep(crate::power::pace(Duration::from_millis(25), Duration::from_millis(50)));
                 let Ok(pos) = app.cursor_position() else { continue };
                 let want = state.wants_ignore(pos.x, pos.y);
                 if state.ignoring.load(Ordering::SeqCst) != want && window.set_ignore_cursor_events(want).is_ok() {

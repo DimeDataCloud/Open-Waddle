@@ -25,6 +25,18 @@ describe("Duck", () => {
     expect(duck.body.x).toBe(600);
   });
 
+  it("comes back on screen when the screen shrinks", () => {
+    const duck = new Duck(size, 1400, 100);
+    settle(duck, computeSegments([], opts), 2);
+    expect(duck.body.y).toBe(900);
+    const small = { width: 1000, floorY: 640, minHeadroom: 56, minWidth: 24 };
+    duck.keepOnScreen({ w: 1000, h: 640 });
+    expect(duck.body.x).toBe(968);
+    settle(duck, computeSegments([], small), 1);
+    expect(duck.mode).toBe("idle");
+    expect(duck.body.y).toBe(640);
+  });
+
   it("respects the trip time cap", () => {
     const segs = computeSegments([], opts);
     const duck = new Duck(size, 100, 900);

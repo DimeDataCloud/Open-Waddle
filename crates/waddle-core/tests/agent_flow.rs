@@ -759,10 +759,17 @@ async fn current_facts_and_research_search_the_web() {
         AgentEvent::Offer { id, .. } => Some(id.clone()),
         _ => None,
     });
-    let path = session.open_answer(&id.unwrap()).unwrap();
-    assert!(path.ends_with("research/heat-pumps-or-gas-boilers.md"), "{}", path.display());
+    // An older answer to the same question keeps its file; asking again reopens the new one.
+    let older = f.workspace.root().join("research").join("heat-pumps-or-gas-boilers.md");
+    std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+    std::fs::write(&older, "yesterday's answer").unwrap();
+    let id = id.unwrap();
+    let path = session.open_answer(&id).unwrap();
+    assert!(path.ends_with("research/heat-pumps-or-gas-boilers-2.md"), "{}", path.display());
     assert!(std::fs::read_to_string(&path).unwrap().contains("## Running costs"));
-    assert_eq!(*host.opened.lock().unwrap(), vec![path]);
+    assert_eq!(std::fs::read_to_string(&older).unwrap(), "yesterday's answer");
+    assert_eq!(session.open_answer(&id).unwrap(), path);
+    assert_eq!(*host.opened.lock().unwrap(), vec![path.clone(), path]);
     assert!(host.busy.lock().unwrap().is_empty(), "neither started a task");
 }
 
@@ -859,4 +866,87 @@ async fn a_selection_arrives_as_untrusted_text_and_can_be_replaced_after_a_notic
     let approvals = host.approvals.lock().unwrap().clone();
     assert_eq!((approvals[0].tool.as_str(), approvals[0].tier, approvals[0].countdown_ms.is_some()), ("replace_selection", 2, true));
     assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::ReplaceSelection { text: "Would you mind sending it?".into() }));
+}
+
+#[tokio::test]
+async fn a_cut_off_tool_call_is_not_run() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| None));
+    let cut = ChatResponse { truncated: true, ..reply("", vec![call("write_file", json!({"path":"long.txt","content":"half of it"}))]) };
+    let provider = Arc::new(MockProvider::scripted(vec![
+        cut,
+        reply("", vec![call("write_file", json!({"path":"long.txt","content":"all of it"}))]),
+        reply("Saved it.", vec![]),
+    ]));
+    let (outcome, _) = run_agent(&f, host, provider.clone(), CancellationToken::new()).await;
+    assert_eq!(outcome, Outcome::Done);
+    assert_eq!(std::fs::read_to_string(f.workspace.root().join("long.txt")).unwrap(), "all of it");
+    let second = &provider.requests.lock().unwrap()[1];
+    let answer = second.iter().rev().find(|m| m.role == Role::Tool).unwrap();
+    assert!(answer.text.contains("length limit"), "{}", answer.text);
+}
+
+#[test]
+fn long_old_tool_results_are_trimmed_once_over_budget() {
+    use waddle_core::agent::{trim_old_results, CONTEXT_BUDGET};
+    let big = "x".repeat(30_000);
+    let c1 = call("read_file", json!({"path":"a.txt"}));
+    let c2 = call("read_file", json!({"path":"b.txt"}));
+    let wrapped = waddle_core::untrusted::wrap("file", &big);
+    let mut msgs = vec![
+        Message::system("sys"),
+        Message::user("summarise both files"),
+        Message::assistant("", vec![c1.clone()]),
+        Message::tool_result(&c1, wrapped.clone()),
+        Message::assistant("", vec![c2.clone()]),
+        Message::tool_result(&c2, big.clone()),
+    ];
+    let small = msgs.clone();
+    trim_old_results(&mut msgs, CONTEXT_BUDGET);
+    assert!(msgs[3].text.len() < 1_200, "the older result is trimmed: {}", msgs[3].text.len());
+    assert!(msgs[3].text.contains("trimmed to save space"));
+    assert!(msgs[3].text.ends_with(&wrapped[wrapped.rfind("\n</untrusted").unwrap()..]), "its closing tag survives");
+    assert_eq!(msgs[5].text, big, "the latest result stays whole");
+    // Under budget nothing changes (append-only for local prompt caches).
+    let mut under = small[..4].to_vec();
+    under[3].text = "short".into();
+    let before = under.clone();
+    trim_old_results(&mut under, CONTEXT_BUDGET);
+    assert_eq!(under, before);
+}
+
+#[tokio::test]
+async fn the_conversation_survives_a_restart_until_it_goes_stale() {
+    let f = fixture();
+    let path = f.workspace.root().join("memory.json");
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Biscuit is a lovely name.", vec![]),
+        reply("It's Biscuit.", vec![]),
+        reply("Hello!", vec![]),
+    ]));
+    let new_session = || {
+        let s = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+        s.keep_memory_in(path.clone());
+        s
+    };
+    let session = new_session();
+    session.user_message("my dog is called Biscuit".into());
+    wait_until(|| path.exists()).await;
+
+    // A fresh session (Waddle restarted) picks the conversation up again.
+    let again = new_session();
+    again.user_message("what's my dog called?".into());
+    wait_until(|| provider.request_count() == 2).await;
+    let saw = |i: usize, text: &str| provider.requests.lock().unwrap()[i].iter().any(|m| m.text.contains(text));
+    assert!(saw(1, "my dog is called Biscuit"));
+
+    // Forgetting deletes the file; a stale file is ignored.
+    again.clear_memory();
+    assert!(!path.exists());
+    std::fs::write(&path, r#"{"saved_ms": 1, "messages": [{"role":"user","text":"ancient"}]}"#).unwrap();
+    let third = new_session();
+    third.user_message("hello".into());
+    wait_until(|| provider.request_count() == 3).await;
+    assert!(!saw(2, "ancient"));
 }

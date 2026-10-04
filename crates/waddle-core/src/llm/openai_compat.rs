@@ -1,20 +1,89 @@
 //! OpenAI-compatible chat completions with SSE streaming. Covers OpenRouter,
 //! OpenAI, LM Studio, llama.cpp server and Microsoft Foundry Local.
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use super::{textcalls, ChatRequest, ChatResponse, Citation, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
+
+/// Waits before the first and second retry, unless the server asks for something else.
+const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(3)];
+/// The longest `Retry-After` Waddle honours; past that, the user is told instead.
+const MAX_WAIT: Duration = Duration::from_secs(8);
 
 pub struct OpenAiCompat {
     base_url: String,
     api_key: Option<String>,
     reasoning: Option<&'static str>,
     no_training: bool,
+    /// A stream that sends nothing (not even keep-alive comments) for this long is treated as dropped.
+    stall: Duration,
     http: reqwest::Client,
+}
+
+/// One failed attempt, with whether trying the same request again could help.
+struct Failure {
+    error: anyhow::Error,
+    retryable: bool,
+    retry_after: Option<Duration>,
+}
+
+impl Failure {
+    fn transient(error: anyhow::Error) -> Self {
+        Self { error, retryable: true, retry_after: None }
+    }
+}
+
+/// An error object the server sent in the middle of a stream.
+#[derive(Debug)]
+pub(crate) struct StreamError {
+    pub code: Option<u64>,
+    pub message: String,
+}
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "provider error: {}", self.message)
+    }
+}
+
+impl std::error::Error for StreamError {}
+
+/// Rate limits, timeouts and server trouble pass; bad keys, bad requests and missing credit don't.
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 520..=529)
+}
+
+/// "OpenRouter" for openrouter.ai, else the host name, for error messages.
+fn service_name(base_url: &str) -> String {
+    let host = base_url.split("://").nth(1).unwrap_or(base_url).split(['/', ':']).next().unwrap_or(base_url);
+    if host.ends_with("openrouter.ai") { "OpenRouter".into() } else { host.to_string() }
+}
+
+/// What a failed request means for the user, in plain words.
+pub(crate) fn describe_status(status: u16, detail: &str, service: &str) -> String {
+    let detail = detail.trim();
+    let tail = if detail.is_empty() { String::new() } else { format!(" ({})", detail.chars().take(300).collect::<String>()) };
+    match status {
+        401 => format!("{service} didn't accept the API key. Check it in Settings{tail}"),
+        402 => format!("the {service} account is out of credit. Add some at openrouter.ai/credits, then try again{tail}"),
+        403 => format!("{service} refused this request{tail}"),
+        404 => format!("{service} doesn't know that model. Check the model name in Settings{tail}"),
+        408 | 504 => format!("the model took too long to answer. Try again in a moment{tail}"),
+        413 => format!("the request was too big for the model. Try a shorter task{tail}"),
+        429 => format!("{service} is rate-limiting this model right now. Try again in a minute{tail}"),
+        500..=599 => format!("the model's provider is having trouble ({status}). Try again in a moment{tail}"),
+        _ => format!("{status} from {service}{tail}"),
+    }
+}
+
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let secs: f64 = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?.trim().parse().ok()?;
+    (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
 }
 
 impl OpenAiCompat {
@@ -23,7 +92,13 @@ impl OpenAiCompat {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("http client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, no_training: false, http }
+        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, no_training: false, stall: Duration::from_secs(60), http }
+    }
+
+    /// How long a stream may go silent before it counts as dropped.
+    pub fn with_stall_timeout(mut self, stall: Duration) -> Self {
+        self.stall = stall;
+        self
     }
 
     /// Sends OpenRouter's `reasoning.effort` with every request ("none", "low", ...).
@@ -134,6 +209,7 @@ pub(crate) struct SseAccumulator {
     calls: BTreeMap<u64, PartialCall>,
     usage: Usage,
     citations: Vec<Citation>,
+    truncated: bool,
     done: bool,
 }
 
@@ -158,8 +234,12 @@ impl SseAccumulator {
         }
         let v: Value = serde_json::from_str(data).with_context(|| format!("bad stream chunk: {data}"))?;
         if let Some(err) = v.get("error") {
-            let msg = err.get("message").and_then(Value::as_str).unwrap_or("unknown error");
-            bail!("provider error: {msg}");
+            let message = err.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_string();
+            let code = err.get("code").and_then(|c| c.as_u64().or_else(|| c.as_str().and_then(|s| s.parse().ok())));
+            return Err(StreamError { code, message }.into());
+        }
+        if v.pointer("/choices/0/finish_reason").and_then(Value::as_str) == Some("length") {
+            self.truncated = true;
         }
         // OpenRouter sends token counts and the price with the last chunk.
         if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
@@ -226,43 +306,96 @@ impl SseAccumulator {
                 tool_calls = calls;
             }
         }
-        ChatResponse { text, tool_calls, usage: self.usage, citations: self.citations }
+        ChatResponse { text, tool_calls, usage: self.usage, citations: self.citations, truncated: self.truncated }
     }
 }
 
-#[async_trait]
-impl Provider for OpenAiCompat {
-    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+impl OpenAiCompat {
+    /// One request, streamed to the end.
+    async fn attempt(&self, req: &ChatRequest<'_>, on_event: EventSink<'_>) -> Result<ChatResponse, Failure> {
         let url = format!("{}/chat/completions", self.base_url);
+        let service = service_name(&self.base_url);
         let mut builder = self
             .http
             .post(&url)
             .header("HTTP-Referer", "https://github.com/DimeDataCloud/Waddle")
             .header("X-Title", "Project Waddle")
-            .json(&self.body(&req));
+            .json(&self.body(req));
         if let Some(key) = self.api_key.as_deref().filter(|k| !k.is_empty()) {
             builder = builder.bearer_auth(key);
         }
-        let resp = builder.send().await.with_context(|| format!("could not reach {url}"))?;
+        let resp = match builder.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let error = anyhow::Error::msg(format!("{e:#}")).context(format!("couldn't reach {service}. Check the internet connection"));
+                return Err(Failure::transient(error));
+            }
+        };
         let status = resp.status();
         if !status.is_success() {
+            let wait = retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
             let detail = serde_json::from_str::<Value>(&body)
                 .ok()
                 .and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
                 .unwrap_or(body);
-            return Err(anyhow!("{} from {}: {}", status, url, detail.chars().take(400).collect::<String>()));
+            log::warn!("{status} from {url}: {}", detail.chars().take(400).collect::<String>());
+            let error = anyhow!(describe_status(status.as_u16(), &detail, &service));
+            return Err(Failure { error, retryable: retryable_status(status.as_u16()), retry_after: wait });
         }
         let mut acc = SseAccumulator::default();
         let mut stream = resp.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("stream interrupted")?;
-            acc.push(&String::from_utf8_lossy(&chunk), on_event)?;
+        loop {
+            let chunk = match tokio::time::timeout(self.stall, stream.next()).await {
+                Err(_) => return Err(Failure::transient(anyhow!("the model stopped responding mid-answer"))),
+                Ok(None) => break,
+                Ok(Some(Err(e))) => {
+                    return Err(Failure::transient(anyhow::Error::msg(format!("{e:#}")).context(format!("the connection to {service} dropped mid-answer"))));
+                }
+                Ok(Some(Ok(c))) => c,
+            };
+            if let Err(e) = acc.push(&String::from_utf8_lossy(&chunk), on_event) {
+                let retryable = e.downcast_ref::<StreamError>().and_then(|s| s.code).is_some_and(|c| retryable_status(c as u16));
+                return Err(Failure { error: e, retryable, retry_after: None });
+            }
             if acc.done {
                 break;
             }
         }
         Ok(acc.finish())
+    }
+}
+
+#[async_trait]
+impl Provider for OpenAiCompat {
+    /// Retries rate limits, server errors and dropped connections up to twice on
+    /// the same model, but only while nothing has reached the user yet: a retry
+    /// after words were shown would show them twice.
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        let mut retries = 0;
+        loop {
+            let mut shown = false;
+            let result = {
+                let mut sink = |e: StreamEvent| {
+                    shown = true;
+                    on_event(e)
+                };
+                self.attempt(&req, &mut sink).await
+            };
+            match result {
+                Ok(r) => return Ok(r),
+                Err(f) if f.retryable && !shown && retries < BACKOFF.len() => {
+                    let wait = f.retry_after.unwrap_or(BACKOFF[retries]);
+                    if wait > MAX_WAIT {
+                        return Err(f.error);
+                    }
+                    log::warn!("model call failed ({:#}); retrying in {:.1} s", f.error, wait.as_secs_f64());
+                    tokio::time::sleep(wait).await;
+                    retries += 1;
+                }
+                Err(f) => return Err(f.error),
+            }
+        }
     }
 }
 
@@ -360,6 +493,122 @@ mod tests {
         assert_eq!(body["plugins"][0]["max_results"], 3);
         let open = OpenAiCompat::new("https://openrouter.ai/api/v1".into(), None);
         assert!(open.body(&req).get("provider").is_none());
+    }
+
+    /// What the scripted server does with one connection.
+    enum Reply {
+        Raw(&'static str),
+        /// Sends the headers and part of the stream, then waits silently.
+        Stall(&'static str),
+    }
+
+    /// Serves one scripted reply per connection, in order; returns the base URL and the connection count.
+    async fn scripted(replies: Vec<Reply>) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = count.clone();
+        tokio::spawn(async move {
+            for reply in replies {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // Read the whole request so closing the socket doesn't reset it.
+                let mut req = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    req.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&req).to_string();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let len = text.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                        if req.len() >= end + 4 + len {
+                            break;
+                        }
+                    }
+                    if n == 0 {
+                        break;
+                    }
+                }
+                match reply {
+                    Reply::Raw(r) => {
+                        let _ = sock.write_all(r.as_bytes()).await;
+                    }
+                    Reply::Stall(r) => {
+                        let _ = sock.write_all(r.as_bytes()).await;
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        });
+        (format!("http://{addr}/v1"), count)
+    }
+
+    const SSE_OK: &str = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hi!\"}}]}\n\ndata: [DONE]\n\n";
+    const RATE_LIMITED: &str = "HTTP/1.1 429 Too Many Requests\r\nretry-after: 0\r\ncontent-type: application/json\r\nconnection: close\r\ncontent-length: 41\r\n\r\n{\"error\":{\"message\":\"slow down please\"}}";
+    const BAD_KEY: &str = "HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\nconnection: close\r\ncontent-length: 36\r\n\r\n{\"error\":{\"message\":\"No auth found\"}}";
+
+    async fn ask(p: &OpenAiCompat) -> (anyhow::Result<ChatResponse>, String) {
+        let msgs = vec![Message::user("hi")];
+        let req = ChatRequest { model: "m", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: None };
+        let mut shown = String::new();
+        let r = p.chat(req, &mut |e: StreamEvent| {
+            let StreamEvent::TextDelta(t) = e;
+            shown.push_str(&t);
+        }).await;
+        (r, shown)
+    }
+
+    #[tokio::test]
+    async fn rate_limits_and_stalls_are_retried_on_the_same_model() {
+        let (url, count) = scripted(vec![
+            Reply::Raw(RATE_LIMITED),
+            Reply::Stall("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n"),
+            Reply::Raw(SSE_OK),
+        ])
+        .await;
+        let p = OpenAiCompat::new(url, None).with_stall_timeout(Duration::from_millis(300));
+        let (r, shown) = ask(&p).await;
+        assert_eq!(r.unwrap().text, "Hi!");
+        assert_eq!(shown, "Hi!");
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_bad_key_fails_at_once_in_plain_words() {
+        let (url, count) = scripted(vec![Reply::Raw(BAD_KEY), Reply::Raw(SSE_OK)]).await;
+        let p = OpenAiCompat::new(url, None);
+        let err = ask(&p).await.0.unwrap_err().to_string();
+        assert!(err.contains("didn't accept the API key") && err.contains("No auth found"), "{err}");
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn no_retry_once_words_were_shown() {
+        let partial = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n";
+        let (url, count) = scripted(vec![Reply::Stall(partial), Reply::Raw(SSE_OK)]).await;
+        let p = OpenAiCompat::new(url, None).with_stall_timeout(Duration::from_millis(300));
+        let (r, shown) = ask(&p).await;
+        assert!(r.unwrap_err().to_string().contains("stopped responding"));
+        assert_eq!(shown, "Hel");
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cut_off_replies_are_flagged() {
+        let (resp, _) = feed(&["data: {\"choices\":[{\"delta\":{\"content\":\"long\"},\"finish_reason\":\"length\"}]}\n"]);
+        assert!(resp.truncated);
+        let (resp, _) = feed(&["data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n"]);
+        assert!(!resp.truncated);
+    }
+
+    #[test]
+    fn statuses_read_as_next_steps() {
+        assert!(describe_status(402, "", "OpenRouter").contains("openrouter.ai/credits"));
+        assert!(describe_status(429, "", "OpenRouter").starts_with("OpenRouter is rate-limiting"));
+        assert_eq!(service_name("https://openrouter.ai/api/v1"), "OpenRouter");
+        assert_eq!(service_name("http://localhost:1234/v1"), "localhost");
+        assert!(retryable_status(503) && retryable_status(429) && !retryable_status(400) && !retryable_status(402));
     }
 
     #[test]

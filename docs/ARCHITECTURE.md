@@ -69,6 +69,8 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
   - native Ollama NDJSON, with `num_thread`, `keep_alive` and `num_ctx` controls
   - a mock provider for tests and demo mode
   - tool calls written as text (`<tool_call>` blocks from local Qwen servers) are recovered
+  - rate limits, server errors and dropped connections are retried twice on the same model (1 s, then 3 s, or what `Retry-After` asks for, up to 8 s), but only before any words have reached the user; a stream silent for 60 s (300 s for local servers) counts as dropped
+  - a reply that stops at the token limit is flagged, and its tool calls are answered "cut off" instead of being run
 - **Planner (System 2):**
   - the agent loop: stream → for each tool call: approach → classify the tier → gate → act → wrap untrusted output → feed back
   - limits: 20 steps per task; a step budget shared across sub-tasks; a 5-minute task timeout
@@ -79,7 +81,9 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 - **Harness:** every task starts with the window list, accessibility elements (Windows) and a screenshot attached to the request (`look_first`). `click_element` names are checked against ids, and a third identical click in a row is refused. Measured on `bench/`: 27% → 93% for the default model ([MODELS.md](MODELS.md)).
 - **Training traces** (opt-in): finished tasks are saved with their screenshots, rated 👍/👎 in the bubble, and exported as fine-tuning data ([TRAINING.md](TRAINING.md)).
 - **Halt phrases** ("stop", "wait", "cancel"…) are matched by fixed rules and stop the task without any model call.
-- **Conversation memory:** the last 10 exchanges carry over between tasks.
+- **Conversation memory:** the last 10 exchanges carry over between tasks, and between runs (`memory.json`, forgotten after 12 hours of quiet).
+- **Context budget:** past about 48,000 characters, earlier tool results over 1,500 characters are cut to their first 1,000 (an untrusted block keeps its closing tag), all at once like screenshots; the latest step's results stay whole.
+- **Spending:** hosted providers are wrapped in `ledger::Metered`, which records each call's reported cost by purpose (a task-local set by the chat, research, quick-reply, brief and self-test call sites; tasks otherwise) in `spending.json`, and refuses calls once the month's spending reaches `monthly_budget`. Jev decisions are recorded too and skipped over budget, so every caller falls back to its careful default.
 - **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model: it loads and reads the system prompt, tools and conversation so far while the user types, so the first step only reads their message (36.6 s → 6.8 s here on a 4-core CPU). The warm-up asks Ollama for thinking on, because the empty think block that `think: false` appends ends the prompt past Qwen3.5's last cache checkpoint.
 
 ### Assistant tools

@@ -160,6 +160,12 @@ impl TauriHost {
         self.emit_overlay("desktop:windows", platforms);
     }
 
+    /// Sends the platforms again after the display changed (same windows, new conversion).
+    pub fn refresh_platforms(&self) {
+        let platforms = self.platforms();
+        self.emit_overlay("desktop:windows", platforms);
+    }
+
     fn to_platforms(&self, list: &[DesktopWindow]) -> Vec<Platform> {
         let g = self.geometry();
         list.iter()
@@ -566,7 +572,8 @@ pub fn spawn_window_sampler(host: Arc<TauriHost>) {
         .name("waddle-windows".into())
         .spawn(move || loop {
             host.update_windows(desktop::list_windows());
-            std::thread::sleep(Duration::from_millis(100));
+            // Ten times a second on mains power, four on battery.
+            std::thread::sleep(crate::power::pace(Duration::from_millis(100), Duration::from_millis(250)));
         })
         .expect("window sampler thread");
 }

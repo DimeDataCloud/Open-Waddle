@@ -18,6 +18,7 @@ interface Settings {
   google_client_id: string;
   working_hours: [number, number];
   send_undo_secs: number;
+  monthly_budget: number;
   meeting_nudges: boolean;
   mail_nudges: boolean;
   morning_brief: boolean;
@@ -118,6 +119,7 @@ function fill(view: SettingsView): void {
   $("work_start").value = String(s.working_hours[0]);
   $("work_end").value = String(s.working_hours[1]);
   $("send_undo_secs").value = String(s.send_undo_secs);
+  $("monthly_budget").value = String(s.monthly_budget);
   $("meeting_nudges").checked = s.meeting_nudges;
   $("mail_nudges").checked = s.mail_nudges;
   $("morning_brief").checked = s.morning_brief;
@@ -162,6 +164,7 @@ function collect(): Settings {
     google_client_id: $("google_client_id").value.trim(),
     working_hours: [num("work_start", 9), num("work_end", 17)],
     send_undo_secs: num("send_undo_secs", 10),
+    monthly_budget: Math.max(0, num("monthly_budget", 5)),
     meeting_nudges: $("meeting_nudges").checked,
     mail_nudges: $("mail_nudges").checked,
     morning_brief: $("morning_brief").checked,
@@ -184,6 +187,57 @@ function collect(): Settings {
       language: $("voice_language").value.trim() || null,
     },
   };
+}
+
+interface SpendLine {
+  calls: number;
+  cost: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+interface Spending {
+  today: number;
+  month: number;
+  budget: number;
+  paused: boolean;
+  by_purpose: Record<string, SpendLine>;
+  days: { day: string; cost: number }[];
+}
+
+/** Pennies matter here: a day of chat can cost a tenth of a cent. */
+const dollars = (x: number) =>
+  x >= 1 ? `$${x.toFixed(2)}` : x >= 0.01 ? `$${x.toFixed(3)}` : x >= 0.0001 ? `$${x.toFixed(4)}` : x > 0 ? "<$0.0001" : "$0.00";
+
+async function loadSpending(): Promise<void> {
+  let s: Spending;
+  try {
+    s = await invoke<Spending>("spending");
+  } catch {
+    return;
+  }
+  const of = s.budget > 0 ? ` of ${dollars(s.budget)}` : "";
+  $("spend-summary").textContent = s.paused
+    ? `This month ${dollars(s.month)}${of}: the budget is used up, so paid model calls are paused until the 1st.`
+    : `Today ${dollars(s.today)} · this month ${dollars(s.month)}${of}`;
+  const max = Math.max(...s.days.map((d) => d.cost), 1e-9);
+  $("spend-bars").replaceChildren(
+    ...s.days.map((d) => {
+      const bar = document.createElement("div");
+      bar.style.height = `${Math.max(2, Math.round((d.cost / max) * 100))}%`;
+      bar.title = `${d.day}: ${dollars(d.cost)}`;
+      if (d.cost === 0) bar.classList.add("zero");
+      return bar;
+    }),
+  );
+  const rows = Object.entries(s.by_purpose).sort((a, b) => b[1].cost - a[1].cost);
+  $("spend-purposes").replaceChildren(
+    ...rows.map(([name, l]) => {
+      const li = document.createElement("li");
+      li.textContent = `${name[0].toUpperCase()}${name.slice(1)}: ${dollars(l.cost)} (${l.calls} call${l.calls === 1 ? "" : "s"})`;
+      return li;
+    }),
+  );
 }
 
 async function loadSkills(): Promise<void> {
@@ -275,13 +329,16 @@ interface GoogleStatus {
   connected: boolean;
   email: string | null;
   error: string | null;
+  expired: boolean;
 }
 
 function showGoogle(g: GoogleStatus): void {
-  $("google-connect").classList.toggle("hidden", g.connected);
+  $("google-connect").classList.toggle("hidden", g.connected && !g.expired);
   $("google-disconnect").classList.toggle("hidden", !g.connected);
   $("google_client_secret").placeholder = g.has_secret ? "saved (leave blank to keep)" : "from the same page as the client ID";
-  $("google-status").textContent = g.connected
+  $("google-status").textContent = g.expired
+    ? "Sign-in expired: Google signed Waddle out. Press Connect to sign in again."
+    : g.connected
     ? g.email
       ? `Connected as ${g.email}.`
       : `Connected, but Google didn't answer: ${g.error ?? "unknown error"}`
@@ -475,6 +532,11 @@ async function loadTraces(): Promise<void> {
   }
 }
 
+$("forget-conversation").addEventListener("click", async () => {
+  await invoke("clear_memory");
+  $("forgot").textContent = "Forgotten.";
+});
+
 $("export-traces").addEventListener("click", async () => {
   try {
     $("traces").textContent = `Exported: ${await invoke<string>("export_traces")}. See docs/TRAINING.md for the next step.`;
@@ -485,6 +547,7 @@ $("export-traces").addEventListener("click", async () => {
 
 void invoke<SettingsView>("get_settings").then(fill);
 void loadTraces();
+void loadSpending();
 void loadAudit();
 void loadSkills();
 void loadFacts();
@@ -492,6 +555,7 @@ void loadGoogle();
 void loadStyle();
 void loadBrowser();
 setInterval(() => {
+  void loadSpending();
   void loadBrowser();
   void loadStyle();
   void loadAudit();

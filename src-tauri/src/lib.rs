@@ -8,6 +8,7 @@ mod browser;
 mod commands;
 mod desktop;
 mod overlay;
+mod power;
 mod presence;
 mod secrets;
 mod selftest;
@@ -29,6 +30,7 @@ use waddle_core::decide::{Decider, Jev};
 use waddle_core::facts::FactStore;
 use waddle_core::google::style::StyleNote;
 use waddle_core::google::{Endpoints, Google, OAuthClient};
+use waddle_core::ledger::{Ledger, Metered};
 use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
@@ -56,11 +58,15 @@ pub struct AppState {
     /// The signed-in Google account, if any.
     pub google: RwLock<Option<Arc<Google>>>,
     pub style: Arc<StyleNote>,
+    /// What Waddle spends on model calls, and the monthly budget.
+    pub ledger: Arc<Ledger>,
     /// Cancels a Google sign-in that's waiting for the browser.
     pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
     /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
     pub nudges: watch::Shared,
     pub data_dir: PathBuf,
+    /// Said once the overlay is ready (see `bootstrap`).
+    pub startup_notices: Mutex<Vec<String>>,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -76,22 +82,27 @@ fn default_workspace(app: &AppHandle) -> PathBuf {
 
 /// Picks the provider for these settings. Without a key for a hosted API,
 /// Waddle runs its scripted demo instead of failing on the first message.
-pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets) -> (Arc<dyn Provider>, bool) {
+/// Hosted providers are metered: every call goes in the ledger, and calls pause over budget.
+pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets, ledger: &Arc<Ledger>) -> (Arc<dyn Provider>, bool) {
     let forced_mock = std::env::var("WADDLE_PROVIDER").map(|v| v == "mock").unwrap_or(false);
     let key = secrets.get(Secret::LlmKey);
     if forced_mock || settings.provider == ProviderKind::Mock || (key.is_none() && commands::needs_key(settings)) {
         return (Arc::new(MockProvider::demo()), true);
     }
-    (build_provider(settings, key), false)
+    let provider = build_provider(settings, key);
+    if settings.is_local() {
+        return (provider, false);
+    }
+    (Arc::new(Metered::new(provider, ledger.clone())), false)
 }
 
 /// Quick decisions (Jev) need an OpenRouter key; the demo and other endpoints get none.
-pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool) -> Option<Arc<dyn Decider>> {
+pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool, ledger: &Arc<Ledger>) -> Option<Arc<dyn Decider>> {
     if demo {
         return None;
     }
     let key = secrets.get(Secret::LlmKey);
-    Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn Decider>)
+    Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j.with_ledger(ledger.clone())) as Arc<dyn Decider>)
 }
 
 /// Google's servers, or a fake on this machine for development (`WADDLE_GOOGLE_BASE`).
@@ -159,14 +170,12 @@ impl AppState {
     pub fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
         let ws_dir = settings.workspace_dir.clone().unwrap_or_else(|| self.workspace().root().to_path_buf());
         let workspace = workspace_for(&self.app, &settings, ws_dir)?;
-        let (provider, demo) = provider_for(&settings, &self.secrets);
-        let decider = decider_for(&settings, &self.secrets, demo);
+        self.ledger.set_budget(settings.monthly_budget);
+        let (provider, demo) = provider_for(&settings, &self.secrets, &self.ledger);
+        let decider = decider_for(&settings, &self.secrets, demo, &self.ledger);
         let self_source = self_source_for(&settings)?;
         let google = google_for(&settings, &self.secrets);
-        if let Some(dir) = self.settings_path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&self.settings_path, serde_json::to_string_pretty(&settings)?)?;
+        waddle_core::store::write_atomic(&self.settings_path, serde_json::to_string_pretty(&settings)?)?;
         self.session.configure(SessionConfig {
             settings: settings.clone(),
             provider,
@@ -245,16 +254,15 @@ pub fn open_settings_soon(app: &AppHandle) {
     });
 }
 
-/// Places the overlay over the primary monitor's work area (not the full
+/// Where the overlay belongs: the primary monitor's work area (not the full
 /// screen, so Windows doesn't treat it as a full-screen app).
-fn place_overlay(app: &AppHandle) -> anyhow::Result<Geometry> {
-    let window = app.get_webview_window("overlay").ok_or_else(|| anyhow::anyhow!("overlay window missing"))?;
+fn monitor_geometry(window: &tauri::WebviewWindow) -> anyhow::Result<Geometry> {
     let monitor = window
         .primary_monitor()?
         .or(window.current_monitor()?)
         .ok_or_else(|| anyhow::anyhow!("no monitor"))?;
     let work = monitor.work_area();
-    let geometry = Geometry {
+    Ok(Geometry {
         origin_x: work.position.x,
         origin_y: work.position.y,
         width: work.size.width,
@@ -264,11 +272,48 @@ fn place_overlay(app: &AppHandle) -> anyhow::Result<Geometry> {
         screen_h: monitor.size().height,
         screen_x: monitor.position().x,
         screen_y: monitor.position().y,
-    };
-    window.set_position(PhysicalPosition::new(work.position.x, work.position.y))?;
-    window.set_size(PhysicalSize::new(work.size.width, work.size.height))?;
+    })
+}
+
+fn apply_geometry(window: &tauri::WebviewWindow, g: &Geometry) -> anyhow::Result<()> {
+    window.set_position(PhysicalPosition::new(g.origin_x, g.origin_y))?;
+    window.set_size(PhysicalSize::new(g.width, g.height))?;
     window.show()?;
+    Ok(())
+}
+
+/// Places the overlay over the primary monitor's work area.
+fn place_overlay(app: &AppHandle) -> anyhow::Result<Geometry> {
+    let window = app.get_webview_window("overlay").ok_or_else(|| anyhow::anyhow!("overlay window missing"))?;
+    let geometry = monitor_geometry(&window)?;
+    apply_geometry(&window, &geometry)?;
     Ok(geometry)
+}
+
+/// Follows display changes: rotating the Surface, docking, a new resolution or
+/// scale, or the taskbar moving. Checked every 2 s; the overlay and every
+/// coordinate conversion move to the new layout.
+fn spawn_display_watch(app: AppHandle, overlay: Arc<OverlayState>, host: Arc<TauriHost>) {
+    let spawned = std::thread::Builder::new().name("waddle-display".into()).spawn(move || {
+        let Some(window) = app.get_webview_window("overlay") else { return };
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let Ok(now) = monitor_geometry(&window) else { continue };
+            if now == overlay.geometry() {
+                continue;
+            }
+            log::info!("display changed: {}x{} at {}% → re-placing the overlay", now.width, now.height, (now.scale * 100.0).round());
+            if let Err(e) = apply_geometry(&window, &now) {
+                log::warn!("re-placing the overlay: {e:#}");
+                continue;
+            }
+            *overlay.geometry.write().unwrap() = now;
+            host.refresh_platforms();
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("display watch: {e}");
+    }
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -315,10 +360,15 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let config_dir = handle.path().app_config_dir()?;
     let data_dir = handle.path().app_data_dir()?;
     let settings_path = config_dir.join("settings.json");
-    let settings: Settings = std::fs::read_to_string(&settings_path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default();
+    let mut startup_notices = vec![];
+    let settings: Settings = match waddle_core::store::read_json(&settings_path) {
+        Ok(s) => s.unwrap_or_default(),
+        Err(e) => {
+            log::warn!("{e}");
+            startup_notices.push("My settings file was damaged, so I started with the defaults. The old file is kept as settings.json.bad next to the new one.".to_string());
+            Settings::default()
+        }
+    };
     let secrets = Secrets::new(&config_dir);
     let audit = Arc::new(AuditLog::open(&data_dir.join("audit.sqlite"))?);
     let workspace = workspace_for(&handle, &settings, settings.workspace_dir.clone().unwrap_or_else(|| default_workspace(&handle)))?;
@@ -337,8 +387,15 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         Err(e) => log::warn!("couldn't register the Chrome link: {e:#}"),
     }
     let host = TauriHost::new(handle.clone(), overlay.clone(), link);
-    let (provider, demo) = provider_for(&settings, &secrets);
-    let decider = decider_for(&settings, &secrets, demo);
+    let ledger = Arc::new(Ledger::new(Some(data_dir.join("spending.json"))));
+    ledger.set_budget(settings.monthly_budget);
+    {
+        use waddle_core::agent::Host;
+        let host = host.clone();
+        ledger.on_notice(move |text| host.emit(waddle_core::AgentEvent::Notice { text }));
+    }
+    let (provider, demo) = provider_for(&settings, &secrets, &ledger);
+    let decider = decider_for(&settings, &secrets, demo, &ledger);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
@@ -371,6 +428,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         },
     );
 
+    session.keep_memory_in(data_dir.join("memory.json"));
+
     app.manage(AppState {
         app: handle.clone(),
         session,
@@ -387,14 +446,17 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         traces,
         google: RwLock::new(google),
         style,
+        ledger,
         google_signin: Mutex::default(),
         nudges: nudges.clone(),
         data_dir: data_dir.clone(),
+        startup_notices: Mutex::new(startup_notices),
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
     });
 
+    spawn_display_watch(handle.clone(), overlay.clone(), host.clone());
     overlay::spawn_hit_test(handle.clone(), overlay);
     bridge::spawn_reminder_clock(host.clone(), reminders);
     ambient::spawn(handle.clone(), host.clone());
@@ -413,9 +475,25 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether a second launch can find the first: always on Windows and macOS; on
+/// Linux the plugin needs a session bus (and panics without one).
+fn single_instance_available() -> bool {
+    cfg!(any(windows, target_os = "macos")) || std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if single_instance_available() {
+        // Must come first. Opening Waddle again (or autostart racing a manual start)
+        // brings up the running duck's chat box instead of a second duck.
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            log::info!("second launch: opening the chat box of the running Waddle");
+            focus_overlay(app);
+            let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": false }));
+        }));
+    }
+    builder
         // A log file in the OS log folder: release builds on Windows have no console.
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -470,6 +548,7 @@ pub fn run() {
             commands::google_disconnect,
             commands::style_get,
             commands::style_set,
+            commands::spending,
             commands::drop_selection,
             commands::rate_task,
             commands::traces_summary,

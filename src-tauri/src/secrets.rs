@@ -121,15 +121,7 @@ impl Secrets {
                 }
             }
         }
-        if let Some(dir) = self.fallback_file.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&self.fallback_file, serde_json::to_string_pretty(&map)?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.fallback_file, std::fs::Permissions::from_mode(0o600))?;
-        }
+        waddle_core::store::write_atomic_private(&self.fallback_file, serde_json::to_string_pretty(&map)?)?;
         Ok(())
     }
 }

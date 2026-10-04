@@ -261,3 +261,27 @@ textarea {
   font: inherit;
   resize: vertical;
 }
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 44px;
+  margin: 6px 0;
+}
+
+.bars div {
+  flex: 1;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+
+.bars div.zero {
+  background: var(--line);
+}
+
+.purposes {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  font-size: 13px;
+}
