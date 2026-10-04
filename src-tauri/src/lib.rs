@@ -263,6 +263,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::send_message,
+            commands::warm_up,
             commands::halt,
             commands::answer_approval,
             commands::duck_arrived,

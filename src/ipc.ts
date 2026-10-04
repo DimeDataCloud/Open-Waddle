@@ -57,6 +57,7 @@ export interface HitRect {
 export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
   sendMessage: (text: string) => invoke<void>("send_message", { text }),
+  warmUp: () => invoke<void>("warm_up"),
   halt: () => invoke<boolean>("halt"),
   answerApproval: (id: string, approved: boolean) => invoke<void>("answer_approval", { id, approved }),
   duckArrived: (id: string) => invoke<void>("duck_arrived", { id }),

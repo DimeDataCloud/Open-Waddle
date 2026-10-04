@@ -106,6 +106,9 @@ pub trait Provider: Send + Sync {
     /// Streams a chat completion. Text deltas are reported through `on_event`
     /// as they arrive; the full response (including tool calls) is returned at the end.
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse>;
+
+    /// Gets the model ready ahead of a request (a local server loads it into memory).
+    async fn warm(&self, _model: &str) {}
 }
 
 /// Builds the provider described by `settings`.

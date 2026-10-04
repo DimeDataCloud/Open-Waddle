@@ -178,10 +178,15 @@ async fn blind_input_is_refused_until_waddle_has_looked() {
 }
 
 #[test]
-fn only_the_latest_screenshot_is_kept() {
+fn screenshots_stay_put_until_the_budget_is_exceeded() {
     let img = || ImageData { mime: "image/png".into(), base64: "X".into() };
     let mut msgs = vec![Message::user_with_image("a", img()), Message::user("b"), Message::user_with_image("c", img())];
-    prune_images(&mut msgs);
+    // Within budget the history is untouched (append-only keeps a local prompt cache valid).
+    let before = msgs.clone();
+    prune_images(&mut msgs, 2);
+    assert_eq!(msgs, before);
+    // Over budget, only the newest screenshot survives.
+    prune_images(&mut msgs, 1);
     assert!(msgs[0].images.is_empty() && msgs[0].text.contains("removed"));
     assert_eq!(msgs[2].images.len(), 1);
 }

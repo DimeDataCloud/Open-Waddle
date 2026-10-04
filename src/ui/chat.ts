@@ -6,6 +6,8 @@
 
 export interface ChatHandlers {
   send(text: string): void;
+  /** The box opened: the user is about to say something. */
+  opened(): void;
   voiceStart(): Promise<"system" | "recording">;
   voiceStop(): Promise<string | null>;
   error(message: string): void;
@@ -46,6 +48,7 @@ export class Chat {
   }
 
   open(): void {
+    if (!this.visible) this.h.opened();
     this.el.classList.remove("hidden");
     this.input.focus();
     this.bumpClose();

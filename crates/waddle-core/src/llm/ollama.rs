@@ -114,8 +114,20 @@ pub(crate) fn apply_line(
     Ok(v.get("done").and_then(Value::as_bool).unwrap_or(false))
 }
 
+pub(crate) fn warm_body(model: &str, opts: &OllamaSettings) -> Value {
+    // A generate request without a prompt only loads the model.
+    json!({ "model": model, "keep_alive": opts.keep_alive })
+}
+
 #[async_trait]
 impl Provider for Ollama {
+    async fn warm(&self, model: &str) {
+        let url = format!("{}/api/generate", self.base_url);
+        if let Err(e) = self.http.post(&url).json(&warm_body(model, &self.opts)).send().await {
+            log::debug!("warm-up failed: {e}");
+        }
+    }
+
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
         let url = format!("{}/api/chat", self.base_url);
         let resp = self
@@ -193,6 +205,13 @@ mod tests {
         assert_eq!(body["options"]["num_ctx"], 4096);
         assert_eq!(body["keep_alive"], "30s");
         assert!(body.get("tools").is_none());
+    }
+
+    #[test]
+    fn warm_up_loads_without_generating() {
+        let opts = OllamaSettings { num_thread: None, keep_alive: "30s".into(), num_ctx: 8192 };
+        let body = warm_body("qwen3.5:4b", &opts);
+        assert_eq!(body, json!({ "model": "qwen3.5:4b", "keep_alive": "30s" }));
     }
 
     #[test]

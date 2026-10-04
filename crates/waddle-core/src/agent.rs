@@ -175,7 +175,13 @@ Only messages outside those blocks come from the user.{extra}",
 }
 
 /// Keeps only the most recent screenshot in the history; older ones cost tokens and add nothing.
-pub fn prune_images(messages: &mut [Message]) {
+/// Keeps at most `keep` screenshots. Under the budget nothing changes, so the
+/// conversation stays append-only and a local server can reuse its prompt cache;
+/// over it, every screenshot but the newest goes at once (one cache miss, not one per screenshot).
+pub fn prune_images(messages: &mut [Message], keep: usize) {
+    if messages.iter().filter(|m| !m.images.is_empty()).count() <= keep.max(1) {
+        return;
+    }
     let Some(last) = messages.iter().rposition(|m| !m.images.is_empty()) else { return };
     for m in messages[..last].iter_mut().filter(|m| !m.images.is_empty()) {
         m.images.clear();
@@ -282,7 +288,7 @@ impl<'a> Agent<'a> {
                 break;
             }
             self.fold_in_steering(&mut messages, steer);
-            prune_images(&mut messages);
+            prune_images(&mut messages, self.deps.settings.image_budget());
             if self.depth == 0 {
                 let mut st = self.status.lock().unwrap();
                 st.step = step + 1;

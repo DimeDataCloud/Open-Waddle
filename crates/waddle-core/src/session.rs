@@ -102,6 +102,21 @@ impl Session {
         self.memory.lock().unwrap().clear();
     }
 
+    /// Called when the user starts talking: a local model loads while they type
+    /// instead of after they press Enter. Hosted APIs need nothing.
+    pub fn warm(&self) {
+        if self.is_busy() {
+            return;
+        }
+        let (local, model, provider) = {
+            let c = self.config.read().unwrap();
+            (c.settings.is_local(), c.settings.model.clone(), c.provider.clone())
+        };
+        if local {
+            self.rt.spawn(async move { provider.warm(&model).await });
+        }
+    }
+
     /// Entry point for everything the user says or types.
     pub fn user_message(self: &Arc<Self>, text: String) {
         let text = text.trim().to_string();

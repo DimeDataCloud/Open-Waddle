@@ -175,6 +175,22 @@ impl Settings {
     pub fn coord_mode(&self) -> CoordMode {
         self.coord_mode.resolve(&self.model)
     }
+
+    /// The model runs on this machine (Ollama, or an OpenAI-compatible server on localhost).
+    pub fn is_local(&self) -> bool {
+        self.provider == ProviderKind::Ollama || ["://localhost", "://127.0.0.1", "://[::1]"].iter().any(|h| self.base_url.contains(h))
+    }
+
+    /// How many screenshots a task keeps in its conversation before older ones are dropped.
+    /// Hosted APIs bill every image on every call, so they keep one. Local servers reuse their
+    /// prompt cache only while the conversation is append-only, so they keep as many as fit
+    /// (about 1400 tokens each, leaving 4096 for the prompt, tools and steps).
+    pub fn image_budget(&self) -> usize {
+        if !self.is_local() {
+            return 1;
+        }
+        (self.ollama.num_ctx.saturating_sub(4096) / 1400).clamp(1, 3) as usize
+    }
 }
 
 /// Settings Waddle may change about itself (with approval). Endpoints, keys,
@@ -251,6 +267,23 @@ mod tests {
         ] {
             assert!(apply_patch(&base, &bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn local_endpoints_keep_more_screenshots() {
+        let cloud = Settings::default();
+        assert!(!cloud.is_local());
+        assert_eq!(cloud.image_budget(), 1);
+        let ollama = Settings { provider: ProviderKind::Ollama, ..Settings::default() };
+        assert!(ollama.is_local());
+        assert_eq!(ollama.image_budget(), 2, "8192 context fits two screenshots");
+        let lm = Settings { base_url: "http://localhost:1234/v1".into(), ..Settings::default() };
+        assert!(lm.is_local());
+        let mut big = ollama.clone();
+        big.ollama.num_ctx = 32768;
+        assert_eq!(big.image_budget(), 3);
+        big.ollama.num_ctx = 4096;
+        assert_eq!(big.image_budget(), 1);
     }
 
     #[test]

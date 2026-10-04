@@ -56,6 +56,11 @@ pub fn send_message(state: State<'_, AppState>, text: String) {
 }
 
 #[tauri::command]
+pub fn warm_up(state: State<'_, AppState>) {
+    state.session.warm();
+}
+
+#[tauri::command]
 pub fn halt(state: State<'_, AppState>) -> bool {
     state.session.halt()
 }
