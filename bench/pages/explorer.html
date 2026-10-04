@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>File Explorer</title><link rel="stylesheet" href="common.css"><style>
+body{background:#f3f3f3}
+.tabs{height:42px;display:flex;align-items:flex-end;padding-left:10px}.tabs span{background:#fff;padding:8px 16px;border-radius:8px 8px 0 0;font-size:13px}.tabs .w{margin-left:auto;align-self:center;display:flex}.tabs .w b{width:46px;text-align:center;font-weight:400}
+.addr{height:46px;background:#fff;display:flex;align-items:center;gap:6px;padding:0 10px}.addr .p{flex:1;height:32px;border:1px solid #ddd;border-radius:4px;display:flex;align-items:center;padding:0 10px;font-size:13px}.addr .s{width:280px;height:32px;border:1px solid #ddd;border-radius:4px;display:flex;align-items:center;padding:0 10px;color:#777}
+.cmd{height:48px;background:#fff;border-top:1px solid #eee;border-bottom:1px solid #e5e5e5;display:flex;align-items:center;gap:6px;padding:0 12px;font-size:13px}.cmd span{padding:6px 10px}
+aside{position:absolute;top:136px;left:0;width:240px;bottom:0;background:#fff;border-right:1px solid #e5e5e5;padding:8px}
+aside a{display:flex;gap:10px;align-items:center;height:32px;padding:0 10px;border-radius:4px;font-size:13px}aside a.on{background:#e5f1fb}
+main{position:absolute;top:136px;left:240px;right:0;bottom:0;background:#fff}
+.hd,.f{display:grid;grid-template-columns:440px 200px 180px 120px;height:34px;align-items:center;padding:0 16px;font-size:13px}.hd{color:#555;border-bottom:1px solid #eee}
+.f span:first-child{display:flex;gap:10px;align-items:center}.f:nth-child(odd){background:#fafafa}
+</style></head><body>
+<div class="tabs"><span>📁 Documents ✕</span><span style="background:none">+</span><div class="w"><b>—</b><b>☐</b><b>✕</b></div></div>
+<div class="addr"><span class="ico">←</span><span class="ico">→</span><span class="ico">↑</span><span class="ico">⟳</span><div class="p">› This PC › Documents</div><div class="s">Search Documents</div></div>
+<div class="cmd"><span>⊕ New ⌄</span><span>✂</span><span>⎘</span><span>📋</span><span>✎</span><span>⇪</span><span>🗑</span><span>⇅ Sort ⌄</span><span>☷ View ⌄</span><span>⋯</span></div>
+<aside><a>⌂ Home</a><a>🖼 Gallery</a><a>☁ OneDrive</a><hr style="border:0;border-top:1px solid #eee;margin:8px 0"><a>🖥 Desktop</a><a data-t="nav-downloads">⬇ Downloads</a><a class="on">📄 Documents</a><a>🖼 Pictures</a><a>♫ Music</a><a>🎬 Videos</a><hr style="border:0;border-top:1px solid #eee;margin:8px 0"><a>💻 This PC</a><a>🖧 Network</a></aside>
+<main><div class="hd"><span>Name</span><span>Date modified</span><span>Type</span><span>Size</span></div>
+<div class="f"><span>📁 Waddle</span><span>10/4/2026 9:12 AM</span><span>File folder</span><span></span></div>
+<div class="f"><span>📁 Taxes</span><span>4/14/2026 6:01 PM</span><span>File folder</span><span></span></div>
+<div class="f"><span>📊 budget-2025.xlsx</span><span>12/30/2025 4:20 PM</span><span>Microsoft Excel Worksheet</span><span>48 KB</span></div>
+<div class="f" data-t="budget-2026"><span>📊 budget-2026.xlsx</span><span>10/2/2026 11:47 AM</span><span>Microsoft Excel Worksheet</span><span>52 KB</span></div>
+<div class="f"><span>📄 budget-2026 notes.docx</span><span>10/2/2026 11:50 AM</span><span>Microsoft Word Document</span><span>21 KB</span></div>
+<div class="f"><span>📄 cover letter.pdf</span><span>8/19/2026 2:33 PM</span><span>PDF Document</span><span>184 KB</span></div>
+<div class="f"><span>🖼 duck-sketch.png</span><span>9/28/2026 7:05 PM</span><span>PNG File</span><span>1.2 MB</span></div>
+<div class="f"><span>📄 lease-agreement.pdf</span><span>1/5/2026 10:10 AM</span><span>PDF Document</span><span>2.4 MB</span></div>
+<div class="f"><span>📝 meeting notes.txt</span><span>10/3/2026 3:44 PM</span><span>Text Document</span><span>3 KB</span></div>
+<div class="f"><span>📊 travel expenses.csv</span><span>7/22/2026 8:15 AM</span><span>CSV File</span><span>9 KB</span></div>
+</main></body></html>

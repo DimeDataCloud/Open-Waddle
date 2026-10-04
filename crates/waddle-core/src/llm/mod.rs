@@ -80,6 +80,7 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
+#[derive(Clone, Copy)]
 pub struct ChatRequest<'a> {
     pub model: &'a str,
     pub messages: &'a [Message],
@@ -92,6 +93,40 @@ pub struct ChatRequest<'a> {
 pub struct ChatResponse {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
+    pub usage: Usage,
+}
+
+/// What a call (or a whole task) used, as reported by the server.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Usage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    /// In US dollars, when the server says (OpenRouter does).
+    pub cost: Option<f64>,
+}
+
+impl Usage {
+    pub fn add(&mut self, other: Usage) {
+        self.prompt_tokens += other.prompt_tokens;
+        self.completion_tokens += other.completion_tokens;
+        if let Some(c) = other.cost {
+            self.cost = Some(self.cost.unwrap_or(0.0) + c);
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.prompt_tokens == 0 && self.completion_tokens == 0 && self.cost.is_none()
+    }
+}
+
+impl std::fmt::Display for Usage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} tokens in, {} out", self.prompt_tokens, self.completion_tokens)?;
+        match self.cost {
+            Some(c) => write!(f, ", ${c:.5}"),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,15 +142,22 @@ pub trait Provider: Send + Sync {
     /// as they arrive; the full response (including tool calls) is returned at the end.
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse>;
 
-    /// Gets the model ready ahead of a request (a local server loads it into memory).
-    async fn warm(&self, _model: &str) {}
+    /// Sends the start of a conversation ahead of time and discards the answer,
+    /// so a local server has the model loaded and the prompt cached when the
+    /// real request arrives. Only worth calling on local servers: a hosted API
+    /// would bill for it.
+    async fn warm(&self, req: ChatRequest<'_>) {
+        if let Err(e) = self.chat(ChatRequest { max_tokens: 1, ..req }, &mut |_| {}).await {
+            log::debug!("warm-up failed: {e:#}");
+        }
+    }
 }
 
 /// Builds the provider described by `settings`.
 pub fn build_provider(settings: &Settings, api_key: Option<String>) -> Arc<dyn Provider> {
     match settings.provider {
         ProviderKind::OpenaiCompat => {
-            Arc::new(openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key))
+            Arc::new(openai_compat::OpenAiCompat::new(settings.base_url.clone(), api_key).with_reasoning(settings.reasoning.effort()))
         }
         ProviderKind::Ollama => Arc::new(ollama::Ollama::new(settings.base_url.clone(), settings.ollama.clone())),
         ProviderKind::Mock => Arc::new(mock::MockProvider::demo()),

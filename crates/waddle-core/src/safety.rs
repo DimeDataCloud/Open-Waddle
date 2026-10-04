@@ -48,6 +48,7 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
     match call.name.as_str() {
         "list_windows" | "look_at_screen" | "find_elements" => assess(Tier::Passive, "reads the screen"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
+        "play" => assess(Tier::NonDestructive, "plays with a copy of the screen; nothing real changes"),
         "read_file" | "list_dir" => assess(Tier::NonDestructive, "reads the workspace"),
         "save_skill" | "forget_skill" => assess(Tier::Destructive, "changes Waddle's long-term memory (loaded into every task)"),
         "update_settings" => assess(Tier::Destructive, "changes Waddle's own settings"),
@@ -172,6 +173,7 @@ mod tests {
         assert_eq!(tier_of("look_at_screen", json!({}), false), Tier::Passive);
         assert_eq!(tier_of("find_elements", json!({}), false), Tier::Passive);
         assert_eq!(tier_of("open_app", json!({"name":"notepad"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("play", json!({"autoplay": true}), false), Tier::NonDestructive);
         assert_eq!(tier_of("read_file", json!({"path":"a"}), true), Tier::NonDestructive);
     }
 

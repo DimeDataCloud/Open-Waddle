@@ -10,17 +10,19 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use waddle_core::agent::{prune_images, Agent, AgentDeps, TaskStatus};
+use waddle_core::agent::{promises_action, prune_images, Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
+use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
 use waddle_core::llm::{ChatRequest, ChatResponse, EventSink, ImageData, Message, Provider, Role, StreamEvent};
 use waddle_core::tools::fs::Workspace;
-use waddle_core::tools::GuiAction;
+use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::skills::SkillStore;
 use waddle_core::{AgentEvent, Decision, Host, Lane, Outcome, Session, SessionConfig, Settings};
 
 fn settings() -> Settings {
-    Settings { model: "test-model".into(), tier2_countdown_ms: 20, ..Settings::default() }
+    // Most tests script exact tool sequences; the opening look has its own test.
+    Settings { model: "test-model".into(), tier2_countdown_ms: 20, look_first: false, ..Settings::default() }
 }
 
 struct Fixture {
@@ -30,7 +32,7 @@ struct Fixture {
 }
 
 fn session_config(f: &Fixture, provider: Arc<dyn Provider>) -> SessionConfig {
-    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, self_source: None }
+    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, self_source: None, traces: None }
 }
 
 fn fixture() -> Fixture {
@@ -157,6 +159,51 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
 }
 
 #[tokio::test]
+async fn the_first_request_shows_the_screen() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Clicking Play.", vec![call("click", json!({"x": 100, "y": 100}))]), reply("Done.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    *host.windows.lock().unwrap() = vec![WindowInfo { title: "DuckTube".into(), app: "chrome".into(), x: 0.0, y: 0.0, w: 1440.0, h: 960.0, focused: true }];
+    let deps = AgentDeps { settings: Settings { look_first: true, ..settings() }, ..deps_with(&f, host.clone(), provider.clone(), None, None) };
+    let env = host.env();
+    let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    agent.run("play my playlist", &[], &mut rx).await;
+
+    let first = provider.requests.lock().unwrap()[0].clone();
+    let goal = first.last().unwrap();
+    assert_eq!(goal.role, Role::User);
+    assert!(goal.text.starts_with("play my playlist"), "{}", goal.text);
+    assert!(goal.text.contains("DuckTube") && goal.text.contains("<untrusted"), "window titles arrive wrapped: {}", goal.text);
+    assert_eq!(goal.images.len(), 1);
+    // Having seen the screen, the click is allowed straight away.
+    let gui = host.gui_calls.lock().unwrap().clone();
+    assert_eq!(gui[..2], [GuiAction::ListWindows, GuiAction::LookAtScreen]);
+    assert!(matches!(gui[2], GuiAction::Click { .. }), "{gui:?}");
+}
+
+#[tokio::test]
+async fn a_third_identical_click_is_refused() {
+    let f = fixture();
+    let click = || call("click", json!({"x": 10, "y": 10}));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Looking.", vec![call("list_windows", json!({}))]),
+        reply("Clicking.", vec![click()]),
+        reply("Again.", vec![click()]),
+        reply("Again.", vec![click()]),
+        reply("Trying elsewhere.", vec![call("click", json!({"x": 20, "y": 10}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let clicks = host.gui_calls.lock().unwrap().iter().filter(|a| matches!(a, GuiAction::Click { .. })).count();
+    assert_eq!(clicks, 3, "the third identical click is refused, a different one goes through");
+    let fifth = provider.requests.lock().unwrap()[4].clone();
+    assert!(fifth.last().unwrap().text.contains("already done exactly this twice"), "{:?}", fifth.last());
+}
+
+#[tokio::test]
 async fn blind_input_is_refused_until_waddle_has_looked() {
     let f = fixture();
     let provider = Arc::new(MockProvider::scripted(vec![
@@ -175,6 +222,34 @@ async fn blind_input_is_refused_until_waddle_has_looked() {
     assert!(refusal.text.contains("haven't looked"), "{}", refusal.text);
     let key_approvals = host.approvals.lock().unwrap().iter().filter(|a| a.tool == "press_keys").count();
     assert_eq!(key_approvals, 1, "the refused attempt never reaches the approval gate");
+}
+
+#[tokio::test]
+async fn an_announced_action_without_a_tool_call_gets_one_nudge() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("I see the red button. I'll click it for you.", vec![]),
+        reply("Clicking it.", vec![call("list_windows", json!({}))]),
+        reply("Let me take another look.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let (outcome, message) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    assert_eq!(host.gui_calls.lock().unwrap().clone(), vec![GuiAction::ListWindows]);
+    let second = provider.requests.lock().unwrap()[1].clone();
+    assert!(second.last().unwrap().text.contains("didn't call a tool"), "{:?}", second.last());
+    // Only one nudge per task, so a model that keeps talking still finishes.
+    assert_eq!((outcome, message.as_str(), provider.request_count()), (Outcome::Done, "Let me take another look.", 3));
+}
+
+#[test]
+fn only_replies_that_announce_an_action_count_as_promises() {
+    for t in ["I'll click it for you.", "Let me take a screenshot first.", "Now I\u{2019}m going to open Notepad", "Okay! I will go ahead and type it."] {
+        assert!(promises_action(t), "{t}");
+    }
+    for t in ["Okay, I'll leave it.", "Done! Let me know if you need anything else.", "I clicked the red button.", "I'll be here if you need me."] {
+        assert!(!promises_action(t), "{t}");
+    }
 }
 
 #[test]
@@ -282,6 +357,35 @@ async fn follow_up_tasks_see_conversation_memory() {
     assert!(second.iter().any(|m| m.role == Role::Assistant && m.text == "Hi there!"));
 }
 
+#[tokio::test]
+async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Hi there!", vec![]), reply("Sure.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+    session.warm();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(provider.warmups.lock().unwrap().is_empty(), "a hosted API was warmed (and would bill for it)");
+
+    let mut local = session_config(&f, provider.clone());
+    local.settings.provider = ProviderKind::Ollama;
+    session.configure(local);
+    session.user_message("hello".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    wait_until(|| !session.is_busy()).await;
+    session.warm();
+    wait_until(|| provider.warmups.lock().unwrap().len() == 1).await;
+    session.user_message("and again".into());
+    wait_until(|| provider.request_count() == 2).await;
+
+    // The warm-up is exactly the next request minus the user's new message,
+    // so a local server can reuse everything it read while the user typed.
+    let warm = provider.warmups.lock().unwrap()[0].clone();
+    let next = provider.requests.lock().unwrap()[1].clone();
+    assert_eq!(warm.as_slice(), &next[..next.len() - 1]);
+    assert!(warm.iter().any(|m| m.text == "Hi there!"), "memory missing from the warm-up");
+}
+
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
     AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, self_source }
 }
@@ -379,4 +483,46 @@ async fn self_source_is_reachable_with_approval_only() {
     assert_eq!(host.approvals.lock().unwrap()[0].tier, 3);
     let last = provider.requests.lock().unwrap().last().unwrap().clone();
     assert!(last.iter().any(|m| m.role == Role::Tool && m.text.contains("v2")));
+}
+
+#[tokio::test]
+async fn recorded_tasks_are_saved_for_training_and_offered_for_rating() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::traces::TraceStore::new(f._dir.path().join("traces")));
+    let provider = Arc::new(MockProvider::scripted(vec![reply("All done.", vec![]), reply("Done again.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let mut config = SessionConfig { traces: Some(store.clone()), ..session_config(&f, provider.clone()) };
+    // Off by default: nothing is saved.
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config.clone());
+    session.user_message("say hi".into());
+    wait_until(|| !session.is_busy() && host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    assert!(store.list().is_empty());
+
+    config.settings.record_traces = true;
+    session.configure(config);
+    session.user_message("say hi again".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TraceSaved { .. }))).await;
+    let saved = store.list();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].goal, "say hi again");
+    assert_eq!(saved[0].outcome, Outcome::Done);
+}
+
+#[tokio::test]
+async fn click_element_trusts_the_name_when_the_id_is_off() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Reading the dialog.", vec![call("find_elements", json!({}))]),
+        reply("Clicking Don't save.", vec![call("click_element", json!({"id": 1, "name": "Don't save"}))]),
+        reply("Clicking Cancel.", vec![call("click_element", json!({"id": 3, "name": "Cancel"}))]),
+        reply("Trying a name that isn't listed.", vec![call("click_element", json!({"id": 1, "name": "Close"}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let el = |id, name: &str| ElementInfo { id, role: "button".into(), name: name.into(), x: 0.0, y: 0.0, w: 10.0, h: 10.0 };
+    *host.elements.lock().unwrap() = vec![el(1, "Save"), el(2, "Don't save"), el(3, "Cancel")];
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let clicked: Vec<u32> = host.gui_calls.lock().unwrap().iter().filter_map(|a| if let GuiAction::ClickElement { id } = a { Some(*id) } else { None }).collect();
+    assert_eq!(clicked, vec![2, 3, 1], "wrong id + listed name → the named element; matching or unknown names → the id as given");
 }

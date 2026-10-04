@@ -264,3 +264,13 @@ body {
   background: var(--tier2);
   transform-origin: left;
 }
+
+.bubble .rate {
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: pointer;
+  font-size: 13px;
+}

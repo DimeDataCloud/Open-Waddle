@@ -1,0 +1,39 @@
+<!doctype html><html><head><meta charset="utf-8"><title>DuckTube</title><link rel="stylesheet" href="common.css"><style>
+body{background:#0f0f0f;color:#f1f1f1}
+header{height:56px;display:flex;align-items:center;padding:0 16px;gap:16px}
+.logo{font-weight:700;font-size:20px;display:flex;gap:6px;align-items:center;width:200px}.logo i{width:30px;height:21px;background:#f00;border-radius:6px;display:inline-block}
+.sb{flex:0 0 560px;margin-left:200px;display:flex;height:40px}
+.sb input{flex:1;background:#121212;border:1px solid #303030;border-radius:20px 0 0 20px;padding:0 16px;color:#fff;font-size:16px}
+.sb button{width:64px;background:#222;border:1px solid #303030;border-left:0;border-radius:0 20px 20px 0;color:#ddd}
+.right{margin-left:auto;display:flex;gap:8px;align-items:center}.av{width:32px;height:32px;border-radius:50%;background:#7b5;}
+nav{position:absolute;top:56px;left:0;width:228px;padding:12px}
+nav a{display:flex;height:40px;align-items:center;padding:0 12px;border-radius:10px;gap:20px;color:#f1f1f1;text-decoration:none}nav a.on{background:#272727}
+nav hr{border:0;border-top:1px solid #303030;margin:12px 0}
+main{position:absolute;top:56px;left:240px;right:0;padding:16px 24px}
+h2{font-size:20px;margin:8px 0 14px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px 16px}
+.card .th{height:150px;border-radius:12px;position:relative;overflow:hidden}
+.card .t{font-weight:600;margin-top:10px;font-size:15px;line-height:20px}.card .m{color:#aaa;font-size:13px;margin-top:4px}
+.dur{position:absolute;right:6px;bottom:6px;background:#000c;padding:1px 4px;border-radius:4px;font-size:12px}
+.pl .stack{position:absolute;right:0;top:0;bottom:0;width:40%;background:#000a;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px}
+.playall{margin-top:6px;display:inline-block;background:#f1f1f1;color:#0f0f0f;border-radius:18px;padding:6px 14px;font-weight:600;font-size:13px}
+</style></head><body>
+<header><div class="logo"><i></i>DuckTube</div>
+<div class="sb"><input data-t="search" placeholder="Search"><button data-t="search-btn" title="Search"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg></span></button></div>
+<div class="right"><span class="ico" style="color:#ddd"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="ico" style="color:#ddd"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9"/></svg></span><span class="av"></span></div></header>
+<nav><a class="on">⌂ Home</a><a>▶ Shorts</a><a>▤ Subscriptions</a><hr><a>You ›</a><a>↺ History</a><a data-t="nav-playlists">☰ Playlists</a><a>◷ Watch later</a><a>♥ Liked videos</a><hr><a>🔥 Trending</a><a>♫ Music</a><a>🎮 Gaming</a></nav>
+<main>
+<h2>Recommended</h2>
+<div class="grid">
+<div class="card"><div class="th" style="background:linear-gradient(135deg,#2b5876,#4e4376)"><span class="dur">12:04</span></div><div class="t">How ducks actually float (it's not what you think)</div><div class="m">Pond Science · 1.2M views · 3 days ago</div></div>
+<div class="card"><div class="th" style="background:linear-gradient(135deg,#ff9966,#ff5e62)"><span class="dur">8:41</span></div><div class="t">Rust in 100 seconds, but slower</div><div class="m">Code Pond · 410K views · 1 week ago</div></div>
+<div class="card"><div class="th" style="background:linear-gradient(135deg,#56ab2f,#a8e063)"><span class="dur">22:10</span></div><div class="t">I built a desktop pet that uses my computer</div><div class="m">Maker Mallard · 88K views · 2 days ago</div></div>
+<div class="card"><div class="th" style="background:linear-gradient(135deg,#614385,#516395)"><span class="dur">3:15</span></div><div class="t">Rain on a tin roof · 3 minutes of calm</div><div class="m">Ambient Lab · 2.9M views · 1 year ago</div></div>
+</div>
+<h2 style="margin-top:22px">Your playlists</h2>
+<div class="grid">
+<div class="card pl"><div class="th" style="background:linear-gradient(135deg,#373b44,#4286f4)"><div class="stack">24 videos<br>≡</div></div><div class="t">Workout Bangers</div><div class="m">Private · Updated today</div><span class="playall">▶ Play all</span></div>
+<div class="card pl" data-t="lofi-card"><div class="th" style="background:linear-gradient(135deg,#c79081,#dfa579)"><div class="stack">57 videos<br>≡</div></div><div class="t">Lo-fi Study Mix</div><div class="m">Private · Updated 2 days ago</div><span class="playall" data-t="lofi-play">▶ Play all</span></div>
+<div class="card pl"><div class="th" style="background:linear-gradient(135deg,#1d976c,#93f9b9)"><div class="stack">12 videos<br>≡</div></div><div class="t">Cooking: weeknight dinners</div><div class="m">Public · Updated 3 weeks ago</div><span class="playall">▶ Play all</span></div>
+<div class="card pl"><div class="th" style="background:linear-gradient(135deg,#ee0979,#ff6a00)"><div class="stack">9 videos<br>≡</div></div><div class="t">Lo-fi Beats (old)</div><div class="m">Private · Updated 2 years ago</div><span class="playall">▶ Play all</span></div>
+</div></main></body></html>

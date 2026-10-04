@@ -7,11 +7,12 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall};
+use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
 
 pub struct OpenAiCompat {
     base_url: String,
     api_key: Option<String>,
+    reasoning: Option<&'static str>,
     http: reqwest::Client,
 }
 
@@ -21,7 +22,13 @@ impl OpenAiCompat {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("http client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, http }
+        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, http }
+    }
+
+    /// Sends OpenRouter's `reasoning.effort` with every request ("none", "low", ...).
+    pub fn with_reasoning(mut self, effort: Option<&'static str>) -> Self {
+        self.reasoning = effort;
+        self
     }
 }
 
@@ -67,7 +74,7 @@ pub(crate) fn message_to_json(m: &Message) -> Value {
     }
 }
 
-pub(crate) fn request_body(req: &ChatRequest<'_>) -> Value {
+pub(crate) fn request_body(req: &ChatRequest<'_>, reasoning: Option<&str>) -> Value {
     let mut body = json!({
         "model": req.model,
         "messages": req.messages.iter().map(message_to_json).collect::<Vec<_>>(),
@@ -75,6 +82,9 @@ pub(crate) fn request_body(req: &ChatRequest<'_>) -> Value {
         "temperature": req.temperature,
         "max_tokens": req.max_tokens,
     });
+    if let Some(effort) = reasoning {
+        body["reasoning"] = json!({ "effort": effort });
+    }
     if !req.tools.is_empty() {
         body["tools"] = req
             .tools
@@ -103,6 +113,7 @@ pub(crate) struct SseAccumulator {
     buffer: String,
     text: String,
     calls: BTreeMap<u64, PartialCall>,
+    usage: Usage,
     done: bool,
 }
 
@@ -129,6 +140,11 @@ impl SseAccumulator {
         if let Some(err) = v.get("error") {
             let msg = err.get("message").and_then(Value::as_str).unwrap_or("unknown error");
             bail!("provider error: {msg}");
+        }
+        // OpenRouter sends token counts and the price with the last chunk.
+        if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
+            let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+            self.usage = Usage { prompt_tokens: n("prompt_tokens"), completion_tokens: n("completion_tokens"), cost: u.get("cost").and_then(Value::as_f64) };
         }
         let Some(delta) = v.pointer("/choices/0/delta") else { return Ok(()) };
         if let Some(t) = delta.get("content").and_then(Value::as_str) {
@@ -182,7 +198,7 @@ impl SseAccumulator {
                 tool_calls = calls;
             }
         }
-        ChatResponse { text, tool_calls }
+        ChatResponse { text, tool_calls, usage: self.usage }
     }
 }
 
@@ -195,7 +211,7 @@ impl Provider for OpenAiCompat {
             .post(&url)
             .header("HTTP-Referer", "https://github.com/DimeDataCloud/Waddle")
             .header("X-Title", "Project Waddle")
-            .json(&request_body(&req));
+            .json(&request_body(&req, self.reasoning));
         if let Some(key) = self.api_key.as_deref().filter(|k| !k.is_empty()) {
             builder = builder.bearer_auth(key);
         }
@@ -248,6 +264,7 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"Notepad.\"}}]}\n",
             "\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"open_app\",\"arguments\":\"{\\\"na\"}}]}}]}\n\n",
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"me\\\":\\\"notepad\\\"}\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1800,\"completion_tokens\":30,\"cost\":0.00023}}\n\n",
             "data: [DONE]\n\n",
         ];
         let (resp, deltas) = feed(&chunks);
@@ -257,6 +274,7 @@ mod tests {
         assert_eq!(resp.tool_calls[0].id, "c1");
         assert_eq!(resp.tool_calls[0].name, "open_app");
         assert_eq!(resp.tool_calls[0].arguments, json!({"name": "notepad"}));
+        assert_eq!(resp.usage, Usage { prompt_tokens: 1800, completion_tokens: 30, cost: Some(0.00023) });
     }
 
     #[test]
@@ -290,11 +308,14 @@ mod tests {
             Message::user_with_image("screen", ImageData { mime: "image/png".into(), base64: "AAA".into() }),
         ];
         let tools = vec![ToolSpec { name: "x".into(), description: "d".into(), parameters: json!({"type":"object"}) }];
-        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 });
+        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 }, None);
         assert_eq!(body["messages"][1]["tool_calls"][0]["function"]["arguments"], "{}");
         assert_eq!(body["messages"][2]["tool_call_id"], "c9");
         assert_eq!(body["messages"][3]["content"][1]["image_url"]["url"], "data:image/png;base64,AAA");
         assert_eq!(body["tools"][0]["function"]["name"], "x");
         assert_eq!(body["stream"], true);
+        assert!(body.get("reasoning").is_none());
+        let body = request_body(&ChatRequest { model: "m", messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10 }, Some("none"));
+        assert_eq!(body["reasoning"]["effort"], "none");
     }
 }

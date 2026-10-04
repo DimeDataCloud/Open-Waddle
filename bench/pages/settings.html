@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Settings</title><link rel="stylesheet" href="common.css"><style>
+body{background:#f3f3f3}
+.tbar{height:40px;display:flex;align-items:center;padding-left:16px;font-size:12px;color:#333}
+.tbar .win{margin-left:auto;display:flex}.tbar .win span{width:46px;text-align:center;font-size:14px}
+aside{position:absolute;top:40px;left:0;width:300px;padding:8px 12px}
+.me{display:flex;gap:12px;align-items:center;padding:12px 8px 18px}.me i{width:64px;height:64px;border-radius:50%;background:#e7c9a9;display:inline-block}
+.find{height:34px;border:1px solid #ddd;border-bottom:2px solid #888;border-radius:4px;background:#fff;padding:0 10px;display:flex;align-items:center;color:#666;margin-bottom:10px}
+aside a{display:flex;align-items:center;gap:14px;height:38px;padding:0 12px;border-radius:5px;color:#1b1b1b}aside a.on{background:#eaeaea;position:relative}aside a.on:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:2px;background:#005fb8}
+main{position:absolute;top:40px;left:316px;right:24px;padding:4px 16px}
+h1{font-size:28px;font-weight:600;margin:6px 0 20px}
+.row{background:#fbfbfb;border:1px solid #e5e5e5;border-radius:6px;min-height:68px;display:flex;align-items:center;padding:0 18px;gap:16px;margin-bottom:3px}
+.row .tx{flex:1}.row .tx small{display:block;color:#5f5f5f;font-size:12px;margin-top:2px}
+.sw{display:flex;align-items:center;gap:10px;color:#333}
+.tg{width:40px;height:20px;border-radius:10px;border:1px solid #777;position:relative;background:#fff}.tg:after{content:"";position:absolute;width:12px;height:12px;border-radius:50%;background:#555;top:3px;left:4px}
+.tg.on{background:#005fb8;border-color:#005fb8}.tg.on:after{background:#fff;left:22px}
+.slider{width:220px;height:4px;background:#005fb8;border-radius:2px;position:relative}.slider:after{content:"";position:absolute;left:150px;top:-8px;width:20px;height:20px;border-radius:50%;background:#fff;border:5px solid #005fb8;box-sizing:border-box}
+.chev{color:#555}
+h3{font-size:14px;font-weight:600;margin:20px 0 8px}
+</style></head><body>
+<div class="tbar">← &nbsp; Settings<div class="win"><span>—</span><span>☐</span><span>✕</span></div></div>
+<aside><div class="me"><i></i><div><b>Sam Mallard</b><br><span style="font-size:12px;color:#555">sam@example.com</span></div></div>
+<div class="find">Find a setting</div>
+<a class="on">🖥 System</a><a data-t="nav-bt">🔵 Bluetooth &amp; devices</a><a>🌐 Network &amp; internet</a><a>🖌 Personalization</a><a>▦ Apps</a><a>👤 Accounts</a><a>🕓 Time &amp; language</a><a>🎮 Gaming</a><a>♿ Accessibility</a><a>🛡 Privacy &amp; security</a><a>⟳ Windows Update</a></aside>
+<main><h1>System › Display</h1>
+<h3>Brightness &amp; color</h3>
+<div class="row"><span>☀</span><div class="tx">Brightness<small>Adjust the brightness of the built-in display</small></div><div class="slider"></div></div>
+<div class="row" data-t="night-row"><span>☾</span><div class="tx">Night light<small>Use warmer colors to help block blue light</small></div><div class="sw">Off <span class="tg" data-t="night-toggle"></span></div><span class="chev">›</span></div>
+<div class="row"><span>◐</span><div class="tx">Use HDR<small>More about HDR</small></div><div class="sw">On <span class="tg on"></span></div><span class="chev">›</span></div>
+<div class="row"><span>⚡</span><div class="tx">Change brightness based on content<small>Content adaptive brightness control</small></div><div class="sw" style="border:1px solid #ccc;border-radius:4px;padding:6px 10px;background:#fff">Off ⌄</div></div>
+<h3>Scale &amp; layout</h3>
+<div class="row"><span>⤢</span><div class="tx">Scale<small>Change the size of text, apps, and other items</small></div><div class="sw" style="border:1px solid #ccc;border-radius:4px;padding:6px 10px;background:#fff">200% (Recommended) ⌄</div><span class="chev">›</span></div>
+<div class="row"><span>▭</span><div class="tx">Display resolution<small>Adjust the resolution to fit your connected display</small></div><div class="sw" style="border:1px solid #ccc;border-radius:4px;padding:6px 10px;background:#fff">2880 × 1920 (Recommended) ⌄</div></div>
+<div class="row"><span>⟲</span><div class="tx">Display orientation</div><div class="sw" style="border:1px solid #ccc;border-radius:4px;padding:6px 10px;background:#fff">Landscape ⌄</div></div>
+</main></body></html>

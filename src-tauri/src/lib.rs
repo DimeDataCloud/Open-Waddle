@@ -22,6 +22,7 @@ use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
 use waddle_core::skills::SkillStore;
+use waddle_core::traces::TraceStore;
 use waddle_core::tools::fs::Workspace;
 use waddle_core::{Session, SessionConfig, Settings};
 
@@ -38,6 +39,7 @@ pub struct AppState {
     pub secrets: Secrets,
     pub recording: Mutex<Option<voice::Recording>>,
     pub skills: Arc<SkillStore>,
+    pub traces: Arc<TraceStore>,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -95,6 +97,7 @@ impl AppState {
             workspace: workspace.clone(),
             skills: Some(self.skills.clone()),
             self_source,
+            traces: Some(self.traces.clone()),
         });
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
@@ -167,10 +170,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let talk = MenuItem::with_id(app, "talk", "Talk to Waddle", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let wander = MenuItem::with_id(app, "wander", "Pause / resume wandering", true, None::<&str>)?;
+    let play = MenuItem::with_id(app, "play", "Play: wreck the desktop!", true, None::<&str>)?;
     let halt = MenuItem::with_id(app, "halt", "Halt current task", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Waddle", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&talk, &settings, &wander, &halt, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&talk, &play, &settings, &wander, &halt, &sep, &quit])?;
     let mut tray = TrayIconBuilder::with_id("waddle").tooltip("Project Waddle").menu(&menu);
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
@@ -181,6 +185,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": false }));
         }
         "settings" => open_settings_soon(app),
+        "play" => {
+            let _ = app.emit_to("overlay", "play:start", serde_json::json!({ "autoplay": false }));
+        }
         "wander" => {
             let _ = app.emit_to("overlay", "wander:toggle", ());
         }
@@ -188,6 +195,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             if let Some(state) = app.try_state::<AppState>() {
                 state.session.halt();
             }
+            let _ = app.emit_to("overlay", "play:stop", ());
         }
         "quit" => app.exit(0),
         _ => {}
@@ -220,6 +228,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let host = TauriHost::new(handle.clone(), overlay.clone());
     let (provider, demo) = provider_for(&settings, &secrets);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
+    let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
         None
@@ -229,7 +238,14 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         rt,
         host.clone(),
         audit.clone(),
-        SessionConfig { settings: settings.clone(), provider, workspace: workspace.clone(), skills: Some(skills.clone()), self_source },
+        SessionConfig {
+            settings: settings.clone(),
+            provider,
+            workspace: workspace.clone(),
+            skills: Some(skills.clone()),
+            self_source,
+            traces: Some(traces.clone()),
+        },
     );
 
     app.manage(AppState {
@@ -241,6 +257,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         secrets,
         recording: Mutex::default(),
         skills,
+        traces,
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
@@ -290,6 +307,8 @@ pub fn run() {
             commands::duck_arrived,
             commands::set_hit_rects,
             commands::set_capture,
+            commands::play_snapshot,
+            commands::play_input,
             commands::bootstrap,
             commands::get_settings,
             commands::save_settings,
@@ -300,6 +319,9 @@ pub fn run() {
             commands::clear_memory,
             commands::skills_list,
             commands::skill_forget,
+            commands::rate_task,
+            commands::traces_summary,
+            commands::export_traces,
             commands::voice_start,
             commands::voice_stop,
             commands::quit,

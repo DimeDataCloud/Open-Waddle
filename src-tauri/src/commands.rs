@@ -85,6 +85,28 @@ pub fn set_capture(state: State<'_, AppState>, on: bool) {
     state.overlay.set_capture(on);
 }
 
+/// Play mode: a copy of the screen under the overlay (its work area), at the overlay's logical size.
+#[tauri::command]
+pub async fn play_snapshot(state: State<'_, AppState>) -> CmdResult<String> {
+    let g = state.overlay.geometry();
+    let (x, y) = ((g.origin_x - g.screen_x).max(0) as u32, (g.origin_y - g.screen_y).max(0) as u32);
+    let (out_w, out_h) = ((g.width as f64 / g.scale).round() as u32, (g.height as f64 / g.scale).round() as u32);
+    tauri::async_runtime::spawn_blocking(move || actuate::capture_area_data_url(x, y, g.width, g.height, out_w, out_h))
+        .await
+        .map_err(err)?
+        .map_err(err)
+}
+
+/// Play mode takes the whole overlay: every click and key goes to the game until it ends.
+#[tauri::command]
+pub fn play_input(app: AppHandle, state: State<'_, AppState>, on: bool) {
+    state.overlay.set_capture(on);
+    crate::shortcuts::set_playing(&app, on);
+    if on {
+        crate::focus_overlay(&app);
+    }
+}
+
 #[tauri::command]
 pub fn bootstrap(state: State<'_, AppState>) -> Bootstrap {
     let s = state.settings.read().unwrap();
@@ -245,4 +267,37 @@ pub fn quit(app: AppHandle) {
 pub fn needs_key(settings: &Settings) -> bool {
     settings.provider == ProviderKind::OpenaiCompat
         && ["openrouter.ai", "api.openai.com", "api.groq.com"].iter().any(|h| settings.base_url.contains(h))
+}
+
+/// The user's 👍/👎 on a saved task.
+#[tauri::command]
+pub async fn rate_task(state: State<'_, AppState>, task_id: String, good: bool) -> CmdResult<()> {
+    state.traces.rate(&task_id, good).map_err(err)
+}
+
+#[derive(Serialize)]
+pub struct TracesSummary {
+    pub folder: String,
+    pub total: usize,
+    pub good: usize,
+    pub bad: usize,
+}
+
+#[tauri::command]
+pub async fn traces_summary(state: State<'_, AppState>) -> CmdResult<TracesSummary> {
+    let list = state.traces.list();
+    Ok(TracesSummary {
+        folder: state.traces.dir().display().to_string(),
+        total: list.len(),
+        good: list.iter().filter(|m| m.rating == Some(true)).count(),
+        bad: list.iter().filter(|m| m.rating == Some(false)).count(),
+    })
+}
+
+/// Writes train.jsonl (good tasks as fine-tuning examples) into the workspace and returns its path.
+#[tauri::command]
+pub async fn export_traces(state: State<'_, AppState>) -> CmdResult<String> {
+    let out = state.workspace().root().join("training");
+    let (file, n) = state.traces.export(&out, true).map_err(err)?;
+    Ok(format!("{} ({n} examples)", file.display()))
 }

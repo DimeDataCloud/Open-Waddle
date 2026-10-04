@@ -1,0 +1,5 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:960px;overflow:hidden;font-family:"Segoe UI",Roboto,"Noto Sans",Arial,sans-serif;font-size:14px;color:#1f1f1f}
+button{font:inherit;border:0;background:none;cursor:pointer}
+.ico{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:6px;color:#444}
+.ico svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}

@@ -27,6 +27,8 @@ pub struct FakeHost {
     pub windows: Mutex<Vec<WindowInfo>>,
     pub elements: Mutex<Vec<ElementInfo>>,
     pub screenshot: Mutex<Option<ImageData>>,
+    /// What env() reports as the OS.
+    pub os: Mutex<String>,
     /// Seconds since creation for each step, tool and finish, for latency reports.
     pub timeline: Mutex<Vec<(f64, String)>>,
     started: Instant,
@@ -44,6 +46,7 @@ impl FakeHost {
             windows: Mutex::default(),
             elements: Mutex::default(),
             screenshot: Mutex::default(),
+            os: Mutex::new("TestOS".into()),
             timeline: Mutex::default(),
             started: Instant::now(),
         })
@@ -70,7 +73,7 @@ impl Host for FakeHost {
     fn env(&self) -> EnvInfo {
         // Like Windows: the accessibility fast path exists when there are elements to list.
         let accessibility = !self.elements.lock().unwrap().is_empty();
-        EnvInfo { os: "TestOS".into(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, accessibility, ..Default::default() } }
+        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, accessibility, ..Default::default() } }
     }
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {
         self.approvals.lock().unwrap().push(req.clone());

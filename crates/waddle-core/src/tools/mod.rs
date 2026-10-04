@@ -90,6 +90,9 @@ pub enum GuiAction {
     ClickElement { id: u32 },
     TypeText { text: String, at: Option<(f64, f64)> },
     PressKeys { keys: String },
+    /// Play mode: a frozen copy of the screen becomes a playground to blast.
+    /// `target` names a window to aim at; `autoplay` lets the duck play by itself.
+    Play { autoplay: bool, target: Option<String>, weapon: Option<String> },
 }
 
 impl GuiAction {
@@ -162,11 +165,11 @@ impl ToolOutcome {
 }
 
 fn spec(name: &str, description: &str, properties: Value, required: &[&str]) -> ToolSpec {
-    ToolSpec {
-        name: name.into(),
-        description: description.into(),
-        parameters: json!({ "type": "object", "properties": properties, "required": required }),
+    let mut parameters = json!({ "type": "object", "properties": properties });
+    if !required.is_empty() {
+        parameters["required"] = json!(required);
     }
+    ToolSpec { name: name.into(), description: description.into(), parameters }
 }
 
 pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
@@ -180,22 +183,22 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
         if caps.accessibility {
             v.push(spec(
                 "find_elements",
-                "List clickable/typeable UI elements (buttons, fields, links, menus) of the front window, or of the window whose title contains `window`. Fast and reliable; prefer it over screenshots.",
-                json!({ "window": { "type": "string", "description": "Part of a window title. Omit for the front window." } }),
+                "List the buttons, fields, links and menus of the front window, or of the window whose title contains `window`.",
+                json!({ "window": { "type": "string" } }),
                 &[],
             ));
             v.push(spec(
                 "click_element",
-                "Walk to and click an element returned by the latest find_elements call.",
-                json!({ "id": { "type": "integer" } }),
-                &["id"],
+                "Click an element from the latest find_elements list. Give its id and its name exactly as listed.",
+                json!({ "id": { "type": "integer" }, "name": { "type": "string" } }),
+                &["id", "name"],
             ));
         }
-        v.push(spec("look_at_screen", "Take a screenshot. Use when elements are not listed or you need to see visual content.", json!({}), &[]));
-        v.push(spec("open_app", "Launch an application by name, e.g. \"notepad\", \"calculator\", \"Microsoft Edge\".", json!({ "name": { "type": "string" } }), &["name"]));
+        v.push(spec("look_at_screen", "Take a screenshot.", json!({}), &[]));
+        v.push(spec("open_app", "Launch an app by name, e.g. \"notepad\".", json!({ "name": { "type": "string" } }), &["name"]));
         v.push(spec(
             "click",
-            &format!("Walk to and click a point ({unit})."),
+            &format!("Click a point ({unit})."),
             json!({
                 "x": { "type": "number" }, "y": { "type": "number" },
                 "button": { "type": "string", "enum": ["left", "right"] },
@@ -205,60 +208,73 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
         ));
         v.push(spec(
             "type_text",
-            &format!("Type text into the focused field. If x,y ({unit}) are given, click there first."),
+            &format!("Type into the focused field, or click x,y ({unit}) first if given."),
             json!({ "text": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" } }),
             &["text"],
         ));
         v.push(spec(
+            "play",
+            "Start play mode: a harmless copy of the screen becomes a playground that gets blasted apart with silly weapons \
+(pea shooter, egg bazooka, laser eyes...). Nothing real is touched and Esc ends it. Use it when the user wants to play, \
+is bored or stressed, or asks you to wreck, smash or blow up their screen or a window. It ends your task: say something fun first.",
+            json!({
+                "autoplay": { "type": "boolean", "description": "true = you play by yourself while the user watches" },
+                "target": { "type": "string", "description": "title of a window to aim at" },
+                "weapon": { "type": "string", "enum": ["pea", "crumbs", "feathers", "egg", "laser", "flame", "quack"] }
+            }),
+            &[],
+        ));
+        v.push(spec(
             "press_keys",
-            "Press a key or shortcut, e.g. \"enter\", \"ctrl+s\", \"alt+tab\", \"ctrl+shift+n\".",
+            "Press a key or shortcut, e.g. \"enter\" or \"ctrl+s\".",
             json!({ "keys": { "type": "string" } }),
             &["keys"],
         ));
     }
-    let path_doc = if caps.self_edit {
-        "Relative to the workspace, or start with self/ for your own source code"
+    // Paths are relative to the workspace (the system prompt says so); only self/ needs explaining.
+    let path = if caps.self_edit {
+        json!({ "type": "string", "description": "Relative to the workspace, or start with self/ for your own source code" })
     } else {
-        "Relative to the workspace"
+        json!({ "type": "string" })
     };
     let mut command_props = json!({ "command": { "type": "string" } });
     if caps.self_edit {
-        command_props["cwd"] = json!({ "type": "string", "enum": ["workspace", "self"], "description": "Where to run: the workspace (default) or your own source folder" });
+        command_props["cwd"] = json!({ "type": "string", "enum": ["workspace", "self"], "description": "Default workspace; self is your source folder" });
     }
     v.push(spec(
         "run_command",
-        "Run a terminal command (PowerShell on Windows, sh elsewhere) and return its output. Prefer this over clicking through apps for file and system work.",
+        "Run a terminal command (PowerShell on Windows, sh elsewhere) and get its output.",
         command_props,
         &["command"],
     ));
-    v.push(spec("read_file", "Read a text file.", json!({ "path": { "type": "string", "description": path_doc } }), &["path"]));
+    v.push(spec("read_file", "Read a text file.", json!({ "path": path }), &["path"]));
     v.push(spec(
         "write_file",
         "Create or overwrite a text file.",
-        json!({ "path": { "type": "string", "description": path_doc }, "content": { "type": "string" } }),
+        json!({ "path": path, "content": { "type": "string" } }),
         &["path", "content"],
     ));
-    v.push(spec("list_dir", "List a folder.", json!({ "path": { "type": "string", "description": format!("{path_doc}; omit for the workspace root") } }), &[]));
+    v.push(spec("list_dir", "List a folder (default: the workspace).", json!({ "path": path }), &[]));
     if caps.delegation {
         v.push(spec(
             "delegate",
-            "Hand a self-contained sub-task to a fresh copy of yourself and get its result back. Use it to split a big job into independent parts; give it everything it needs to know.",
-            json!({ "goal": { "type": "string" }, "context": { "type": "string", "description": "Facts the sub-task needs" } }),
+            "Hand an independent part of a big job to a fresh copy of yourself and get its result. It knows only what you pass it.",
+            json!({ "goal": { "type": "string" }, "context": { "type": "string" } }),
             &["goal"],
         ));
     }
     if caps.self_improve {
         v.push(spec(
             "save_skill",
-            "Save a reusable skill to your long-term memory: short instructions on how to do something well next time (e.g. which app or command worked). Loaded into every future task. Needs the user's approval.",
+            "Save short instructions for doing something well next time (e.g. which app or command worked). Loaded into every future task.",
             json!({ "name": { "type": "string" }, "instructions": { "type": "string" } }),
             &["name", "instructions"],
         ));
-        v.push(spec("forget_skill", "Remove a skill from your long-term memory.", json!({ "name": { "type": "string" } }), &["name"]));
+        v.push(spec("forget_skill", "Remove a saved skill.", json!({ "name": { "type": "string" } }), &["name"]));
         v.push(spec(
             "update_settings",
             &format!(
-                "Change your own settings (needs approval; applies from the next task). Allowed keys: {}.",
+                "Change your own settings from the next task on. Keys: {}.",
                 crate::config::SELF_EDITABLE.join(", ")
             ),
             json!({ "changes": { "type": "object", "description": "e.g. {\"model\": \"...\", \"wander\": false}" } }),
@@ -271,7 +287,7 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
 pub fn is_gui_tool(name: &str) -> bool {
     matches!(
         name,
-        "list_windows" | "look_at_screen" | "find_elements" | "open_app" | "click" | "click_element" | "type_text" | "press_keys"
+        "list_windows" | "look_at_screen" | "find_elements" | "open_app" | "click" | "click_element" | "type_text" | "press_keys" | "play"
     )
 }
 
@@ -311,6 +327,11 @@ pub fn parse_gui_action(call: &ToolCall, coords: &Coords) -> Result<GuiAction, S
         "click_element" => GuiAction::ClickElement { id: num(a, "id").ok_or("`id` is required")? as u32 },
         "type_text" => GuiAction::TypeText { text: text(a, "text").ok_or("`text` is required")?, at: point(false)? },
         "press_keys" => GuiAction::PressKeys { keys: text(a, "keys").filter(|s| !s.trim().is_empty()).ok_or("`keys` is required")? },
+        "play" => GuiAction::Play {
+            autoplay: a.get("autoplay").and_then(Value::as_bool).unwrap_or(false),
+            target: text(a, "target").filter(|s| !s.trim().is_empty()),
+            weapon: text(a, "weapon").filter(|s| !s.trim().is_empty()),
+        },
         other => return Err(format!("`{other}` is not a GUI tool")),
     })
 }
@@ -373,10 +394,16 @@ pub fn summarize(call: &ToolCall) -> String {
         "look_at_screen" => "Take a screenshot".into(),
         "find_elements" => "Read the buttons and fields on screen".into(),
         "open_app" => format!("Open {}", s("name")),
-        "click" => format!("Click at ({}, {})", num(a, "x").unwrap_or(0.0).round(), num(a, "y").unwrap_or(0.0).round()),
+        // The duck walks to the spot, so the model's raw coordinates would only confuse.
+        "click" => match (s("button").as_str(), a.get("double").and_then(Value::as_bool).unwrap_or(false)) {
+            ("right", _) => "Right-click here".into(),
+            (_, true) => "Double-click here".into(),
+            _ => "Click here".into(),
+        },
         "click_element" => format!("Click element {}", num(a, "id").unwrap_or(0.0)),
         "type_text" => format!("Type \"{}\"", short(s("text"))),
         "press_keys" => format!("Press {}", s("keys")),
+        "play" => if s("target").is_empty() { "Play time!".into() } else { format!("Play time: aiming at {}", short(s("target"))) },
         "run_command" => format!("Run `{}`", short(s("command"))),
         "read_file" => format!("Read {}", s("path")),
         "write_file" => format!("Write {}", s("path")),
@@ -410,6 +437,16 @@ mod tests {
         assert_eq!(c.to_screen(1.0, 0.0), (1.44, 0.0), "whole numbers stay on the 0-1000 grid");
         let p = coords(CoordMode::Pixels);
         assert_eq!(p.to_screen(10.0, 20.0), (10.0, 20.0));
+    }
+
+    #[test]
+    fn parses_play() {
+        let c = coords(CoordMode::Pixels);
+        let a = parse_gui_action(&call("play", json!({"autoplay": true, "target": "Chrome", "weapon": "egg"})), &c).unwrap();
+        assert_eq!(a, GuiAction::Play { autoplay: true, target: Some("Chrome".into()), weapon: Some("egg".into()) });
+        let a = parse_gui_action(&call("play", json!({"target": " "})), &c).unwrap();
+        assert_eq!(a, GuiAction::Play { autoplay: false, target: None, weapon: None });
+        assert!(!a.is_blind_input(), "play needs no look first: it only touches a copy");
     }
 
     #[test]

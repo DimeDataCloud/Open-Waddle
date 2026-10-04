@@ -135,6 +135,29 @@ pub fn screenshot(logical_w: u32, logical_h: u32) -> anyhow::Result<(ImageData, 
     Ok((ImageData { mime: "image/png".into(), base64: b64 }, logical_w, logical_h))
 }
 
+/// Captures part of the primary monitor (physical pixels relative to the monitor)
+/// as a PNG data URL scaled to `out_w` x `out_h`, for play mode's copy of the screen.
+pub fn capture_area_data_url(x: u32, y: u32, w: u32, h: u32, out_w: u32, out_h: u32) -> anyhow::Result<String> {
+    let monitors = xcap::Monitor::all().context("listing monitors")?;
+    let monitor = monitors
+        .iter()
+        .find(|m| m.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
+        .ok_or_else(|| anyhow!("no monitor found"))?;
+    let img = monitor.capture_image().context("screen capture failed (on macOS, grant Screen Recording permission)")?;
+    let (x, y) = (x.min(img.width().saturating_sub(1)), y.min(img.height().saturating_sub(1)));
+    let (w, h) = (w.min(img.width() - x).max(1), h.min(img.height() - y).max(1));
+    let area = image::imageops::crop_imm(&img, x, y, w, h).to_image();
+    let area = if (w, h) != (out_w, out_h) {
+        image::imageops::resize(&area, out_w.max(1), out_h.max(1), image::imageops::FilterType::Triangle)
+    } else {
+        area
+    };
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(area).to_rgb8().write_to(&mut png, image::ImageFormat::Png)?;
+    Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png.into_inner())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

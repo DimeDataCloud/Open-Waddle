@@ -76,9 +76,30 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 - **Quick-reply lane (System 1):**
   - a message sent mid-task gets a streaming reply with no tools, from a fast model, built from a live status snapshot (goal, step, narration)
   - the same message is folded into the planner at the next step, with a note that it was already answered
+- **Harness:** every task starts with the window list, accessibility elements (Windows) and a screenshot attached to the request (`look_first`). `click_element` names are checked against ids, and a third identical click in a row is refused. Measured on `bench/`: 27% → 93% for the default model ([MODELS.md](MODELS.md)).
+- **Training traces** (opt-in): finished tasks are saved with their screenshots, rated 👍/👎 in the bubble, and exported as fine-tuning data ([TRAINING.md](TRAINING.md)).
 - **Halt phrases** ("stop", "wait", "cancel"…) are matched by fixed rules and stop the task without any model call.
 - **Conversation memory:** the last 10 exchanges carry over between tasks.
-- **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model, so it loads while the user types.
+- **Local prompt cache:** within a task the conversation is append-only, so a local server (Ollama/llama.cpp) reuses its cache and only processes new tokens each step. Local models keep up to 2–3 screenshots before older ones are dropped in one go (hosted APIs keep 1, since every image is billed on every call). Opening the chat box warms a local model: it loads and reads the system prompt, tools and conversation so far while the user types, so the first step only reads their message (36.6 s → 6.8 s here on a 4-core CPU). The warm-up asks Ollama for thinking on, because the empty think block that `think: false` appends ends the prompt past Qwen3.5's last cache checkpoint.
+
+### Play mode (`src/play/*`)
+
+- **Level:** play mode snapshots the overlay's work area (`play_snapshot`) and turns it into a level.
+  - Window rectangles become solid 4-px cells.
+  - The wallpaper is open air.
+  - With no windows known, the lower 70% of the screen is solid.
+- **Layers:** three canvases.
+  - Bottom: a pixel-art pond drawn at quarter resolution.
+  - Middle: the screen copy. Blasted cells are cleared, and scorch marks are clipped to the windows.
+  - Top: the duck, projectiles, debris and HUD.
+- **Duck physics:** the duck is a platformer body that moves one pixel at a time, so it never tunnels through terrain. It steps up small ledges and flaps on a stamina bar.
+- **Debris:** takes its colour from the original pixels and settles on what's left of the windows.
+- **Autoplay:** the bot picks spots inside the window the AI aimed at, gets in range, and fires.
+- **Ending it:**
+  - While playing, the overlay captures all input, and Escape is a global hotkey, so the game ends even when Windows refuses the overlay keyboard focus.
+  - The ✕ button and the tray's Halt item also work.
+  - Autoplay closes itself after 25 s with nobody at the keyboard.
+- **The agent's side:** the `play` tool (tier 1) only emits an event. Nothing on the real desktop changes.
 
 ### Self-modification and recursion
 

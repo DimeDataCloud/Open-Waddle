@@ -19,15 +19,17 @@ pub struct MockProvider {
     delay: Duration,
     /// Every request's messages, for assertions in tests.
     pub requests: Mutex<Vec<Vec<Message>>>,
+    /// Every warm-up's messages; warm-ups don't use up scripted replies.
+    pub warmups: Mutex<Vec<Vec<Message>>>,
 }
 
 impl MockProvider {
     pub fn scripted(responses: Vec<ChatResponse>) -> Self {
-        Self { mode: Mode::Scripted(Mutex::new(responses.into())), delay: Duration::ZERO, requests: Mutex::default() }
+        Self { mode: Mode::Scripted(Mutex::new(responses.into())), delay: Duration::ZERO, requests: Mutex::default(), warmups: Mutex::default() }
     }
 
     pub fn demo() -> Self {
-        Self { mode: Mode::Demo, delay: Duration::from_millis(35), requests: Mutex::default() }
+        Self { mode: Mode::Demo, delay: Duration::from_millis(35), requests: Mutex::default(), warmups: Mutex::default() }
     }
 
     /// Adds a pause before each response, to exercise cancellation.
@@ -46,7 +48,7 @@ pub fn call(name: &str, args: serde_json::Value) -> ToolCall {
 }
 
 pub fn reply(text: &str, calls: Vec<ToolCall>) -> ChatResponse {
-    ChatResponse { text: text.into(), tool_calls: calls }
+    ChatResponse { text: text.into(), tool_calls: calls, ..Default::default() }
 }
 
 fn demo_step(req: &ChatRequest<'_>) -> ChatResponse {
@@ -94,5 +96,9 @@ impl Provider for MockProvider {
             on_event(StreamEvent::TextDelta(word.to_string()));
         }
         Ok(resp)
+    }
+
+    async fn warm(&self, req: ChatRequest<'_>) {
+        self.warmups.lock().unwrap().push(req.messages.to_vec());
     }
 }

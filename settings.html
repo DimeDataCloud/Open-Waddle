@@ -75,6 +75,14 @@
         </fieldset>
 
         <fieldset>
+          <legend>Training data</legend>
+          <p class="muted">Save each task (what you asked, what Waddle saw and did) on this computer, rate results with 👍/👎 in the bubble, and export the good ones to fine-tune a model on your own work. Screenshots never leave this computer unless you share the files.</p>
+          <label class="check"><input id="record_traces" type="checkbox" /> Save my tasks for training</label>
+          <p id="traces" class="muted"></p>
+          <button type="button" id="export-traces" class="link">Export training file</button>
+        </fieldset>
+
+        <fieldset>
           <legend>Voice</legend>
           <label>Talk input
             <select id="voice_backend">

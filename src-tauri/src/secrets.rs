@@ -28,6 +28,12 @@ impl Secret {
     }
 }
 
+/// Keys are plain ASCII; drops spaces, line breaks and the invisible byte-order
+/// mark some editors put at the start of a saved file.
+fn clean(v: &str) -> String {
+    v.chars().filter(|c| c.is_ascii_graphic()).collect()
+}
+
 pub struct Secrets {
     fallback_file: PathBuf,
 }
@@ -40,22 +46,24 @@ impl Secrets {
     pub fn get(&self, s: Secret) -> Option<String> {
         for var in s.env_vars() {
             if let Ok(v) = std::env::var(var) {
-                if !v.trim().is_empty() {
-                    return Some(v.trim().to_string());
+                let v = clean(&v);
+                if !v.is_empty() {
+                    return Some(v);
                 }
             }
         }
         if let Ok(entry) = keyring::Entry::new(SERVICE, s.account()) {
             if let Ok(v) = entry.get_password() {
-                return Some(v);
+                return Some(clean(&v));
             }
         }
-        self.read_file().get(s.account()).and_then(|v| v.as_str()).map(str::to_string)
+        self.read_file().get(s.account()).and_then(|v| v.as_str()).map(clean)
     }
 
     /// Stores (or with an empty value, removes) a key. Returns where it went.
     pub fn set(&self, s: Secret, value: &str) -> anyhow::Result<&'static str> {
-        let value = value.trim();
+        let value = clean(value);
+        let value = value.as_str();
         let keychain = keyring::Entry::new(SERVICE, s.account());
         if value.is_empty() {
             if let Ok(e) = keychain {
@@ -116,5 +124,13 @@ impl Secrets {
             std::fs::set_permissions(&self.fallback_file, std::fs::Permissions::from_mode(0o600))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pasted_keys_lose_invisible_characters() {
+        assert_eq!(super::clean("\u{feff}sk-or-v1-abc123\r\n "), "sk-or-v1-abc123");
     }
 }
