@@ -156,6 +156,15 @@ pub struct Settings {
     /// Skip that opening screenshot when a quick check (TypeSafe Jev, on OpenRouter)
     /// is confident the task doesn't need the screen: reminders, files, maths, writing.
     pub smart_look: bool,
+    /// Describe each step in words. Off: Waddle acts silently (the overlay shows
+    /// each action visually) and only speaks to answer, ask or finish.
+    pub narrate: bool,
+    /// Answer small talk ("thanks!", "tell me a joke") straight away with the fast
+    /// model, when a quick check (Jev, on OpenRouter) is sure it needs no computer use.
+    pub quick_chat: bool,
+    /// Let a quick check (Jev, on OpenRouter) pick what the duck does between tasks,
+    /// from the front app's name and how long the user has been idle (never window titles).
+    pub ambient_brain: bool,
     /// Save each task (conversation and screenshots) on this computer as training data.
     pub record_traces: bool,
     pub tier2_mode: Tier2Mode,
@@ -187,6 +196,9 @@ impl Default for Settings {
             reasoning: Reasoning::Default,
             look_first: true,
             smart_look: true,
+            narrate: false,
+            quick_chat: true,
+            ambient_brain: true,
             record_traces: false,
             tier2_mode: Tier2Mode::Countdown,
             tier2_countdown_ms: 2000,
@@ -244,6 +256,9 @@ pub const SELF_EDITABLE: &[&str] = &[
     "reasoning",
     "look_first",
     "smart_look",
+    "narrate",
+    "quick_chat",
+    "ambient_brain",
     "wander",
     "color",
     "tier2_mode",
@@ -280,7 +295,10 @@ pub fn apply_patch(base: &Settings, patch: &serde_json::Value) -> anyhow::Result
             "coord_mode" => next.coord_mode = parse_enum(k, v)?,
             "reasoning" => next.reasoning = parse_enum(k, v)?,
             "look_first" => next.look_first = v.as_bool().ok_or_else(|| anyhow::anyhow!("`look_first` must be true or false"))?,
+            "narrate" => next.narrate = v.as_bool().ok_or_else(|| anyhow::anyhow!("`narrate` must be true or false"))?,
             "smart_look" => next.smart_look = v.as_bool().ok_or_else(|| anyhow::anyhow!("`smart_look` must be true or false"))?,
+            "quick_chat" => next.quick_chat = v.as_bool().ok_or_else(|| anyhow::anyhow!("`quick_chat` must be true or false"))?,
+            "ambient_brain" => next.ambient_brain = v.as_bool().ok_or_else(|| anyhow::anyhow!("`ambient_brain` must be true or false"))?,
             "wander" => next.wander = v.as_bool().ok_or_else(|| anyhow::anyhow!("`wander` must be true or false"))?,
             "color" => next.character.color = text()?,
             "tier2_mode" => next.tier2_mode = parse_enum(k, v)?,

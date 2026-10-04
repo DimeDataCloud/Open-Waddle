@@ -1,6 +1,7 @@
 //! Project Waddle desktop app: the Body (transparent overlay), the GUI Hands
 //! and Eyes, and the glue that connects them to `waddle-core`.
 
+mod ambient;
 mod actuate;
 mod bridge;
 mod commands;
@@ -21,6 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Webview
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
+use waddle_core::decide::{Decider, Jev};
 use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
@@ -41,6 +43,7 @@ pub struct AppState {
     pub recording: Mutex<Option<voice::Recording>>,
     pub skills: Arc<SkillStore>,
     pub reminders: Arc<ReminderStore>,
+    pub decider: RwLock<Option<Arc<dyn Decider>>>,
     pub traces: Arc<TraceStore>,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
@@ -66,6 +69,15 @@ pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets) -> (Arc<dyn P
     (build_provider(settings, key), false)
 }
 
+/// Quick decisions (Jev) need an OpenRouter key; the demo and other endpoints get none.
+pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool) -> Option<Arc<dyn Decider>> {
+    if demo {
+        return None;
+    }
+    let key = secrets.get(Secret::LlmKey);
+    Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn Decider>)
+}
+
 /// Waddle's own source folder, if the user turned self-editing on.
 fn self_source_for(settings: &Settings) -> anyhow::Result<Option<Arc<Workspace>>> {
     match &settings.self_source_dir {
@@ -88,6 +100,7 @@ impl AppState {
         let ws_dir = settings.workspace_dir.clone().unwrap_or_else(|| self.workspace().root().to_path_buf());
         let workspace = Arc::new(Workspace::new(ws_dir)?);
         let (provider, demo) = provider_for(&settings, &self.secrets);
+        let decider = decider_for(&settings, &self.secrets, demo);
         let self_source = self_source_for(&settings)?;
         if let Some(dir) = self.settings_path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -99,12 +112,14 @@ impl AppState {
             workspace: workspace.clone(),
             skills: Some(self.skills.clone()),
             reminders: Some(self.reminders.clone()),
+            decider: decider.clone(),
             self_source,
             traces: Some(self.traces.clone()),
         });
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
         *self.demo.write().unwrap() = demo;
+        *self.decider.write().unwrap() = decider;
         Ok(())
     }
 }
@@ -225,6 +240,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let overlay = OverlayState::new(geometry);
     let host = TauriHost::new(handle.clone(), overlay.clone());
     let (provider, demo) = provider_for(&settings, &secrets);
+    let decider = decider_for(&settings, &secrets, demo);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
@@ -243,6 +259,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             workspace: workspace.clone(),
             skills: Some(skills.clone()),
             reminders: Some(reminders.clone()),
+            decider: decider.clone(),
             self_source,
             traces: Some(traces.clone()),
         },
@@ -258,6 +275,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         recording: Mutex::default(),
         skills,
         reminders: reminders.clone(),
+        decider: RwLock::new(decider),
         traces,
         settings_path,
         workspace: RwLock::new(workspace),
@@ -266,6 +284,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
 
     overlay::spawn_hit_test(handle.clone(), overlay);
     bridge::spawn_reminder_clock(host.clone(), reminders);
+    ambient::spawn(handle.clone(), host.clone());
     bridge::spawn_window_sampler(host);
     build_tray(&handle)?;
     {

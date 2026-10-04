@@ -230,6 +230,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     if let Some(rpm) = std::env::var("WADDLE_BENCH_RPM").ok().and_then(|v| v.parse::<f64>().ok()) {
         provider = Arc::new(Paced { inner: provider, gap: std::time::Duration::from_secs_f64(60.0 / rpm), waited: waited.clone() });
     }
+    let decider = waddle_core::decide::Jev::for_settings(&settings, Some(key)).map(|j| Arc::new(j) as Arc<dyn waddle_core::decide::Decider>);
     let deps = AgentDeps {
         provider,
         host: host.clone(),
@@ -238,6 +239,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         settings,
         skills: None,
         reminders: Some(reminders.clone()),
+        decider,
         self_source: None,
     };
     let env = host.env();

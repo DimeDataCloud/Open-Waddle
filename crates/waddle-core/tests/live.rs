@@ -83,6 +83,7 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
         settings,
         skills: None,
         reminders: None,
+        decider: None,
         self_source: None,
     };
     let env = host.env();

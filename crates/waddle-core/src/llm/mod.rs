@@ -146,12 +146,6 @@ pub trait Provider: Send + Sync {
     /// so a local server has the model loaded and the prompt cached when the
     /// real request arrives. Only worth calling on local servers: a hosted API
     /// would bill for it.
-    /// Probability (0-1) that a request needs the screen, from a cheap decision
-    /// model. None when this provider has no such check or it failed.
-    async fn needs_screen(&self, _goal: &str) -> Option<f64> {
-        None
-    }
-
     async fn warm(&self, req: ChatRequest<'_>) {
         if let Err(e) = self.chat(ChatRequest { max_tokens: 1, ..req }, &mut |_| {}).await {
             log::debug!("warm-up failed: {e:#}");

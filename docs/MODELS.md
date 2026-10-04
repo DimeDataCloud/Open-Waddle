@@ -132,6 +132,16 @@ These are "System One" models: one quick pass that returns a yes/no probability,
 - Below 0.3 the opening screenshot is skipped. That would have skipped 8 of the 12 tasks that didn't need the screen (reminders, files, maths, writing), with no wrong skips. Every task that needed the screen scored 0.5 or more.
 - Any error, or an answer slower than 2 s, means "look".
 
+**Also in use: ambient behaviour and the chat lane.**
+
+- **Ambient behaviour:** Jev picks the duck's next idle behaviour from the front app's name, full screen or not, and idle time. In the app it chose:
+  - perch while Chrome was in use
+  - give space when Chrome went full screen
+  - nap after a minute with no mouse movement
+
+  Each decision took 0.26–0.6 s, and a busy day costs a few cents at most.
+- **Chat lane:** messages Jev rates at least 0.8 "just conversation" get an instant answer from the fast model. On 22 sample messages it scored 22/22: chat came out at 0.98–1.00 and tasks at 0.17 or lower. Median latency was 0.32 s.
+
 **Jev Router (`typesafe/jev-router`)** is a different product: it picks a chat model for each request. It isn't tested here, because its per-request model choice makes cost unpredictable.
 
 **Laya: later, for the local brain.**

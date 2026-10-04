@@ -38,6 +38,7 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
   - Open apps, click, type, press shortcuts, scroll and drag. Waddle walks to the target and stands beside it before each action.
   - Read and write files and run terminal commands in its workspace folder (`Documents\Waddle`).
+- **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Small talk ("thanks!", "tell me a joke") gets an instant answer without a task. Each decision costs about $0.00002.
 - **Assist.**
   - "Where's the export button?" or "how do I turn on Night light?": Waddle walks over and circles the spot with a label instead of clicking, so you learn where it is.
   - Reads what you copied ("summarise what I copied", "translate this") and puts results on your clipboard ("copy that address for me").

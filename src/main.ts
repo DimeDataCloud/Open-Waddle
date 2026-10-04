@@ -3,6 +3,7 @@
 
 import { Duck, pickWanderTarget } from "./body/behavior";
 import { alarmPalette, buildPalette } from "./body/palette";
+import { planIntent, type Plan } from "./body/intent";
 import { standBeside } from "./body/pathfind";
 import { computeSegments, type Segment, type WinRect } from "./body/platforms";
 import { SpriteRenderer } from "./body/renderer";
@@ -33,6 +34,9 @@ let lastInteraction = performance.now();
 let lastRect: HitRect | null = null;
 let sentRects = "";
 let hoverTimer = 0;
+/** What the ambient decision asked for (perch, explore…), worked through stop by stop. */
+let plan: Plan | null = null;
+let planStop = 0;
 
 const duck = new Duck({ w: renderer.width, h: renderer.height }, screen.w * 0.7, screen.h * 0.4);
 
@@ -120,6 +124,23 @@ function think(now: number): void {
   if (now - lastInteraction > SLEEP_AFTER_MS) {
     duck.sleeping = true;
     return;
+  }
+  if (wander && now > nextWander && plan) {
+    if (planStop < plan.stops.length) {
+      const p = plan;
+      const stop = p.stops[planStop++];
+      const last = planStop === p.stops.length;
+      const facing = last && p.faceX !== undefined ? (p.faceX > stop.x ? 1 : -1) : undefined;
+      nextWander = now + p.pauseMs;
+      duck.moveTo(stop, segments, {
+        facing,
+        onArrive: () => {
+          if (p.inspect) duck.doAct("look", performance.now(), 700);
+        },
+      });
+      return;
+    }
+    plan = null;
   }
   if (wander && now > nextWander) {
     nextWander = now + 5000 + Math.random() * 9000;
@@ -254,8 +275,25 @@ void on("reminder", ({ text, late }) => {
   bubble.say("reminder", `⏰ Reminder${late ? " (from while I was off)" : ""}: ${text}`);
 });
 
+void on("duck:intent", ({ intent, window: win, cursor }) => {
+  if (busy || !wander) return;
+  const now = performance.now();
+  if (intent === "nap") {
+    plan = null;
+    duck.sleeping = true;
+    nextWander = now + 600_000;
+    return;
+  }
+  // A fresh decision counts as a reason to be up and about.
+  lastInteraction = now;
+  plan = planIntent(intent, win, segments, renderer.width, cursor, duck.body.x);
+  planStop = 0;
+  nextWander = now;
+});
+
 void on("busy", (b) => {
   busy = b;
+  plan = null;
   bubble.setBusy(b);
   if (!b) {
     alarm = false;

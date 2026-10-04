@@ -121,6 +121,28 @@ impl TauriHost {
             .collect()
     }
 
+    /// The front window of another app: its app name, where it is on the overlay, and whether it fills the screen.
+    pub fn front_window(&self) -> Option<(String, Platform, bool)> {
+        let list = self.windows.read().unwrap();
+        let w = list.iter().find(|w| w.focused)?;
+        let (sw, sh) = self.geometry().screen_logical();
+        let (_, _, lw, lh) = self.to_logical(w);
+        let fullscreen = lw >= sw * 0.98 && lh >= sh * 0.98;
+        let p = self.to_platforms(std::slice::from_ref(w)).pop()?;
+        Some((w.app.clone(), p, fullscreen))
+    }
+
+    /// Logical screen point → overlay coordinates.
+    pub fn to_overlay(&self, x: f64, y: f64) -> (f64, f64) {
+        self.geometry().screen_to_overlay(x, y)
+    }
+
+    /// Physical desktop pixels → overlay coordinates.
+    pub fn physical_to_overlay(&self, px: f64, py: f64) -> (f64, f64) {
+        let g = self.geometry();
+        g.screen_to_overlay((px - g.screen_x as f64) / g.scale, (py - g.screen_y as f64) / g.scale)
+    }
+
     pub fn platforms(&self) -> Vec<Platform> {
         self.to_platforms(&self.windows.read().unwrap())
     }

@@ -32,7 +32,7 @@ struct Fixture {
 }
 
 fn session_config(f: &Fixture, provider: Arc<dyn Provider>) -> SessionConfig {
-    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, reminders: None, self_source: None, traces: None }
+    SessionConfig { settings: settings(), provider, workspace: f.workspace.clone(), skills: None, reminders: None, decider: None, self_source: None, traces: None }
 }
 
 fn fixture() -> Fixture {
@@ -42,7 +42,7 @@ fn fixture() -> Fixture {
 }
 
 async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
-    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, self_source: None };
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, decider: None, self_source: None };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -146,6 +146,7 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
         settings: Settings { model: "qwen/qwen3-vl-8b-instruct".into(), ..settings() },
         skills: None,
         reminders: None,
+        decider: None,
         self_source: None,
     };
     let env = host.env();
@@ -388,7 +389,7 @@ async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
-    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, self_source }
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, decider: None, self_source }
 }
 
 async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {
@@ -574,16 +575,19 @@ fn spots_tool_calls_written_as_text() {
     assert!(promises_action("I'll show you where it is."));
 }
 
-/// A scripted provider whose screen check answers `p`.
-struct ScreenCheck(Arc<MockProvider>, Option<f64>);
+/// A decider whose screen and chat checks give fixed answers.
+struct FixedDecider {
+    screen: Option<f64>,
+    chat: Option<f64>,
+}
 
 #[async_trait]
-impl Provider for ScreenCheck {
-    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
-        self.0.chat(req, on_event).await
-    }
+impl waddle_core::decide::Decider for FixedDecider {
     async fn needs_screen(&self, _goal: &str) -> Option<f64> {
-        self.1
+        self.screen
+    }
+    async fn chat_only(&self, _message: &str) -> Option<f64> {
+        self.chat
     }
 }
 
@@ -595,13 +599,41 @@ async fn the_opening_look_is_skipped_only_when_the_screen_check_is_confident() {
         let mock = Arc::new(MockProvider::scripted(vec![reply("Done.", vec![])]));
         let deps = AgentDeps {
             settings: Settings { look_first: true, ..settings() },
+            decider: Some(Arc::new(FixedDecider { screen: p, chat: None })),
             ..deps_with(&f, host.clone(), mock.clone(), None, None)
         };
-        let deps = AgentDeps { provider: Arc::new(ScreenCheck(mock.clone(), p)), ..deps };
         run_with(&deps).await;
         let looked = host.gui_calls.lock().unwrap().contains(&GuiAction::LookAtScreen);
         assert_eq!(looked, looks, "screen check {p:?}");
         let first = mock.requests.lock().unwrap()[0].last().unwrap().text.clone();
         assert!(first.contains("It's "), "the time is always given: {first}");
     }
+}
+
+#[tokio::test]
+async fn small_talk_gets_a_quick_answer_without_a_task() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Aw, thank you! Quack!", vec![]),
+        reply("[task]", vec![]),
+        reply("Opening Notepad.", vec![call("open_app", json!({"name": "notepad"}))]),
+        reply("Notepad is open.", vec![]),
+    ]));
+    let rt = tokio::runtime::Handle::current();
+    let config = SessionConfig { decider: Some(Arc::new(FixedDecider { screen: None, chat: Some(0.99) })), ..session_config(&f, provider.clone()) };
+    let session = Session::new(rt, host.clone(), f.audit.clone(), config);
+
+    session.user_message("you're so cute".into());
+    wait_until(|| provider.request_count() == 1).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(host.busy.lock().unwrap().is_empty(), "small talk starts no task");
+    assert!(provider.requests.lock().unwrap()[0][0].text.contains("pixel-art duck"));
+
+    // The check said chat, but the chat model hands it back: it becomes a task.
+    session.user_message("open notepad".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::OpenApp { name: "notepad".into() }));
+    let task_req = provider.requests.lock().unwrap()[2].clone();
+    assert!(task_req.iter().any(|m| m.text == "Aw, thank you! Quack!"), "the chat is remembered in the task");
 }
