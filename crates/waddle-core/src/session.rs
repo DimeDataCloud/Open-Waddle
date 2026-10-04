@@ -86,6 +86,9 @@ pub struct SessionConfig {
     pub self_source: Option<Arc<Workspace>>,
     /// Where tasks are saved when `settings.record_traces` is on.
     pub traces: Option<Arc<TraceStore>>,
+    /// The signed-in Google account. None = not connected.
+    pub google: Option<Arc<crate::google::Google>>,
+    pub style: Option<Arc<crate::google::style::StyleNote>>,
 }
 
 pub struct Session {
@@ -208,6 +211,8 @@ impl Session {
             decider: config.decider,
             self_source: config.self_source,
             selection: None,
+            google: config.google,
+            style: config.style,
         }
     }
 
@@ -639,6 +644,15 @@ impl Host for Held {
     }
     fn resolve_approval(&self, id: &str, decision: Decision) {
         self.inner.resolve_approval(id, decision)
+    }
+    async fn review_draft(&self, req: ApprovalRequest) -> (Decision, Option<crate::google::gmail::MailDraft>) {
+        if !self.confirmed().await {
+            return (Decision::Cancelled, None);
+        }
+        self.inner.review_draft(req).await
+    }
+    async fn offer_undo(&self, id: &str, secs: u64) -> bool {
+        self.inner.offer_undo(id, secs).await
     }
     async fn approach(&self, action: &GuiAction, cancel: &CancellationToken) {
         if self.confirmed().await {

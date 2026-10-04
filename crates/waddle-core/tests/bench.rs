@@ -245,6 +245,8 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         decider,
         self_source: None,
         selection: None,
+        google: None,
+        style: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, id.clone(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);

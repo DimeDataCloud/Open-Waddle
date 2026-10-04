@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Duck, pickWanderTarget } from "./behavior";
+import { Duck, pickWanderTarget, usesLaptop } from "./behavior";
 import { computeSegments } from "./platforms";
 
 const opts = { width: 1440, floorY: 900, minHeadroom: 56, minWidth: 24 };
@@ -65,5 +65,23 @@ describe("Duck", () => {
     const t = pickWanderTarget(segs, 40, () => 0.5)!;
     expect(t.y).toBe(900);
     expect(t.x).toBeGreaterThan(40);
+  });
+});
+
+describe("usesLaptop", () => {
+  it("is for tools that work through an API, not the screen", () => {
+    for (const t of ["mail_search", "mail_send", "calendar_events", "contacts_find", "drive_read", "find_files", "read_document", "browser_read"]) {
+      expect(usesLaptop(t)).toBe(true);
+    }
+    for (const t of ["click", "type_text", "look_at_screen", "browser_click", "write_file"]) expect(usesLaptop(t)).toBe(false);
+  });
+
+  it("pecks while at the laptop and keeps the frame loop running", () => {
+    const duck = new Duck({ w: 48, h: 42 }, 100, 100);
+    duck.mode = "idle";
+    duck.laptop = true;
+    expect(duck.isAnimating(5000)).toBe(true);
+    const frames = new Set([0, 110, 220, 330].map((t) => duck.frame(10_000 + t)));
+    expect(frames).toEqual(new Set(["peck", "idle"]));
   });
 });

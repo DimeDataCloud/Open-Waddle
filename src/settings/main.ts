@@ -15,6 +15,9 @@ interface Settings {
   wander: boolean;
   record_traces: boolean;
   no_training: boolean;
+  google_client_id: string;
+  working_hours: [number, number];
+  send_undo_secs: number;
   self_source_dir: string | null;
   max_delegation_depth: number;
   character: { id: string; color: string };
@@ -103,6 +106,10 @@ function fill(view: SettingsView): void {
   $("wander").checked = s.wander;
   $("record_traces").checked = s.record_traces;
   $("no_training").checked = s.no_training;
+  $("google_client_id").value = s.google_client_id;
+  $("work_start").value = String(s.working_hours[0]);
+  $("work_end").value = String(s.working_hours[1]);
+  $("send_undo_secs").value = String(s.send_undo_secs);
   $("mode").textContent = view.demo
     ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
     : `Using ${s.model}. Workspace: ${view.workspace}`;
@@ -130,6 +137,9 @@ function collect(): Settings {
     wander: $("wander").checked,
     record_traces: $("record_traces").checked,
     no_training: $("no_training").checked,
+    google_client_id: $("google_client_id").value.trim(),
+    working_hours: [num("work_start", 9), num("work_end", 17)],
+    send_undo_secs: num("send_undo_secs", 10),
     self_source_dir: $("self_source_dir").value.trim() || null,
     max_delegation_depth: num("max_delegation_depth", 2),
     character: { ...current.character, color: $("color").value },
@@ -225,6 +235,69 @@ $("fact-text").addEventListener("keydown", (e) => {
     void addFact();
   }
 });
+
+interface GoogleStatus {
+  client_id: string;
+  has_secret: boolean;
+  connected: boolean;
+  email: string | null;
+  error: string | null;
+}
+
+function showGoogle(g: GoogleStatus): void {
+  $("google-connect").classList.toggle("hidden", g.connected);
+  $("google-disconnect").classList.toggle("hidden", !g.connected);
+  $("google_client_secret").placeholder = g.has_secret ? "saved (leave blank to keep)" : "from the same page as the client ID";
+  $("google-status").textContent = g.connected
+    ? g.email
+      ? `Connected as ${g.email}.`
+      : `Connected, but Google didn't answer: ${g.error ?? "unknown error"}`
+    : "Not connected. Without it, Waddle uses Gmail and Calendar in Chrome on screen.";
+}
+
+async function loadGoogle(): Promise<void> {
+  try {
+    showGoogle(await invoke<GoogleStatus>("google_status"));
+  } catch (err) {
+    $("google-status").textContent = String(err);
+  }
+}
+
+$("google-connect").addEventListener("click", async () => {
+  const button = $<HTMLButtonElement>("google-connect");
+  if (button.dataset.waiting) {
+    await invoke("google_cancel");
+    return;
+  }
+  button.dataset.waiting = "1";
+  button.textContent = "Cancel";
+  $("google-status").textContent = "Finish signing in in your browser…";
+  try {
+    const secret = $("google_client_secret").value.trim();
+    showGoogle(await invoke<GoogleStatus>("google_connect", { clientId: $("google_client_id").value.trim(), clientSecret: secret || null }));
+    $("google_client_secret").value = "";
+  } catch (err) {
+    $("google-status").textContent = `Couldn't connect: ${err}`;
+  } finally {
+    delete button.dataset.waiting;
+    button.textContent = "Connect";
+  }
+});
+
+$("google-disconnect").addEventListener("click", async () => {
+  showGoogle(await invoke<GoogleStatus>("google_disconnect"));
+});
+
+$("style-save").addEventListener("click", async () => {
+  await invoke("style_set", { text: $<HTMLTextAreaElement>("style-note").value });
+  $("style-save").textContent = "Saved";
+  setTimeout(() => ($("style-save").textContent = "Save note"), 1500);
+});
+
+async function loadStyle(): Promise<void> {
+  const note = $<HTMLTextAreaElement>("style-note");
+  if (document.activeElement !== note) note.value = await invoke<string>("style_get");
+}
 
 async function loadAudit(): Promise<void> {
   const rows = await invoke<AuditRecord[]>("audit_recent", { limit: 50 });
@@ -350,7 +423,10 @@ void loadTraces();
 void loadAudit();
 void loadSkills();
 void loadFacts();
+void loadGoogle();
+void loadStyle();
 setInterval(() => {
+  void loadStyle();
   void loadAudit();
   void loadSkills();
   // Don't redraw the list under the user while they type a new fact.

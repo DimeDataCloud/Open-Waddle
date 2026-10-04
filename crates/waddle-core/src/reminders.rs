@@ -182,9 +182,9 @@ where
     format!("{day}{} ({when})", due.format("%H:%M"))
 }
 
-/// The current local time for the task message, e.g. "Sunday 4 October, 14:05".
+/// The current local time for the task message, e.g. "Sunday 4 October 2026, 14:05".
 pub fn now_line() -> String {
-    Local::now().format("%A %-d %B, %H:%M").to_string()
+    Local::now().format("%A %-d %B %Y, %H:%M").to_string()
 }
 
 #[cfg(test)]

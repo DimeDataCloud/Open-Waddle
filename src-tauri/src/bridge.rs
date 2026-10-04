@@ -14,6 +14,10 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{AgentEvent, ApprovalRequest, Decision, EnvInfo, Host};
 use waddle_core::session::Selection;
+use waddle_core::google::gmail::MailDraft;
+
+/// The user's answer to an approval card, with the email as they left it on a send card.
+type Answer = (Decision, Option<MailDraft>);
 use waddle_core::tools::{Capabilities, GuiAction, GuiResult, WindowInfo};
 
 use crate::actuate;
@@ -38,7 +42,9 @@ pub struct Platform {
 pub struct TauriHost {
     app: AppHandle,
     overlay: Arc<OverlayState>,
-    approvals: Mutex<HashMap<String, oneshot::Sender<Decision>>>,
+    approvals: Mutex<HashMap<String, oneshot::Sender<Answer>>>,
+    /// Undo buttons showing after Send, by approval id.
+    undos: Mutex<HashMap<String, oneshot::Sender<()>>>,
     moves: Mutex<HashMap<String, oneshot::Sender<()>>>,
     windows: RwLock<Vec<DesktopWindow>>,
     busy: AtomicBool,
@@ -62,6 +68,7 @@ impl TauriHost {
             app,
             overlay,
             approvals: Mutex::default(),
+            undos: Mutex::default(),
             moves: Mutex::default(),
             windows: RwLock::default(),
             busy: AtomicBool::new(false),
@@ -187,9 +194,16 @@ impl TauriHost {
         self.to_platforms(&self.windows.read().unwrap())
     }
 
-    pub fn answer_approval(&self, id: &str, approved: bool) {
+    /// The user's click on an approval card; a send card also returns the message as they edited it.
+    pub fn answer_approval(&self, id: &str, approved: bool, draft: Option<MailDraft>) {
         if let Some(tx) = self.approvals.lock().unwrap().remove(id) {
-            let _ = tx.send(if approved { Decision::Approved } else { Decision::Denied });
+            let _ = tx.send((if approved { Decision::Approved } else { Decision::Denied }, draft));
+        }
+    }
+
+    pub fn undo_send(&self, id: &str) {
+        if let Some(tx) = self.undos.lock().unwrap().remove(id) {
+            let _ = tx.send(());
         }
     }
 
@@ -273,10 +287,30 @@ impl Host for TauriHost {
     }
 
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {
+        self.review_draft(req).await.0
+    }
+
+    async fn review_draft(&self, req: ApprovalRequest) -> (Decision, Option<MailDraft>) {
         let (tx, rx) = oneshot::channel();
         self.approvals.lock().unwrap().insert(req.id.clone(), tx);
         self.emit_overlay("approval", req);
-        rx.await.unwrap_or(Decision::Cancelled)
+        rx.await.unwrap_or((Decision::Cancelled, None))
+    }
+
+    async fn offer_undo(&self, id: &str, secs: u64) -> bool {
+        if secs == 0 {
+            return false;
+        }
+        let (tx, rx) = oneshot::channel();
+        self.undos.lock().unwrap().insert(id.to_string(), tx);
+        self.emit_overlay("undo", json!({ "id": id, "secs": secs }));
+        let undone = tokio::select! {
+            r = rx => r.is_ok(),
+            _ = tokio::time::sleep(Duration::from_secs(secs)) => false,
+        };
+        self.undos.lock().unwrap().remove(id);
+        self.emit_overlay("undo:done", json!({ "id": id, "undone": undone }));
+        undone
     }
 
     fn resolve_approval(&self, id: &str, decision: Decision) {
@@ -480,7 +514,7 @@ impl Host for TauriHost {
         crate::shortcuts::set_halt_hotkey(&self.app, busy);
         if !busy {
             for (_, tx) in self.approvals.lock().unwrap().drain() {
-                let _ = tx.send(Decision::Cancelled);
+                let _ = tx.send((Decision::Cancelled, None));
             }
             for (_, tx) in self.moves.lock().unwrap().drain() {
                 let _ = tx.send(());

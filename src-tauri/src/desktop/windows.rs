@@ -153,6 +153,11 @@ pub fn open_path(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn open_url(url: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(shell_open(url), "Windows couldn't open the browser");
+    Ok(())
+}
+
 fn shell_open(target: &str) -> bool {
     let file = HSTRING::from(target);
     let verb = HSTRING::from("open");

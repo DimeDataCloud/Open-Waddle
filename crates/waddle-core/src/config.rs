@@ -185,6 +185,12 @@ pub struct Settings {
     pub character: CharacterSettings,
     pub ollama: OllamaSettings,
     pub voice: VoiceSettings,
+    /// OAuth client ID of the user's Google Cloud project (Desktop app type). Empty = Google off.
+    pub google_client_id: String,
+    /// Hours (local, 24h) that `calendar_free` proposes meetings in, on weekdays.
+    pub working_hours: (u32, u32),
+    /// After Send on the send card, how long Undo stays available before the email goes.
+    pub send_undo_secs: u64,
 }
 
 impl Default for Settings {
@@ -215,6 +221,9 @@ impl Default for Settings {
             character: CharacterSettings::default(),
             ollama: OllamaSettings::default(),
             voice: VoiceSettings::default(),
+            google_client_id: String::new(),
+            working_hours: (9, 17),
+            send_undo_secs: 10,
         }
     }
 }

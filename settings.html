@@ -75,6 +75,27 @@
         </fieldset>
 
         <fieldset>
+          <legend>Google account</legend>
+          <p class="muted">Lets Waddle read and tidy your Gmail, check and book your Google Calendar, and look up your contacts. Sending, binning and deleting always wait for your click. Setup takes about 5 minutes: see <code>docs/GOOGLE_SETUP.md</code>.</p>
+          <label>OAuth client ID <input id="google_client_id" placeholder="….apps.googleusercontent.com" autocomplete="off" /></label>
+          <label>Client secret <input id="google_client_secret" type="password" autocomplete="off" /></label>
+          <div class="add-row">
+            <button type="button" id="google-connect" class="link">Connect</button>
+            <button type="button" id="google-disconnect" class="link hidden">Disconnect</button>
+          </div>
+          <p id="google-status" class="muted"></p>
+          <div class="row">
+            <label>Working hours from <input id="work_start" type="number" min="0" max="23" /></label>
+            <label>to <input id="work_end" type="number" min="1" max="24" /></label>
+          </div>
+          <label>Undo window after Send (seconds) <input id="send_undo_secs" type="number" min="0" max="30" /></label>
+          <h4>How you write email</h4>
+          <p class="muted">Ask Waddle to "learn how I write emails" and it writes this note from about 20 of your sent emails. Drafts follow it.</p>
+          <textarea id="style-note" rows="3" maxlength="800" placeholder="No note yet"></textarea>
+          <button type="button" id="style-save" class="link">Save note</button>
+        </fieldset>
+
+        <fieldset>
           <legend>Memory &amp; privacy</legend>
           <label class="check"><input id="no_training" type="checkbox" /> Only use AI providers that don't keep or train on what I send (OpenRouter)</label>
           <h4>What Waddle remembers about you</h4>

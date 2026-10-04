@@ -9,7 +9,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+pub mod fake_google;
+
 use waddle_core::agent::ApprovalRequest;
+use waddle_core::google::gmail::MailDraft;
 use waddle_core::llm::ImageData;
 use waddle_core::tools::{Capabilities, ElementInfo, GuiAction, GuiResult, WindowInfo};
 use waddle_core::{AgentEvent, Decision, EnvInfo, Host, Settings};
@@ -34,6 +37,11 @@ pub struct FakeHost {
     pub timeline: Mutex<Vec<(f64, String)>>,
     /// Files Waddle opened for the user.
     pub opened: Mutex<Vec<PathBuf>>,
+    /// What the user changes on the send card before pressing Send (None = sends as shown).
+    pub draft_edit: Mutex<Option<MailDraft>>,
+    /// Whether the user presses Undo after Send.
+    pub undo: Mutex<bool>,
+    pub undo_offers: Mutex<Vec<u64>>,
     started: Instant,
 }
 
@@ -52,6 +60,9 @@ impl FakeHost {
             os: Mutex::new("TestOS".into()),
             timeline: Mutex::default(),
             opened: Mutex::default(),
+            draft_edit: Mutex::default(),
+            undo: Mutex::new(false),
+            undo_offers: Mutex::default(),
             started: Instant::now(),
         })
     }
@@ -87,6 +98,15 @@ impl Host for FakeHost {
         }
     }
     fn resolve_approval(&self, _id: &str, _decision: Decision) {}
+    async fn review_draft(&self, req: ApprovalRequest) -> (Decision, Option<MailDraft>) {
+        let shown = req.draft.clone();
+        let decision = self.request_approval(req).await;
+        (decision, self.draft_edit.lock().unwrap().clone().or(shown))
+    }
+    async fn offer_undo(&self, _id: &str, secs: u64) -> bool {
+        self.undo_offers.lock().unwrap().push(secs);
+        *self.undo.lock().unwrap()
+    }
     async fn gui(&self, action: GuiAction, _cancel: &CancellationToken) -> anyhow::Result<GuiResult> {
         self.gui_calls.lock().unwrap().push(action.clone());
         Ok(match action {

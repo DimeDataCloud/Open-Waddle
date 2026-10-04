@@ -31,6 +31,8 @@ pub struct Capabilities {
     pub memory: bool,
     /// Text the user selected came with the message and can be replaced.
     pub selection: bool,
+    /// Gmail, Calendar and Contacts are connected.
+    pub google: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -183,7 +185,7 @@ impl ToolOutcome {
     }
 }
 
-fn spec(name: &str, description: &str, properties: Value, required: &[&str]) -> ToolSpec {
+pub(crate) fn spec(name: &str, description: &str, properties: Value, required: &[&str]) -> ToolSpec {
     let mut parameters = json!({ "type": "object", "properties": properties });
     if !required.is_empty() {
         parameters["required"] = json!(required);
@@ -274,6 +276,9 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             json!({ "text": { "type": "string" } }),
             &["text"],
         ));
+    }
+    if caps.google {
+        v.extend(crate::google::tools::specs());
     }
     if caps.memory {
         v.push(spec(
@@ -373,7 +378,7 @@ pub fn is_gui_tool(name: &str) -> bool {
 
 /// Tools that only read and never use the screen: several in one turn run at once.
 pub fn is_parallel_read(name: &str) -> bool {
-    matches!(name, "read_file" | "list_dir")
+    matches!(name, "read_file" | "list_dir") || crate::google::tools::is_parallel_read(name)
 }
 
 fn num(args: &Value, k: &str) -> Option<f64> {
@@ -532,7 +537,7 @@ pub fn summarize(call: &ToolCall) -> String {
         "forget_skill" => format!("Forget skill \"{}\"", s("name")),
         "update_settings" => format!("Change my settings: {}", a.get("changes").map(|c| c.to_string()).unwrap_or_default()),
         "list_dir" => format!("List {}", if s("path").is_empty() { "the workspace".into() } else { s("path") }),
-        other => format!("Use {other}"),
+        other => crate::google::tools::summarize(call).unwrap_or_else(|| format!("Use {other}")),
     }
 }
 
@@ -607,7 +612,9 @@ mod tests {
         let names = |caps| specs(caps, &c).into_iter().map(|s| s.name).collect::<Vec<_>>();
         let headless = names(Capabilities::default());
         assert!(headless.contains(&"run_command".to_string()) && !headless.contains(&"click".to_string()));
-        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true });
+        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true, google: true });
+        assert!(full.contains(&"mail_send".to_string()) && full.contains(&"calendar_free".to_string()));
+        assert!(!headless.contains(&"mail_search".to_string()), "Google tools only when connected");
         assert!(full.contains(&"reminder".to_string()) && full.contains(&"point_at".to_string()));
         assert!(full.contains(&"remember".to_string()) && full.contains(&"replace_selection".to_string()));
         assert!(!names(Capabilities { gui: true, ..Default::default() }).contains(&"replace_selection".to_string()), "only with a selection");

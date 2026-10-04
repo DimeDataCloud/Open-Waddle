@@ -10,6 +10,11 @@ export type Mode = "idle" | "moving" | "falling" | "dragged" | "hovering";
 export type ActKind = "peck" | "type" | "look";
 
 const WALK_SPEED = 110; // logical px/s
+
+/** Tools that work through an API, not the screen: the duck pecks at a little laptop while they run. */
+export function usesLaptop(tool: string): boolean {
+  return /^(mail_|calendar_|drive_|browser_read)/.test(tool) || ["contacts_find", "find_files", "read_document"].includes(tool);
+}
 const FLY_SPEED = 280;
 
 interface Leg {
@@ -46,6 +51,8 @@ export class Duck {
   facing: 1 | -1 = 1;
   mode: Mode = "falling";
   sleeping = false;
+  /** Working at the laptop (API tools); ends with the next on-screen action or the task. */
+  laptop = false;
   private legs: Waypoint[] = [];
   private leg: Leg | null = null;
   private speed = 1;
@@ -202,7 +209,7 @@ export class Duck {
 
   /** True while something is animating, so the render loop runs at full rate. */
   isAnimating(now: number): boolean {
-    return this.mode !== "idle" || (this.act !== null && now < this.act.until) || now < this.blinkUntil;
+    return this.mode !== "idle" || this.laptop || (this.act !== null && now < this.act.until) || now < this.blinkUntil;
   }
 
   frame(now: number): FrameName {
@@ -225,6 +232,7 @@ export class Duck {
       case "dragged":
         return tick(220) ? "flap_down" : "flap_up";
       case "idle":
+        if (this.laptop) return tick(110) ? "peck" : "idle";
         if (this.sleeping) return "blink";
         if (now >= this.nextBlink) {
           this.blinkUntil = now + 140;

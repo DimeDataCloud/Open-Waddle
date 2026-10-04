@@ -4,6 +4,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use waddle_core::audit::{AuditRecord, VerifyReport};
 use waddle_core::config::{ProviderKind, VoiceBackend};
+use waddle_core::google::gmail::MailDraft;
+use waddle_core::google::{auth, OAuthClient, SCOPES};
 use waddle_core::Settings;
 
 use crate::bridge::Platform;
@@ -96,8 +98,101 @@ pub fn halt(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-pub fn answer_approval(state: State<'_, AppState>, id: String, approved: bool) {
-    state.host.answer_approval(&id, approved);
+pub fn answer_approval(state: State<'_, AppState>, id: String, approved: bool, draft: Option<MailDraft>) {
+    state.host.answer_approval(&id, approved, draft);
+}
+
+/// Undo on the bar that follows Send: the email doesn't go.
+#[tauri::command]
+pub fn undo_send(state: State<'_, AppState>, id: String) {
+    state.host.undo_send(&id);
+}
+
+#[derive(Serialize)]
+pub struct GoogleStatus {
+    pub client_id: String,
+    pub has_secret: bool,
+    pub connected: bool,
+    pub email: Option<String>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn google_status(state: State<'_, AppState>) -> CmdResult<GoogleStatus> {
+    let google = state.google.read().unwrap().clone();
+    let (email, error) = match google {
+        Some(g) => match g.mail_profile().await {
+            Ok((email, _)) => (Some(email), None),
+            Err(e) => (None, Some(format!("{e:#}"))),
+        },
+        None => (None, None),
+    };
+    Ok(GoogleStatus {
+        client_id: state.settings.read().unwrap().google_client_id.clone(),
+        has_secret: state.secrets.get(Secret::GoogleClient).is_some(),
+        connected: state.google.read().unwrap().is_some(),
+        email,
+        error,
+    })
+}
+
+/// Signs in to Google in the browser (PKCE, loopback redirect) and keeps the refresh token in the keychain.
+#[tauri::command]
+pub async fn google_connect(state: State<'_, AppState>, client_id: String, client_secret: Option<String>) -> CmdResult<GoogleStatus> {
+    let client_id = client_id.trim().to_string();
+    if client_id.is_empty() {
+        return Err("Paste the OAuth client ID from your Google Cloud project first (see the setup guide).".into());
+    }
+    if let Some(secret) = client_secret.filter(|s| !s.trim().is_empty()) {
+        state.secrets.set(Secret::GoogleClient, &secret).map_err(err)?;
+    }
+    let client = OAuthClient { id: client_id.clone(), secret: state.secrets.get(Secret::GoogleClient) };
+    let cancel = tokio_util::sync::CancellationToken::new();
+    if let Some(old) = state.google_signin.lock().unwrap().replace(cancel.clone()) {
+        old.cancel();
+    }
+    let open = |url: &str| {
+        if let Err(e) = crate::desktop::open_url(url) {
+            log::warn!("{e:#}");
+        }
+    };
+    let tokens = auth::sign_in(&crate::google_endpoints(), &client, SCOPES, open, &cancel, std::time::Duration::from_secs(300)).await.map_err(|e| format!("{e:#}"))?;
+    state.google_signin.lock().unwrap().take();
+    state.secrets.set(Secret::GoogleRefreshToken, tokens.refresh_token.as_deref().unwrap_or("")).map_err(err)?;
+    let mut settings = state.settings.read().unwrap().clone();
+    settings.google_client_id = client_id;
+    state.apply_settings(settings).map_err(err)?;
+    log::info!("connected to Google");
+    google_status(state).await
+}
+
+#[tauri::command]
+pub fn google_cancel(state: State<'_, AppState>) {
+    if let Some(c) = state.google_signin.lock().unwrap().take() {
+        c.cancel();
+    }
+}
+
+/// Signs out: Google forgets the grant and the refresh token leaves the keychain.
+#[tauri::command]
+pub async fn google_disconnect(state: State<'_, AppState>) -> CmdResult<GoogleStatus> {
+    if let Some(token) = state.secrets.get(Secret::GoogleRefreshToken) {
+        auth::revoke(&crate::google_endpoints(), &token).await;
+    }
+    state.secrets.set(Secret::GoogleRefreshToken, "").map_err(err)?;
+    let settings = state.settings.read().unwrap().clone();
+    state.apply_settings(settings).map_err(err)?;
+    google_status(state).await
+}
+
+#[tauri::command]
+pub async fn style_get(state: State<'_, AppState>) -> CmdResult<String> {
+    Ok(state.style.get().unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn style_set(state: State<'_, AppState>, text: String) -> CmdResult<()> {
+    state.style.set(&text).map_err(err)
 }
 
 #[tauri::command]

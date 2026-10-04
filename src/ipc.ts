@@ -31,6 +31,16 @@ export interface ApprovalRequest {
   reason: string;
   detail: string;
   countdown_ms: number | null;
+  /** An email about to be sent: the send card shows it in full and lets the user edit it. */
+  draft?: MailDraft;
+}
+
+export interface MailDraft {
+  to: string;
+  cc: string;
+  subject: string;
+  body: string;
+  reply_to?: string;
 }
 
 /** Text grabbed with Ctrl+Alt+A, as the chat box shows it. */
@@ -71,7 +81,8 @@ export const api = {
   openAnswer: (id: string) => invoke<string>("open_answer", { id }),
   warmUp: () => invoke<void>("warm_up"),
   halt: () => invoke<boolean>("halt"),
-  answerApproval: (id: string, approved: boolean) => invoke<void>("answer_approval", { id, approved }),
+  answerApproval: (id: string, approved: boolean, draft: MailDraft | null = null) => invoke<void>("answer_approval", { id, approved, draft }),
+  undoSend: (id: string) => invoke<void>("undo_send", { id }),
   duckArrived: (id: string) => invoke<void>("duck_arrived", { id }),
   setHitRects: (rects: HitRect[]) => invoke<void>("set_hit_rects", { rects }),
   setCapture: (on: boolean) => invoke<void>("set_capture", { on }),
@@ -94,6 +105,8 @@ export interface Events {
   settings: { color: string; wander: boolean; demo: boolean };
   "chat:open": { voice: boolean; selection?: SelectionPreview | null };
   "wander:toggle": null;
+  undo: { id: string; secs: number };
+  "undo:done": { id: string; undone: boolean };
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {

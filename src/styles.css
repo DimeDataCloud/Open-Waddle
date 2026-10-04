@@ -367,3 +367,54 @@ body {
     opacity: 0;
   }
 }
+
+/* Send card: the whole email, editable after Edit. */
+.card.mail {
+  width: 380px;
+}
+
+.card.mail .mail-fields label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0;
+}
+
+.card.mail input,
+.card.mail textarea {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  user-select: text;
+}
+
+.card.mail textarea {
+  width: 100%;
+  margin-top: 4px;
+  resize: vertical;
+  max-height: 260px;
+  white-space: pre-wrap;
+  background: #f6f0e1;
+}
+
+.card.mail.editing input,
+.card.mail.editing textarea {
+  border-color: var(--tier2);
+  background: #fff;
+}
+
+.card.undo {
+  width: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}

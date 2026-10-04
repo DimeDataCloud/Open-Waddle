@@ -133,6 +133,7 @@ These are "System One" models: one quick pass that returns a yes/no probability,
 - Jev scored 28/32 on sample requests, and every miss was on the safe side (it looked when it didn't need to).
 - Below 0.3 the opening screenshot is skipped. That would have skipped 8 of the 12 tasks that didn't need the screen (reminders, files, maths, writing), with no wrong skips. Every task that needed the screen scored 0.5 or more.
 - Any error, or an answer slower than 2 s, means "look".
+- With Google connected, the question says mail, calendar and contacts are reachable without the screen, and the skip bar rises to 0.6. Live: "what's my next meeting?" 0.23, "any important unread email?" 0.51, "reply to Ana…" 0.48, "find 45 minutes with Sam…" 0.33, against "summarise this email" 0.83 and "click the blue button" 0.99. That took "what's my next meeting?" from 5.2 s to 3.3 s end to end.
 
 **Also in use: ambient behaviour and the chat lane.**
 

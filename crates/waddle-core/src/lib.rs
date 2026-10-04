@@ -17,6 +17,7 @@ pub mod stt;
 pub mod tools;
 pub mod decide;
 pub mod facts;
+pub mod google;
 pub mod reminders;
 pub mod traces;
 pub mod untrusted;

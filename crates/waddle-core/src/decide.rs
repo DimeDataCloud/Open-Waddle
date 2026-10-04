@@ -97,7 +97,8 @@ pub struct Routing {
 #[async_trait]
 pub trait Decider: Send + Sync {
     /// Probability that a task needs the screen.
-    async fn needs_screen(&self, _goal: &str) -> Option<f64> {
+    /// `apis`: Gmail, Calendar and Contacts are reachable without the screen.
+    async fn needs_screen(&self, _goal: &str, _apis: bool) -> Option<f64> {
         None
     }
     /// Whether a message is conversation, a research question or a task.
@@ -160,14 +161,21 @@ impl Jev {
 
 #[async_trait]
 impl Decider for Jev {
-    async fn needs_screen(&self, goal: &str) -> Option<f64> {
-        let p = self
-            .noul(
-                format!("User request to a desktop assistant: {goal}"),
-                "Doing this request needs looking at or acting on what is on the user's screen",
+    async fn needs_screen(&self, goal: &str, apis: bool) -> Option<f64> {
+        // With Google connected, mail and meetings come through the API: only "this email" means the screen.
+        let (visible, without) = if apis {
+            (
+                "It points at something visible right now (this, it, an open app, window, page, button, selection) or needs clicking, typing, scrolling or reading the screen",
+                "It can be done without the screen: the user's email inbox, calendar, meetings and contacts (all reachable directly, not on screen), files, commands, reminders, the clipboard, maths, writing, or general knowledge",
+            )
+        } else {
+            (
                 "It refers to something visible (this, it, an open app, page, email, button, selection) or needs clicking, typing, scrolling or reading the screen",
                 "It can be done without the screen: files, commands, reminders, the clipboard, maths, writing, or general knowledge",
             )
+        };
+        let p = self
+            .noul(format!("User request to a desktop assistant: {goal}"), "Doing this request needs looking at or acting on what is on the user's screen", visible, without)
             .await;
         log::info!("screen check: {p:?}");
         p

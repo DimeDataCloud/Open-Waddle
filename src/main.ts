@@ -1,7 +1,7 @@
 // Overlay entry point: the render/behaviour loop and the wiring between the
 // duck, its UI, and the backend's events.
 
-import { Duck, pickWanderTarget } from "./body/behavior";
+import { Duck, pickWanderTarget, usesLaptop } from "./body/behavior";
 import { alarmPalette, buildPalette } from "./body/palette";
 import { planIntent, type Plan } from "./body/intent";
 import { standBeside } from "./body/pathfind";
@@ -42,7 +42,11 @@ const duck = new Duck({ w: renderer.width, h: renderer.height }, screen.w * 0.7,
 
 const pointer = new Pointer();
 const bubble = new Bubble(document.getElementById("bubble")!, () => void api.halt());
-const approval = new ApprovalCard(document.getElementById("approval")!, (id, ok) => void api.answerApproval(id, ok));
+const approval = new ApprovalCard(
+  document.getElementById("approval")!,
+  (id, ok, draft) => void api.answerApproval(id, ok, draft ?? null),
+  (id) => void api.undoSend(id),
+);
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
   send: (text, selection) => {
     bubble.say("user", selection ? `${text || "Help with this"} 📎` : text);
@@ -155,12 +159,35 @@ function draw(now: number): void {
   const frame = duck.frame(now);
   if (lastRect) ctx.clearRect(lastRect.x - 2, lastRect.y - 2, lastRect.w + 4, lastRect.h + 4);
   renderer.draw(frame, r.x, r.y, duck.facing < 0);
+  if (duck.laptop && duck.mode === "idle") drawLaptop(r);
   if (duck.sleeping) {
     ctx.fillStyle = "#2a1e14";
     ctx.font = "bold 14px monospace";
     ctx.fillText("z", r.x + r.w - 6, r.y + 6 - (Math.floor(now / 600) % 3) * 4);
   }
-  lastRect = { ...r, y: r.y - 16, h: r.h + 16 };
+  // The laptop sits just outside the sprite, so clear a little wider.
+  const pad = renderer.scale * LAPTOP[0].length;
+  lastRect = { x: r.x - pad, y: r.y - 16, w: r.w + pad * 2, h: r.h + 16 };
+}
+
+// A tiny open laptop, 7x5 sprite pixels: lid (L), glowing screen (S), base (B).
+const LAPTOP = [".LLLLL.", ".LSSSL.", ".LSSSL.", ".LLLLL.", "BBBBBBB"];
+const LAPTOP_COLOURS: Record<string, string> = { L: "#3a3f4b", S: "#9ad1ff", B: "#5b6170" };
+
+function drawLaptop(r: HitRect): void {
+  const px = renderer.scale;
+  const w = LAPTOP[0].length * px;
+  const x = duck.facing > 0 ? r.x + r.w - px : r.x - w + px;
+  const y = r.y + r.h - LAPTOP.length * px;
+  // The screen flickers as the duck types.
+  const glow = Math.floor(performance.now() / 220) % 3 === 0 ? "#c4e6ff" : LAPTOP_COLOURS.S;
+  LAPTOP.forEach((row, j) =>
+    [...row].forEach((k, i) => {
+      if (k === ".") return;
+      ctx.fillStyle = k === "S" ? glow : LAPTOP_COLOURS[k];
+      ctx.fillRect(Math.round(x + i * px), Math.round(y + j * px), px, px);
+    }),
+  );
 }
 
 function union(a: HitRect, b: DOMRect): HitRect {
@@ -297,6 +324,7 @@ void on("busy", (b) => {
   plan = null;
   bubble.setBusy(b);
   if (!b) {
+    duck.laptop = false;
     alarm = false;
     applyPalette();
     // Flutter back down after a task that ended mid-air.
@@ -311,6 +339,16 @@ void on("approval", (req) => {
   applyPalette();
 });
 
+void on("undo", ({ id, secs }) => {
+  touch();
+  approval.showUndo(id, secs);
+});
+
+void on("undo:done", ({ id, undone }) => {
+  approval.hideUndo(id);
+  if (undone) bubble.say("notice", "Not sent.");
+});
+
 void on("agent", (ev) => {
   touch();
   switch (ev.type) {
@@ -322,6 +360,8 @@ void on("agent", (ev) => {
       break;
     case "tool_started":
       bubble.tool(ev.summary);
+      // Email, calendar and file reads: the duck pecks at its little laptop until it acts on screen again.
+      duck.laptop = usesLaptop(ev.tool);
       if (ev.tool === "run_command" || ev.tool === "write_file") duck.doAct("type", performance.now(), 1200);
       break;
     case "tool_output":
@@ -336,6 +376,7 @@ void on("agent", (ev) => {
       applyPalette();
       break;
     case "task_finished":
+      duck.laptop = false;
       // The planner's final words already streamed; show the message only if it didn't.
       if (ev.outcome !== "done") bubble.say(ev.outcome === "failed" ? "error" : "notice", ev.message);
       break;

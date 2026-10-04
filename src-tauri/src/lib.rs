@@ -24,6 +24,8 @@ use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
 use waddle_core::decide::{Decider, Jev};
 use waddle_core::facts::FactStore;
+use waddle_core::google::style::StyleNote;
+use waddle_core::google::{Endpoints, Google, OAuthClient};
 use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
@@ -47,6 +49,11 @@ pub struct AppState {
     pub facts: Arc<FactStore>,
     pub decider: RwLock<Option<Arc<dyn Decider>>>,
     pub traces: Arc<TraceStore>,
+    /// The signed-in Google account, if any.
+    pub google: RwLock<Option<Arc<Google>>>,
+    pub style: Arc<StyleNote>,
+    /// Cancels a Google sign-in that's waiting for the browser.
+    pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
     settings_path: PathBuf,
     workspace: RwLock<Arc<Workspace>>,
     demo: RwLock<bool>,
@@ -80,6 +87,25 @@ pub(crate) fn decider_for(settings: &Settings, secrets: &Secrets, demo: bool) ->
     Jev::for_settings(settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn Decider>)
 }
 
+/// Google's servers, or a fake on this machine for development (`WADDLE_GOOGLE_BASE`).
+pub(crate) fn google_endpoints() -> Endpoints {
+    match std::env::var("WADDLE_GOOGLE_BASE") {
+        Ok(base) if base.starts_with("http://127.0.0.1:") || base.starts_with("http://localhost:") => Endpoints::at(&base),
+        _ => Endpoints::google(),
+    }
+}
+
+/// The Google account, when the user has set a client ID and signed in.
+pub(crate) fn google_for(settings: &Settings, secrets: &Secrets) -> Option<Arc<Google>> {
+    let id = settings.google_client_id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let refresh = secrets.get(Secret::GoogleRefreshToken)?;
+    let client = OAuthClient { id: id.to_string(), secret: secrets.get(Secret::GoogleClient) };
+    Some(Arc::new(Google::new(google_endpoints(), client, refresh)))
+}
+
 /// Waddle's own source folder, if the user turned self-editing on.
 fn self_source_for(settings: &Settings) -> anyhow::Result<Option<Arc<Workspace>>> {
     match &settings.self_source_dir {
@@ -104,6 +130,7 @@ impl AppState {
         let (provider, demo) = provider_for(&settings, &self.secrets);
         let decider = decider_for(&settings, &self.secrets, demo);
         let self_source = self_source_for(&settings)?;
+        let google = google_for(&settings, &self.secrets);
         if let Some(dir) = self.settings_path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -118,7 +145,10 @@ impl AppState {
             decider: decider.clone(),
             self_source,
             traces: Some(self.traces.clone()),
+            google: google.clone(),
+            style: Some(self.style.clone()),
         });
+        *self.google.write().unwrap() = google;
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
         *self.demo.write().unwrap() = demo;
@@ -248,6 +278,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
     let facts = Arc::new(FactStore::new(data_dir.join("facts.json")));
+    let style = Arc::new(StyleNote::new(data_dir.join("style.md")));
+    let google = google_for(&settings, &secrets);
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
         None
@@ -267,6 +299,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             decider: decider.clone(),
             self_source,
             traces: Some(traces.clone()),
+            google: google.clone(),
+            style: Some(style.clone()),
         },
     );
 
@@ -283,6 +317,9 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         facts,
         decider: RwLock::new(decider),
         traces,
+        google: RwLock::new(google),
+        style,
+        google_signin: Mutex::default(),
         settings_path,
         workspace: RwLock::new(workspace),
         demo: RwLock::new(demo),
@@ -351,6 +388,13 @@ pub fn run() {
             commands::fact_add,
             commands::fact_forget,
             commands::open_answer,
+            commands::undo_send,
+            commands::google_status,
+            commands::google_connect,
+            commands::google_cancel,
+            commands::google_disconnect,
+            commands::style_get,
+            commands::style_set,
             commands::drop_selection,
             commands::rate_task,
             commands::traces_summary,

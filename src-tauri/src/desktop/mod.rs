@@ -77,6 +77,19 @@ pub fn open_path(path: &std::path::Path) -> anyhow::Result<()> {
     r.map(|_| ()).map_err(|e| anyhow::anyhow!("couldn't open {}: {e}", path.display()))
 }
 
+/// Opens a web page in the default browser (http and https only).
+pub fn open_url(url: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(url.starts_with("https://") || url.starts_with("http://"), "not a web address");
+    #[cfg(windows)]
+    return windows::open_url(url);
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
+    #[cfg(not(windows))]
+    r.map(|_| ()).map_err(|e| anyhow::anyhow!("couldn't open the browser: {e}"))
+}
+
 /// Launches an application by name without going through a shell.
 pub fn open_app(name: &str) -> anyhow::Result<String> {
     #[cfg(windows)]

@@ -42,6 +42,13 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - *Chat* ("thanks!", "what's a haiku?") gets an instant answer without a task. If it needs current facts ("who won last night?"), the answer uses a web search (about $0.007).
   - *Research* ("research how to keep basil alive indoors") gets a short cited summary in the bubble and a **Full answer** button that saves the whole answer, with numbered sources, to `Documents\Waddle\research\` and opens it.
   - *Tasks* start straight away: Waddle looks at the screen while the router decides, so tasks don't wait for it.
+- **Gmail, Calendar and Contacts** (connect your Google account in Settings; see [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md)).
+  - "What's my next meeting?" answers in about 3 seconds, straight from your calendar, without touching the screen.
+  - "Any important unread email?", "archive the newsletters", "reply to Ana that Thursday works", "find 45 minutes with Sam next week and invite him".
+  - Before anything is sent, a card shows the whole email. You can edit it, and after **Send** you have 10 seconds to **Undo**. Binning mail and deleting events also wait for your click.
+  - "Learn how I write emails" makes a short style note from about 20 of your sent emails, so drafts sound like you.
+  - While it works through Google, the duck pecks at a little laptop.
+  - Not connected? Waddle uses Gmail and Calendar in Chrome on screen instead.
 - **Work on what you selected.** Select text anywhere and press **Ctrl+Alt+A**: the chat opens with the selection attached ("make this friendlier", "translate to French"). Waddle puts the result on your clipboard or, after a 2 s notice, replaces the selection.
 - **Remember what matters.** "Remember that I take my coffee black" or "my manager is Sam" go into a short list of facts (2 KB at most) that every later task can see. Waddle may save useful facts on its own, never from the screen, files or web pages. See and edit the list in Settings → Memory & privacy.
 - **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Each decision costs about $0.00002.
@@ -59,9 +66,9 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
 | Tier | What | What happens |
 |---|---|---|
 | 0 | Reading the screen, pointing at things | Runs silently |
-| 1 | Opening apps, scrolling, reading the workspace or clipboard, reminders, remembering facts, starting sub-tasks | Runs, logged |
-| 2 | Clicks, typing, dragging, copying to the clipboard, replacing a selection, new files, read-only commands (`dir`, `git status`…) | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
-| 3 | Deleting/overwriting, any other command, network, self-changes (skills, settings, own code) | Waddle turns red and **waits for your click** |
+| 1 | Opening apps, scrolling, reading the workspace or clipboard, reading your mail, calendar and contacts, reminders, remembering facts, starting sub-tasks | Runs, logged |
+| 2 | Clicks, typing, dragging, copying to the clipboard, replacing a selection, new files, read-only commands (`dir`, `git status`…), mail drafts, archiving and labels, new or changed events, invitations and replies to them | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
+| 3 | Deleting/overwriting, any other command, network, self-changes (skills, settings, own code), sending email (the card shows the whole message, editable, then 10 s to Undo), binning mail, deleting events | Waddle turns red and **waits for your click** |
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
 - **Screen and file contents are treated as data.** Text from the screen, files and command output is wrapped in tags with an unguessable id. The model is told never to follow instructions inside them.
@@ -122,6 +129,10 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 10. "Research the best houseplants for low light" → a short summary with sources in brackets, then **Full answer** opens a Markdown file from `Documents\Waddle\research\`.
 11. Select a sentence in Notepad, press **Ctrl+Alt+A**, type "make this more formal" → a 2 s notice, then the sentence is replaced.
 12. "Remember that my dog is called Biscuit" → Settings → Memory & privacy lists it; a later "what's my dog called?" knows.
+13. Connect Google (Settings → Google account, then [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md)) → "Connected as you@…".
+14. "What's my next meeting?" → the answer comes in under 5 seconds, with the Meet link if there is one.
+15. "Reply to <someone>'s last email saying thanks" → the send card shows the whole reply; **Edit** a word, **Send**, then press **Undo** within 10 s → nothing is sent. Do it again without Undo → the reply shows up in the thread in Gmail.
+16. "Find 30 minutes with <a contact> next week and send an invite with a Meet link" → three free slots inside 9–17, then a 2 s notice, then the event and the invite.
 
 ## Something not working?
 

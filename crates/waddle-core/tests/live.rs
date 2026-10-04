@@ -87,6 +87,8 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
         decider: None,
         self_source: None,
         selection: None,
+        google: None,
+        style: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "live".into(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);
@@ -290,6 +292,8 @@ async fn route_live(text: &str) -> (Arc<FakeHost>, f64, f64) {
         facts: None,
         self_source: None,
         traces: None,
+        google: None,
+        style: None,
     };
     let session = Session::new(tokio::runtime::Handle::current(), host.clone(), Arc::new(AuditLog::open_in_memory().unwrap()), config);
     let started = Instant::now();
@@ -327,4 +331,30 @@ async fn routes_chat_research_and_tasks() {
     println!("research took {total:.1}s");
     let (h, _, _) = route_live("what's the title of the window I have open?").await;
     assert!(h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })), "a question about the screen is a task");
+}
+
+#[tokio::test]
+#[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.0003)"]
+async fn the_screen_check_knows_when_google_is_reachable() {
+    use waddle_core::decide::Decider;
+    assert!(openrouter(), "the screen check needs Jev on OpenRouter");
+    let key = std::env::var("OPENROUTER_API_KEY").ok();
+    let jev = waddle_core::decide::Jev::for_settings(&live_settings(), key.as_deref()).unwrap();
+    let mut results = vec![];
+    for (goal, skip_with_google) in [
+        ("what's my next meeting?", true),
+        ("any important unread email?", true),
+        ("reply to Ana that Friday works", true),
+        ("find 45 minutes with Sam next week", true),
+        ("summarise this email", false),
+        ("click the blue button", false),
+    ] {
+        let with = jev.needs_screen(goal, true).await.unwrap();
+        let without = jev.needs_screen(goal, false).await.unwrap();
+        println!("{with:.2} (with Google) {without:.2} (without): {goal}");
+        results.push((goal, with, skip_with_google));
+    }
+    for (goal, with, skip) in results {
+        assert_eq!(with < 0.6, skip, "{goal}: {with:.2}");
+    }
 }

@@ -53,6 +53,16 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "reminder" => assess(Tier::NonDestructive, "manages reminders"),
         "remember" | "forget" => assess(Tier::NonDestructive, "updates the facts Waddle keeps about you (listed in Settings)"),
         "replace_selection" => assess(Tier::ScopedMutation, "replaces the text you selected"),
+        "mail_search" | "mail_read" | "contacts_find" | "calendar_events" | "calendar_free" => assess(Tier::NonDestructive, "reads your Google account"),
+        "mail_style" => assess(Tier::NonDestructive, "reads some of your sent mail to learn your writing style"),
+        "mail_draft" => assess(Tier::ScopedMutation, "saves a draft in Gmail (nothing is sent)"),
+        "mail_modify" => assess(Tier::ScopedMutation, "archives, labels or marks an email"),
+        "calendar_create" => assess(Tier::ScopedMutation, "adds an event to your calendar (attendees get an invitation)"),
+        "calendar_update" => assess(Tier::ScopedMutation, "changes a calendar event (attendees are told)"),
+        "calendar_respond" => assess(Tier::ScopedMutation, "answers an invitation"),
+        "mail_send" => assess(Tier::Destructive, "sends an email from your account"),
+        "mail_trash" => assess(Tier::Destructive, "moves an email to the bin"),
+        "calendar_delete" => assess(Tier::Destructive, "deletes a calendar event (attendees are told)"),
         "copy_to_clipboard" => assess(Tier::ScopedMutation, "replaces what's on the clipboard"),
         "drag" => assess(Tier::ScopedMutation, "drags in another application"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
@@ -189,6 +199,19 @@ mod tests {
         assert_eq!(tier_of("remember", json!({"fact":"x"}), false), Tier::NonDestructive);
         assert_eq!(tier_of("forget", json!({"id":"x"}), false), Tier::NonDestructive);
         assert_eq!(tier_of("replace_selection", json!({"text":"x"}), false), Tier::ScopedMutation);
+    }
+
+    #[test]
+    fn only_sends_and_deletes_need_a_click_in_google() {
+        for read in ["mail_search", "mail_read", "contacts_find", "calendar_events", "calendar_free", "mail_style"] {
+            assert_eq!(tier_of(read, json!({}), false), Tier::NonDestructive, "{read}");
+        }
+        for notice in ["mail_draft", "mail_modify", "calendar_create", "calendar_update", "calendar_respond"] {
+            assert_eq!(tier_of(notice, json!({}), false), Tier::ScopedMutation, "{notice}");
+        }
+        for click in ["mail_send", "mail_trash", "calendar_delete"] {
+            assert_eq!(tier_of(click, json!({}), false), Tier::Destructive, "{click}");
+        }
     }
 
     #[test]
