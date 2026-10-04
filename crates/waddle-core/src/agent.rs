@@ -226,8 +226,6 @@ pub struct Agent<'a> {
     sub_tasks: AtomicU32,
     /// Whether this task has looked at the desktop yet; blind input is refused.
     looked: AtomicBool,
-    /// Whether it has seen where things are (a screenshot or an element list); clicking a point needs this.
-    located: AtomicBool,
     /// Tokens and cost of the whole tree of tasks.
     usage: Arc<Mutex<Usage>>,
 }
@@ -236,7 +234,7 @@ impl<'a> Agent<'a> {
     pub fn new(deps: &'a AgentDeps, task_id: String, cancel: CancellationToken, status: Arc<Mutex<TaskStatus>>, env: &EnvInfo) -> Self {
         let coords = Coords { mode: deps.settings.coord_mode(), screen_w: env.screen_w, screen_h: env.screen_h };
         let budget = deps.settings.max_steps * (1 + deps.settings.max_delegation_depth);
-        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false), located: AtomicBool::new(false), usage: Arc::default() }
+        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false), usage: Arc::default() }
     }
 
     fn capabilities(&self, env: &EnvInfo) -> Capabilities {
@@ -504,12 +502,6 @@ impl<'a> Agent<'a> {
 Use list_windows, find_elements or look_at_screen first. If the task is already done, reply without tool calls.";
                 return (ToolOutcome::trusted(text), false);
             }
-            // A window list says where windows are, not what's in them; a point picked from it is a guess.
-            if action.target().is_some() && !self.located.load(Ordering::SeqCst) {
-                let text = "Error: you haven't seen the screen during this task, so you'd be clicking blind. \
-Use look_at_screen first to see where things are, then click.";
-                return (ToolOutcome::trusted(text), false);
-            }
             self.deps.host.approach(action, &self.cancel).await;
         }
 
@@ -545,13 +537,10 @@ Use look_at_screen first to see where things are, then click.";
         });
         let result = match gui_action {
             Some(action) => {
-                let (perceives, locates) = (action.perceives(), action.locates());
+                let perceives = action.perceives();
                 let r = self.deps.host.gui(action, &self.cancel).await;
                 if perceives && r.is_ok() {
                     self.looked.store(true, Ordering::SeqCst);
-                }
-                if locates && r.is_ok() {
-                    self.located.store(true, Ordering::SeqCst);
                 }
                 r.map(|r| tools::format_gui_result(r, &self.coords))
             }
@@ -609,7 +598,7 @@ Use look_at_screen first to see where things are, then click.";
             steps_left: self.steps_left.clone(),
             sub_tasks: AtomicU32::new(0),
             looked: AtomicBool::new(false),
-            located: AtomicBool::new(false),
+           
             usage: self.usage.clone(),
         };
         let full_goal = if context.trim().is_empty() { goal.to_string() } else { format!("{goal}\n\nContext from the parent task:\n{context}") };

@@ -179,26 +179,6 @@ async fn blind_input_is_refused_until_waddle_has_looked() {
 }
 
 #[tokio::test]
-async fn clicking_a_point_needs_a_look_at_the_screen_first() {
-    let f = fixture();
-    let provider = Arc::new(MockProvider::scripted(vec![
-        reply("Checking windows.", vec![call("list_windows", json!({}))]),
-        reply("Clicking the name box.", vec![call("click", json!({"x": 500, "y": 300}))]),
-        reply("Looking.", vec![call("look_at_screen", json!({}))]),
-        reply("Clicking the name box.", vec![call("click", json!({"x": 500, "y": 300}))]),
-        reply("Done.", vec![]),
-    ]));
-    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
-    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
-
-    let gui = host.gui_calls.lock().unwrap().clone();
-    assert!(matches!(gui.as_slice(), [GuiAction::ListWindows, GuiAction::LookAtScreen, GuiAction::Click { .. }]), "{gui:?}");
-    let third = provider.requests.lock().unwrap()[2].clone();
-    let refusal = third.iter().rev().find(|m| m.role == Role::Tool).unwrap();
-    assert!(refusal.text.contains("clicking blind"), "{}", refusal.text);
-}
-
-#[tokio::test]
 async fn an_announced_action_without_a_tool_call_gets_one_nudge() {
     let f = fixture();
     let provider = Arc::new(MockProvider::scripted(vec![

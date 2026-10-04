@@ -103,11 +103,6 @@ impl GuiAction {
         matches!(self, GuiAction::ListWindows | GuiAction::LookAtScreen | GuiAction::FindElements { .. } | GuiAction::OpenApp { .. })
     }
 
-    /// Actions that show where things are inside windows, so a point can be aimed at.
-    pub fn locates(&self) -> bool {
-        matches!(self, GuiAction::LookAtScreen | GuiAction::FindElements { .. })
-    }
-
     /// Where Waddle should walk before acting, if anywhere.
     pub fn target(&self) -> Option<(f64, f64)> {
         match self {

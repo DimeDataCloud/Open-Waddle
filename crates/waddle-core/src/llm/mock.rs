@@ -59,7 +59,7 @@ fn demo_step(req: &ChatRequest<'_>) -> ChatResponse {
     let step = req.messages.iter().filter(|m| m.role == Role::Tool).count();
     let cleanup = if cfg!(windows) { "Remove-Item waddle-demo.txt" } else { "rm waddle-demo.txt" };
     match step {
-        0 => reply("Hi! This is demo mode. First, a quick look at your screen.", vec![call("look_at_screen", json!({}))]),
+        0 => reply("Hi! This is demo mode. First, a peek at what's open.", vec![call("list_windows", json!({}))]),
         1 => reply(
             "I'll leave a note in your workspace.",
             vec![call("write_file", json!({ "path": "waddle-demo.txt", "content": "Hello from Project Waddle!\n" }))],
