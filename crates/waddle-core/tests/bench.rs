@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::{CoordMode, ProviderKind, Reasoning};
-use waddle_core::llm::{build_provider, ImageData};
+use waddle_core::llm::{build_provider, ChatRequest, ChatResponse, EventSink, ImageData, Provider};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::{Decision, Host, Outcome, Settings};
@@ -66,6 +66,47 @@ fn load() -> Suite {
         .cloned()
         .collect();
     Suite { tasks, boxes, windows }
+}
+
+/// Spaces out model calls to stay under a requests-per-minute cap
+/// (`WADDLE_BENCH_RPM`; new OpenRouter accounts get 20 per model), and retries
+/// once after a 429. Waiting is not counted in a task's time.
+struct Paced {
+    inner: Arc<dyn Provider>,
+    gap: std::time::Duration,
+    waited: Arc<Mutex<f64>>,
+}
+
+static NEXT_SLOT: tokio::sync::Mutex<Option<Instant>> = tokio::sync::Mutex::const_new(None);
+
+impl Paced {
+    async fn slot(&self) {
+        let started = Instant::now();
+        let mut next = NEXT_SLOT.lock().await;
+        let at = next.unwrap_or(started).max(started);
+        *next = Some(at + self.gap);
+        drop(next);
+        tokio::time::sleep_until(at.into()).await;
+        *self.waited.lock().unwrap() += started.elapsed().as_secs_f64();
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for Paced {
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        self.slot().await;
+        let req2 = req;
+        match self.inner.chat(req, on_event).await {
+            Err(e) if e.to_string().contains("429") => {
+                let t = Instant::now();
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                *self.waited.lock().unwrap() += t.elapsed().as_secs_f64();
+                self.slot().await;
+                self.inner.chat(req2, &mut |_| {}).await
+            }
+            r => r,
+        }
+    }
 }
 
 fn screen(name: &str) -> ImageData {
@@ -184,8 +225,13 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         Ok("norm1000") => settings.coord_mode = CoordMode::Norm1000,
         _ => {}
     }
+    let waited = Arc::new(Mutex::new(0.0));
+    let mut provider = build_provider(&settings, Some(key.to_string()));
+    if let Some(rpm) = std::env::var("WADDLE_BENCH_RPM").ok().and_then(|v| v.parse::<f64>().ok()) {
+        provider = Arc::new(Paced { inner: provider, gap: std::time::Duration::from_secs_f64(60.0 / rpm), waited: waited.clone() });
+    }
     let deps = AgentDeps {
-        provider: build_provider(&settings, Some(key.to_string())),
+        provider,
         host: host.clone(),
         audit: Arc::new(AuditLog::open_in_memory().unwrap()),
         workspace: workspace.clone(),
@@ -204,7 +250,7 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
         Ok(r) => r,
         Err(_) => waddle_core::agent::RunResult { outcome: Outcome::TimedOut, message: "timed out".into() },
     };
-    let secs = started.elapsed().as_secs_f64();
+    let secs = started.elapsed().as_secs_f64() - *waited.lock().unwrap();
     let usage = agent.usage();
     let actions = host.gui_calls.lock().unwrap().clone();
     let steps = host.timeline.lock().unwrap().iter().filter(|(_, l)| l == "model call").count();
