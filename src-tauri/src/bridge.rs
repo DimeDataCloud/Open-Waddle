@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{AgentEvent, ApprovalRequest, Decision, EnvInfo, Host};
+use waddle_core::session::Selection;
 use waddle_core::tools::{Capabilities, GuiAction, GuiResult, WindowInfo};
 
 use crate::actuate;
@@ -21,6 +22,8 @@ use crate::overlay::{Geometry, OverlayState};
 
 const OVERLAY: &str = "overlay";
 const ARRIVE_TIMEOUT: Duration = Duration::from_secs(6);
+/// Longest selection sent along with a message.
+const MAX_SELECTION_CHARS: usize = 8000;
 
 /// A window as the overlay sees it: logical pixels relative to the overlay.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -41,6 +44,10 @@ pub struct TauriHost {
     busy: AtomicBool,
     halt_suppressed_until: AtomicU64,
     next_move: AtomicU64,
+    /// Text grabbed by Ctrl+Alt+A, waiting for the message it goes with, and the window it came from.
+    selection: Mutex<Option<(Selection, Option<u64>)>>,
+    /// The window `replace_selection` pastes into.
+    selection_window: Mutex<Option<u64>>,
     #[cfg(windows)]
     uia: crate::uia::Uia,
 }
@@ -60,6 +67,8 @@ impl TauriHost {
             busy: AtomicBool::new(false),
             halt_suppressed_until: AtomicU64::new(0),
             next_move: AtomicU64::new(1),
+            selection: Mutex::default(),
+            selection_window: Mutex::default(),
             #[cfg(windows)]
             uia: crate::uia::Uia::spawn(),
         })
@@ -71,6 +80,37 @@ impl TauriHost {
 
     pub fn is_busy(&self) -> bool {
         self.busy.load(Ordering::SeqCst)
+    }
+
+    /// Reads the text selected in the front app (Ctrl+Alt+A) and keeps it for the
+    /// next message. Returns what the chat box shows: length, a preview and the app.
+    pub async fn capture_selection(&self) -> Option<serde_json::Value> {
+        let front = desktop::list_windows().into_iter().find(|w| w.focused);
+        #[cfg(windows)]
+        let via_uia = self.uia.selection().await.ok().filter(|t| !t.trim().is_empty());
+        #[cfg(not(windows))]
+        let via_uia: Option<String> = None;
+        let text = match via_uia {
+            Some(t) => t,
+            None => Self::blocking(actuate::copy_selection).await.ok()?,
+        };
+        let text: String = text.chars().take(MAX_SELECTION_CHARS).collect();
+        if text.trim().is_empty() {
+            *self.selection.lock().unwrap() = None;
+            return None;
+        }
+        let app = front.as_ref().map(|w| w.app.clone()).unwrap_or_default();
+        let preview: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
+        let view = json!({ "chars": text.chars().count(), "preview": preview, "app": app });
+        *self.selection.lock().unwrap() = Some((Selection { text, app }, front.map(|w| w.id)));
+        Some(view)
+    }
+
+    /// The captured selection, for the message being sent; `replace_selection` will paste into its window.
+    pub fn take_selection(&self) -> Option<Selection> {
+        let (sel, window) = self.selection.lock().unwrap().take()?;
+        *self.selection_window.lock().unwrap() = window;
+        Some(sel)
     }
 
     /// The Escape hotkey should halt, unless Waddle itself just pressed Escape.
@@ -398,6 +438,15 @@ impl Host for TauriHost {
                 Self::blocking(move || actuate::copy_to_clipboard(&text)).await?;
                 Ok(GuiResult::Done(format!("Copied {n} characters to the clipboard.")))
             }
+            GuiAction::ReplaceSelection { text } => {
+                let window = *self.selection_window.lock().unwrap();
+                desktop::focus_window(window);
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                self.act("type");
+                let n = text.chars().count();
+                Self::blocking(move || actuate::paste_text(&text)).await?;
+                Ok(GuiResult::Done(format!("Replaced the selection with {n} characters.")))
+            }
             GuiAction::PressKeys { keys } => {
                 let combo = actuate::parse_combo(&keys)?;
                 if combo.contains(&enigo::Key::Escape) {
@@ -418,6 +467,12 @@ impl Host for TauriHost {
         let s = state.settings.read().unwrap().clone();
         self.emit_overlay("settings", json!({ "color": s.character.color, "wander": s.wander, "demo": state.is_demo() }));
         Ok(())
+    }
+
+    fn open_path(&self, path: &std::path::Path) {
+        if let Err(e) = desktop::open_path(path) {
+            log::warn!("{e:#}");
+        }
     }
 
     fn set_busy(&self, busy: bool) {

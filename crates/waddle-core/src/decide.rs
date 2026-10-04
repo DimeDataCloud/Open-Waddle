@@ -74,14 +74,34 @@ impl Situation {
     }
 }
 
+/// How a message is handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// A few sentences from the fast model, no tools.
+    Chat,
+    /// A cited answer from a web search.
+    Research,
+    /// The planner, with the screen and tools.
+    Task,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Routing {
+    pub route: Route,
+    /// How sure the router is of `route`.
+    pub p: f64,
+    /// Probability that a good answer needs current facts from the web.
+    pub web: f64,
+}
+
 #[async_trait]
 pub trait Decider: Send + Sync {
     /// Probability that a task needs the screen.
     async fn needs_screen(&self, _goal: &str) -> Option<f64> {
         None
     }
-    /// Probability that a message is only conversation (no computer use needed).
-    async fn chat_only(&self, _message: &str) -> Option<f64> {
+    /// Whether a message is conversation, a research question or a task.
+    async fn route(&self, _message: &str) -> Option<Routing> {
         None
     }
     /// The duck's next idle behaviour, with its probability.
@@ -108,8 +128,9 @@ impl Jev {
         Some(Self { http, url: format!("{origin}/api/alpha/decisions"), key })
     }
 
-    async fn ask(&self, state: String, question: Value) -> Option<Value> {
-        let body = json!({ "model": "typesafe/jev-1.13", "state": state, "questions": { "q": question } });
+    /// Asks several questions about one state in a single call (same latency as one).
+    async fn ask_all(&self, state: String, questions: Value) -> Option<Value> {
+        let body = json!({ "model": "typesafe/jev-1.13", "state": state, "questions": questions });
         let send = self.http.post(&self.url).bearer_auth(&self.key).json(&body).send();
         let res = tokio::time::timeout(Duration::from_secs(2), send).await.ok()?.ok()?;
         if !res.status().is_success() {
@@ -117,7 +138,11 @@ impl Jev {
             return None;
         }
         let v: Value = tokio::time::timeout(Duration::from_secs(1), res.json()).await.ok()?.ok()?;
-        Some(v["answers"]["q"].clone())
+        Some(v["answers"].clone())
+    }
+
+    async fn ask(&self, state: String, question: Value) -> Option<Value> {
+        Some(self.ask_all(state, json!({ "q": question })).await?["q"].clone())
     }
 
     async fn noul(&self, state: String, instructions: &str, yes: &str, no: &str) -> Option<f64> {
@@ -148,20 +173,32 @@ impl Decider for Jev {
         p
     }
 
-    async fn chat_only(&self, message: &str) -> Option<f64> {
-        let (_, probs) = self
-            .choice(
-                format!("Message: {message}"),
-                "Does this message to a desktop assistant duck need it to do something on the computer, or is it just conversation it can answer from general knowledge",
-                &[
-                    ("task", "Needs the computer: the screen, apps, files, clipboard, reminders, the time, settings, or showing where something is"),
-                    ("chat", "Small talk, thanks, praise, questions about the duck itself, jokes, writing or maths it can answer directly"),
-                ],
-            )
-            .await?;
-        let p = probs.get("chat").copied();
-        log::info!("chat check: {p:?}");
-        p
+    async fn route(&self, message: &str) -> Option<Routing> {
+        // On 45 labelled messages: 44 routed right (the miss, "make this sound more polite",
+        // scored chat 0.76, under the 0.8 bar), and every research question scored 0.89 or more.
+        let questions = json!({
+            "route": { "type": "choice", "instructions": "Pick how a desktop assistant duck should handle this message", "criteria": {
+                "chat": "Conversation it can answer in a few sentences: small talk, thanks, questions about the duck, jokes, writing, maths, general knowledge, or a quick current fact like news, weather, prices or scores",
+                "research": "Asks to research, compare, investigate or explain a topic in depth from several sources on the web",
+                "task": "Needs the computer: the screen, apps, files, the clipboard or selected text, email, calendar, reminders, memory, the time, settings, searching in the browser, or showing where something is"
+            }},
+            "web": { "type": "noul", "instructions": "Answering this message well needs current information from the web", "criteria": {
+                "true": "It asks about recent or live facts: news, weather, prices, scores, schedules, releases, or anything that changes over time",
+                "false": "Timeless knowledge, small talk, opinions, writing or maths"
+            }}
+        });
+        let a = self.ask_all(format!("Message: {message}"), questions).await?;
+        let label = a["route"]["choice"].as_str()?;
+        let route = match label {
+            "chat" => Route::Chat,
+            "research" => Route::Research,
+            "task" => Route::Task,
+            _ => return None,
+        };
+        let p = a["route"]["probabilities"][label].as_f64()?;
+        let web = a["web"]["noul"].as_f64().unwrap_or(0.0);
+        log::info!("route: {label} {p:.2}, web {web:.2}");
+        Some(Routing { route, p, web })
     }
 
     async fn duck_intent(&self, situation: &Situation) -> Option<(DuckIntent, f64)> {

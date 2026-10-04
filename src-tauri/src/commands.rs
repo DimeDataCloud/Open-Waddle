@@ -49,10 +49,40 @@ fn view(state: &AppState, key_storage: Option<&'static str>) -> SettingsView {
 }
 
 #[tauri::command]
-pub fn send_message(state: State<'_, AppState>, text: String) {
+pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<bool>) {
     // Focus stays in the chat box for follow-ups; the bridge hands focus back
     // to the user's app right before Waddle types anything.
-    state.session.user_message(text);
+    match selection.filter(|s| *s).and_then(|_| state.host.take_selection()) {
+        Some(sel) => state.session.user_message_with_selection(text, sel),
+        None => state.session.user_message(text),
+    }
+}
+
+/// The user removed the selection chip from the chat box.
+#[tauri::command]
+pub fn drop_selection(state: State<'_, AppState>) {
+    let _ = state.host.take_selection();
+}
+
+/// Saves a research answer as Markdown in the workspace and opens it.
+#[tauri::command]
+pub async fn open_answer(state: State<'_, AppState>, id: String) -> CmdResult<String> {
+    state.session.open_answer(&id).map(|p| p.display().to_string()).map_err(err)
+}
+
+#[tauri::command]
+pub async fn facts_list(state: State<'_, AppState>) -> CmdResult<Vec<waddle_core::facts::Fact>> {
+    Ok(state.facts.list())
+}
+
+#[tauri::command]
+pub async fn fact_add(state: State<'_, AppState>, text: String) -> CmdResult<String> {
+    state.facts.add(&text).map_err(err)
+}
+
+#[tauri::command]
+pub async fn fact_forget(state: State<'_, AppState>, id: String) -> CmdResult<String> {
+    state.facts.forget(&id).map_err(err)
 }
 
 #[tauri::command]
@@ -144,13 +174,7 @@ pub async fn open_settings(app: AppHandle) -> CmdResult<()> {
 #[tauri::command]
 pub async fn open_workspace(state: State<'_, AppState>) -> CmdResult<()> {
     let path = state.workspace().root().to_path_buf();
-    #[cfg(windows)]
-    let r = std::process::Command::new("explorer").arg(&path).spawn();
-    #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&path).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(&path).spawn();
-    r.map(|_| ()).map_err(err)
+    crate::desktop::open_path(&path).map_err(err)
 }
 
 #[tauri::command]

@@ -44,10 +44,11 @@ const pointer = new Pointer();
 const bubble = new Bubble(document.getElementById("bubble")!, () => void api.halt());
 const approval = new ApprovalCard(document.getElementById("approval")!, (id, ok) => void api.answerApproval(id, ok));
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
-  send: (text) => {
-    bubble.say("user", text);
-    void api.sendMessage(text);
+  send: (text, selection) => {
+    bubble.say("user", selection ? `${text || "Help with this"} 📎` : text);
+    void api.sendMessage(text, selection);
   },
+  dropSelection: () => void api.dropSelection(),
   // A local model loads while the user types.
   opened: () => void api.warmUp(),
   voiceStart: () => api.voiceStart(),
@@ -344,6 +345,9 @@ void on("agent", (ev) => {
     case "trace_saved":
       bubble.rate((good) => void api.rateTask(ev.task_id, good));
       break;
+    case "offer":
+      bubble.offer(ev.label, () => api.openAnswer(ev.id));
+      break;
     case "task_started":
     case "thinking":
       break;
@@ -356,9 +360,13 @@ void on("settings", (s) => {
   applyPalette();
 });
 
-void on("chat:open", ({ voice }) => {
+void on("chat:open", ({ voice, selection }) => {
   touch();
   chat.open();
+  if (selection !== undefined) {
+    chat.setSelection(selection);
+    if (!selection) bubble.say("notice", "I couldn't find any selected text. Select some, then press Ctrl+Alt+A.");
+  }
   if (voice) void chat.toggleVoice();
 });
 

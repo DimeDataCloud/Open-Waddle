@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use uiautomation::types::ControlType;
-use uiautomation::patterns::UIInvokePattern;
+use uiautomation::patterns::{UIInvokePattern, UITextPattern};
 use uiautomation::types::Handle;
 use uiautomation::{UIAutomation, UIElement};
 use waddle_core::tools::ElementInfo;
@@ -17,6 +17,8 @@ use waddle_core::tools::ElementInfo;
 const MAX_DEPTH: usize = 12;
 const MAX_ELEMENTS: usize = 150;
 const TIME_BUDGET: Duration = Duration::from_millis(1500);
+/// Longest selection read through UI Automation.
+const MAX_SELECTION: i32 = 20_000;
 
 pub enum Activation {
     /// The element's own Invoke action ran (no mouse needed).
@@ -28,6 +30,7 @@ pub enum Activation {
 enum Job {
     Find { hwnd: isize, reply: oneshot::Sender<anyhow::Result<Vec<ElementInfo>>> },
     Activate { id: u32, invoke: bool, reply: oneshot::Sender<anyhow::Result<Activation>> },
+    Selection { reply: oneshot::Sender<anyhow::Result<String>> },
 }
 
 pub struct Uia {
@@ -117,6 +120,15 @@ impl Worker {
         Some(ElementInfo { id, role: role.into(), name, x: r.get_left() as f64, y: r.get_top() as f64, w: w as f64, h: h as f64 })
     }
 
+    /// The text selected in the focused control, when it exposes the Text pattern
+    /// (Word, Notepad, Edge, most text fields). No clipboard involved.
+    fn selection(&self) -> anyhow::Result<String> {
+        let el = self.automation.get_focused_element()?;
+        let pattern = el.get_pattern::<UITextPattern>()?;
+        let parts: Vec<String> = pattern.get_selection()?.iter().filter_map(|r| r.get_text(MAX_SELECTION).ok()).collect();
+        Ok(parts.join("\n"))
+    }
+
     fn activate(&mut self, id: u32, invoke: bool) -> anyhow::Result<Activation> {
         let (el, t, center) = self
             .last
@@ -148,6 +160,7 @@ impl Uia {
                             match job {
                                 Job::Find { reply, .. } => drop(reply.send(Err(anyhow::anyhow!("UI Automation unavailable")))),
                                 Job::Activate { reply, .. } => drop(reply.send(Err(anyhow::anyhow!("UI Automation unavailable")))),
+                                Job::Selection { reply } => drop(reply.send(Err(anyhow::anyhow!("UI Automation unavailable")))),
                             }
                         }
                         return;
@@ -158,6 +171,7 @@ impl Uia {
                     match job {
                         Job::Find { hwnd, reply } => drop(reply.send(worker.find(hwnd))),
                         Job::Activate { id, invoke, reply } => drop(reply.send(worker.activate(id, invoke))),
+                        Job::Selection { reply } => drop(reply.send(worker.selection())),
                     }
                 }
             })
@@ -170,6 +184,13 @@ impl Uia {
         let (reply, rx) = oneshot::channel();
         self.tx.send(Job::Find { hwnd, reply })?;
         tokio::time::timeout(Duration::from_secs(4), rx).await.map_err(|_| anyhow::anyhow!("reading the window took too long"))??
+    }
+
+    /// The text selected in the focused control.
+    pub async fn selection(&self) -> anyhow::Result<String> {
+        let (reply, rx) = oneshot::channel();
+        self.tx.send(Job::Selection { reply })?;
+        tokio::time::timeout(Duration::from_secs(1), rx).await.map_err(|_| anyhow::anyhow!("reading the selection took too long"))??
     }
 
     /// Where element `id` (from the latest `find`) is, without activating it.

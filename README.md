@@ -38,7 +38,13 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
   - Open apps, click, type, press shortcuts, scroll and drag. Waddle walks to the target and stands beside it before each action.
   - Read and write files and run terminal commands in its workspace folder (`Documents\Waddle`).
-- **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Small talk ("thanks!", "tell me a joke") gets an instant answer without a task. Each decision costs about $0.00002.
+- **Answer, research, or act: picked per message.** A tiny decision model sorts each message in about 0.3 s:
+  - *Chat* ("thanks!", "what's a haiku?") gets an instant answer without a task. If it needs current facts ("who won last night?"), the answer uses a web search (about $0.007).
+  - *Research* ("research how to keep basil alive indoors") gets a short cited summary in the bubble and a **Full answer** button that saves the whole answer, with numbered sources, to `Documents\Waddle\research\` and opens it.
+  - *Tasks* start straight away: Waddle looks at the screen while the router decides, so tasks don't wait for it.
+- **Work on what you selected.** Select text anywhere and press **Ctrl+Alt+A**: the chat opens with the selection attached ("make this friendlier", "translate to French"). Waddle puts the result on your clipboard or, after a 2 s notice, replaces the selection.
+- **Remember what matters.** "Remember that I take my coffee black" or "my manager is Sam" go into a short list of facts (2 KB at most) that every later task can see. Waddle may save useful facts on its own, never from the screen, files or web pages. See and edit the list in Settings → Memory & privacy.
+- **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Each decision costs about $0.00002.
 - **Assist.**
   - "Where's the export button?" or "how do I turn on Night light?": Waddle walks over and circles the spot with a label instead of clicking, so you learn where it is.
   - Reads what you copied ("summarise what I copied", "translate this") and puts results on your clipboard ("copy that address for me").
@@ -53,14 +59,15 @@ This repo is the MVP foundation. It runs on your own machine. Apart from cheap c
 | Tier | What | What happens |
 |---|---|---|
 | 0 | Reading the screen, pointing at things | Runs silently |
-| 1 | Opening apps, scrolling, reading the workspace or clipboard, reminders, starting sub-tasks | Runs, logged |
-| 2 | Clicks, typing, dragging, copying to the clipboard, new files, read-only commands (`dir`, `git status`…) | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
+| 1 | Opening apps, scrolling, reading the workspace or clipboard, reminders, remembering facts, starting sub-tasks | Runs, logged |
+| 2 | Clicks, typing, dragging, copying to the clipboard, replacing a selection, new files, read-only commands (`dir`, `git status`…) | Shown with a 2 s countdown and a **Cancel** button (or "always ask" in Settings) |
 | 3 | Deleting/overwriting, any other command, network, self-changes (skills, settings, own code) | Waddle turns red and **waits for your click** |
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
 - **Screen and file contents are treated as data.** Text from the screen, files and command output is wrapped in tags with an unguessable id. The model is told never to follow instructions inside them.
 - **Stopping:** Escape (registered only while a task runs), the ■ Stop button, double-clicking the duck, the tray menu, or saying "stop".
 - **Activity log:** every action, decision and result goes to a SQLite log that can only be appended to. Each entry is hash-chained to the previous one, so edits are detectable. Settings → Activity log → *Verify integrity*.
+- **No training on your data:** OpenRouter requests ask for providers that don't keep or train on prompts (`data_collection: deny`). Settings → Memory & privacy turns this off if a model you want needs it.
 - **Honest limits:** commands run in the workspace folder, but this is **not an OS sandbox**. Tier 3 approval is the real gate.
 
 ## Quick start (Windows 11 on ARM, e.g. Surface Pro with Snapdragon)
@@ -112,6 +119,9 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 7. While it's working, say "actually type goodbye instead" → you get an instant reply in blue, and the task adapts.
 8. Press **Escape** mid-task → it stops.
 9. Settings → Activity log shows each step; *Verify integrity* reports the log intact.
+10. "Research the best houseplants for low light" → a short summary with sources in brackets, then **Full answer** opens a Markdown file from `Documents\Waddle\research\`.
+11. Select a sentence in Notepad, press **Ctrl+Alt+A**, type "make this more formal" → a 2 s notice, then the sentence is replaced.
+12. "Remember that my dog is called Biscuit" → Settings → Memory & privacy lists it; a later "what's my dog called?" knows.
 
 ## Something not working?
 

@@ -19,7 +19,8 @@ export type AgentEvent =
   | { type: "approval_resolved"; id: string; decision: Decision }
   | { type: "task_finished"; task_id: string; outcome: Outcome; message: string }
   | { type: "notice"; text: string }
-  | { type: "trace_saved"; task_id: string };
+  | { type: "trace_saved"; task_id: string }
+  | { type: "offer"; id: string; label: string };
 
 export interface ApprovalRequest {
   id: string;
@@ -30,6 +31,13 @@ export interface ApprovalRequest {
   reason: string;
   detail: string;
   countdown_ms: number | null;
+}
+
+/** Text grabbed with Ctrl+Alt+A, as the chat box shows it. */
+export interface SelectionPreview {
+  chars: number;
+  preview: string;
+  app: string;
 }
 
 export interface Platform {
@@ -58,7 +66,9 @@ export interface HitRect {
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
-  sendMessage: (text: string) => invoke<void>("send_message", { text }),
+  sendMessage: (text: string, selection = false) => invoke<void>("send_message", { text, selection }),
+  dropSelection: () => invoke<void>("drop_selection"),
+  openAnswer: (id: string) => invoke<string>("open_answer", { id }),
   warmUp: () => invoke<void>("warm_up"),
   halt: () => invoke<boolean>("halt"),
   answerApproval: (id: string, approved: boolean) => invoke<void>("answer_approval", { id, approved }),
@@ -82,7 +92,7 @@ export interface Events {
   reminder: { text: string; late: boolean };
   "duck:intent": { intent: Intent; window: Platform | null; cursor: { x: number; y: number } | null };
   settings: { color: string; wander: boolean; demo: boolean };
-  "chat:open": { voice: boolean };
+  "chat:open": { voice: boolean; selection?: SelectionPreview | null };
   "wander:toggle": null;
 }
 

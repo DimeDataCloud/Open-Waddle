@@ -25,7 +25,7 @@ use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, ChatRequest, ImageData};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
-use waddle_core::{AgentEvent, Decision, Host, Outcome, Settings};
+use waddle_core::{AgentEvent, Decision, Host, Outcome, Session, SessionConfig, Settings};
 
 fn openrouter() -> bool {
     std::env::var("WADDLE_LIVE").is_ok_and(|v| v == "openrouter")
@@ -83,15 +83,17 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
         settings,
         skills: None,
         reminders: None,
+        facts: None,
         decider: None,
         self_source: None,
+        selection: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "live".into(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);
     if warm {
         let started = Instant::now();
         let (messages, tools) = agent.opening(&[]);
-        deps.provider.warm(ChatRequest { model: &deps.settings.model, messages: &messages, tools: &tools, temperature: 0.2, max_tokens: 1 }).await;
+        deps.provider.warm(ChatRequest { model: &deps.settings.model, messages: &messages, tools: &tools, temperature: 0.2, max_tokens: 1, web: None }).await;
         println!("\nwarm-up took {:.1}s (hidden while the user types)", started.elapsed().as_secs_f64());
     }
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -267,4 +269,62 @@ async fn warm_up_hides_the_model_load_and_the_prompt() {
     println!("\nfirst step after idle: cold {:.1}s, warmed {:.1}s", first_step(&cold), first_step(&warm));
     assert_eq!(warm.outcome, Outcome::Done, "{}", warm.message);
     assert!(first_step(&warm) < first_step(&cold) / 2.0, "warming should at least halve the first step");
+}
+
+/// Sends one message through the whole session (router, then chat, research or a
+/// task) and reports how long the first words took and where the message went.
+async fn route_live(text: &str) -> (Arc<FakeHost>, f64, f64) {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Arc::new(Workspace::new(dir.path().join("ws")).unwrap());
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    desktop(&host);
+    let settings = live_settings();
+    let key = std::env::var("OPENROUTER_API_KEY").ok();
+    let config = SessionConfig {
+        provider: build_provider(&settings, key.clone()),
+        decider: waddle_core::decide::Jev::for_settings(&settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn waddle_core::decide::Decider>),
+        settings,
+        workspace,
+        skills: None,
+        reminders: None,
+        facts: None,
+        self_source: None,
+        traces: None,
+    };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), Arc::new(AuditLog::open_in_memory().unwrap()), config);
+    let started = Instant::now();
+    session.user_message(text.into());
+    let mut first = None;
+    for _ in 0..600 {
+        let events = host.events();
+        if first.is_none() && events.iter().any(|e| matches!(e, AgentEvent::TextDelta { .. } | AgentEvent::ToolStarted { .. })) {
+            first = Some(started.elapsed().as_secs_f64());
+        }
+        let done = events.iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))
+            || (!events.iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })) && events.iter().any(|e| matches!(e, AgentEvent::TextDone { .. })));
+        if done {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let total = started.elapsed().as_secs_f64();
+    println!("\n== {text}\nfirst output {:.1}s, done {total:.1}s\n{}", first.unwrap_or(f64::NAN), narration(&host));
+    drop(dir);
+    (host, first.unwrap_or(f64::NAN), total)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.02)"]
+async fn routes_chat_research_and_tasks() {
+    assert!(openrouter(), "routing needs Jev on OpenRouter");
+    let (h, first, _) = route_live("thanks, you're the best!").await;
+    assert!(!h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })), "small talk starts no task");
+    assert!(first < 4.0, "chat answered in {first:.1}s");
+    let (h, _, _) = route_live("what's the weather like in London right now?").await;
+    assert!(!h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })));
+    let (h, _, total) = route_live("compare heat pumps and gas boilers for a UK home: running costs, install costs, lifespan").await;
+    assert!(h.events().iter().any(|e| matches!(e, AgentEvent::Offer { .. })), "research offers the full answer");
+    println!("research took {total:.1}s");
+    let (h, _, _) = route_live("what's the title of the window I have open?").await;
+    assert!(h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })), "a question about the screen is a task");
 }

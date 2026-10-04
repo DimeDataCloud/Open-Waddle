@@ -5,6 +5,16 @@
 export type LineKind = "planner" | "quick" | "user" | "tool" | "output" | "notice" | "error" | "reminder";
 
 const MAX_LINES = 5;
+
+/** Models sometimes answer in Markdown; the bubble is plain text, so drop the markup. */
+export function plain(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, "$1");
+}
 const LINGER_MS = 9000;
 const REMINDER_LINGER_MS = 60_000;
 
@@ -70,7 +80,26 @@ export class Bubble {
   }
 
   say(kind: LineKind, text: string): void {
-    if (text.trim()) this.add(kind, text);
+    if (text.trim()) this.add(kind, plain(text));
+  }
+
+  /** A button under the latest reply (e.g. "Full answer"). */
+  offer(label: string, onClick: () => Promise<unknown>): void {
+    const row = this.add("notice", "");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rate offer";
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      b.disabled = true;
+      onClick().then(
+        () => (row.textContent = "Saved and opened."),
+        (e) => (row.textContent = String(e)),
+      );
+    });
+    row.appendChild(b);
+    // Long enough to read the answer and decide.
+    this.show(REMINDER_LINGER_MS);
   }
 
   /** Appends streamed text to the open line for this lane, starting one if needed. */
@@ -79,9 +108,11 @@ export class Bubble {
     if (!el || !el.isConnected) {
       el = this.add(lane, "");
       el.classList.add("typing");
+      el.dataset.raw = "";
       this.streaming.set(lane, el);
     }
-    el.textContent += text;
+    el.dataset.raw += text;
+    el.textContent = plain(el.dataset.raw ?? "");
     this.show();
   }
 

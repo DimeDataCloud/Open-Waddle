@@ -21,15 +21,17 @@ pub struct MockProvider {
     pub requests: Mutex<Vec<Vec<Message>>>,
     /// Every warm-up's messages; warm-ups don't use up scripted replies.
     pub warmups: Mutex<Vec<Vec<Message>>>,
+    /// Whether each request asked for a web search (and how many results).
+    pub webs: Mutex<Vec<Option<u8>>>,
 }
 
 impl MockProvider {
     pub fn scripted(responses: Vec<ChatResponse>) -> Self {
-        Self { mode: Mode::Scripted(Mutex::new(responses.into())), delay: Duration::ZERO, requests: Mutex::default(), warmups: Mutex::default() }
+        Self { mode: Mode::Scripted(Mutex::new(responses.into())), delay: Duration::ZERO, requests: Mutex::default(), warmups: Mutex::default(), webs: Mutex::default() }
     }
 
     pub fn demo() -> Self {
-        Self { mode: Mode::Demo, delay: Duration::from_millis(35), requests: Mutex::default(), warmups: Mutex::default() }
+        Self { mode: Mode::Demo, delay: Duration::from_millis(35), requests: Mutex::default(), warmups: Mutex::default(), webs: Mutex::default() }
     }
 
     /// Adds a pause before each response, to exercise cancellation.
@@ -77,6 +79,7 @@ fn demo_step(req: &ChatRequest<'_>) -> ChatResponse {
 impl Provider for MockProvider {
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
         self.requests.lock().unwrap().push(req.messages.to_vec());
+        self.webs.lock().unwrap().push(req.web);
         let resp = match &self.mode {
             Mode::Scripted(q) => q
                 .lock()

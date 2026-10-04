@@ -27,6 +27,10 @@ pub struct Capabilities {
     pub self_improve: bool,
     /// Reminders can be set (the app pops them up when due).
     pub reminders: bool,
+    /// Long-term facts about the user (`remember` / `forget`).
+    pub memory: bool,
+    /// Text the user selected came with the message and can be replaced.
+    pub selection: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,6 +103,8 @@ pub enum GuiAction {
     PointAt { x: f64, y: f64, label: String },
     ReadClipboard,
     WriteClipboard { text: String },
+    /// Paste over the text the user selected before asking (focus goes back to its window first).
+    ReplaceSelection { text: String },
 }
 
 impl GuiAction {
@@ -261,6 +267,23 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             &["text"],
         ));
     }
+    if caps.selection {
+        v.push(spec(
+            "replace_selection",
+            "Replace the text the user selected with new text (e.g. a rewrite or translation). Use only when they ask you to change it in place.",
+            json!({ "text": { "type": "string" } }),
+            &["text"],
+        ));
+    }
+    if caps.memory {
+        v.push(spec(
+            "remember",
+            "Save a short, lasting fact about the user for future conversations, e.g. \"Their sister is Ana\". Under 200 characters.",
+            json!({ "fact": { "type": "string" } }),
+            &["fact"],
+        ));
+        v.push(spec("forget", "Delete a saved fact by its id.", json!({ "id": { "type": "string" } }), &["id"]));
+    }
     if caps.reminders {
         v.push(spec(
             "reminder",
@@ -344,7 +367,13 @@ pub fn is_gui_tool(name: &str) -> bool {
             | "point_at"
             | "read_clipboard"
             | "copy_to_clipboard"
+            | "replace_selection"
     )
+}
+
+/// Tools that only read and never use the screen: several in one turn run at once.
+pub fn is_parallel_read(name: &str) -> bool {
+    matches!(name, "read_file" | "list_dir")
 }
 
 fn num(args: &Value, k: &str) -> Option<f64> {
@@ -408,6 +437,7 @@ pub fn parse_gui_action(call: &ToolCall, coords: &Coords) -> Result<GuiAction, S
         }
         "read_clipboard" => GuiAction::ReadClipboard,
         "copy_to_clipboard" => GuiAction::WriteClipboard { text: text(a, "text").ok_or("`text` is required")? },
+        "replace_selection" => GuiAction::ReplaceSelection { text: text(a, "text").ok_or("`text` is required")? },
         other => return Err(format!("`{other}` is not a GUI tool")),
     })
 }
@@ -486,6 +516,9 @@ pub fn summarize(call: &ToolCall) -> String {
         "point_at" => if s("label").is_empty() { "It's here".into() } else { short(s("label")) },
         "read_clipboard" => "Read what you copied".into(),
         "copy_to_clipboard" => format!("Copy \"{}\" to the clipboard", short(s("text"))),
+        "replace_selection" => format!("Replace your selection with \"{}\"", short(s("text"))),
+        "remember" => format!("Remember: {}", short(s("fact"))),
+        "forget" => "Forget a fact".into(),
         "reminder" => match s("action").as_str() {
             "list" => "Check your reminders".into(),
             "cancel" => "Cancel a reminder".into(),
@@ -574,8 +607,10 @@ mod tests {
         let names = |caps| specs(caps, &c).into_iter().map(|s| s.name).collect::<Vec<_>>();
         let headless = names(Capabilities::default());
         assert!(headless.contains(&"run_command".to_string()) && !headless.contains(&"click".to_string()));
-        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true });
+        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true });
         assert!(full.contains(&"reminder".to_string()) && full.contains(&"point_at".to_string()));
+        assert!(full.contains(&"remember".to_string()) && full.contains(&"replace_selection".to_string()));
+        assert!(!names(Capabilities { gui: true, ..Default::default() }).contains(&"replace_selection".to_string()), "only with a selection");
         assert!(full.contains(&"delegate".to_string()) && full.contains(&"save_skill".to_string()));
         assert!(full.contains(&"find_elements".to_string()) && full.contains(&"click".to_string()));
         let no_a11y = names(Capabilities { gui: true, ..Default::default() });

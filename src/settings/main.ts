@@ -14,6 +14,7 @@ interface Settings {
   workspace_dir: string | null;
   wander: boolean;
   record_traces: boolean;
+  no_training: boolean;
   self_source_dir: string | null;
   max_delegation_depth: number;
   character: { id: string; color: string };
@@ -101,6 +102,7 @@ function fill(view: SettingsView): void {
   $("color").value = s.character.color;
   $("wander").checked = s.wander;
   $("record_traces").checked = s.record_traces;
+  $("no_training").checked = s.no_training;
   $("mode").textContent = view.demo
     ? "Demo mode: add an API key (or pick a local model) to make Waddle useful."
     : `Using ${s.model}. Workspace: ${view.workspace}`;
@@ -127,6 +129,7 @@ function collect(): Settings {
     workspace_dir: $("workspace_dir").value.trim() || null,
     wander: $("wander").checked,
     record_traces: $("record_traces").checked,
+    no_training: $("no_training").checked,
     self_source_dir: $("self_source_dir").value.trim() || null,
     max_delegation_depth: num("max_delegation_depth", 2),
     character: { ...current.character, color: $("color").value },
@@ -172,6 +175,56 @@ async function loadSkills(): Promise<void> {
     }),
   );
 }
+
+async function loadFacts(): Promise<void> {
+  const facts = await invoke<{ id: string; text: string }[]>("facts_list");
+  const list = $("facts");
+  if (!facts.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "Nothing yet.";
+    list.replaceChildren(li);
+    return;
+  }
+  list.replaceChildren(
+    ...facts.map((f) => {
+      const li = document.createElement("li");
+      const text = document.createElement("span");
+      text.textContent = f.text;
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "link";
+      forget.textContent = "Forget";
+      forget.onclick = async () => {
+        await invoke("fact_forget", { id: f.id });
+        void loadFacts();
+      };
+      li.append(text, forget);
+      return li;
+    }),
+  );
+}
+
+async function addFact(): Promise<void> {
+  const input = $("fact-text");
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await invoke("fact_add", { text });
+    input.value = "";
+  } catch (err) {
+    $("status").textContent = String(err);
+  }
+  void loadFacts();
+}
+
+$("fact-add").addEventListener("click", () => void addFact());
+$("fact-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void addFact();
+  }
+});
 
 async function loadAudit(): Promise<void> {
   const rows = await invoke<AuditRecord[]>("audit_recent", { limit: 50 });
@@ -296,7 +349,10 @@ void invoke<SettingsView>("get_settings").then(fill);
 void loadTraces();
 void loadAudit();
 void loadSkills();
+void loadFacts();
 setInterval(() => {
   void loadAudit();
   void loadSkills();
+  // Don't redraw the list under the user while they type a new fact.
+  if (document.activeElement !== $("fact-text")) void loadFacts();
 }, 5000);

@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -31,6 +32,8 @@ pub struct FakeHost {
     pub os: Mutex<String>,
     /// Seconds since creation for each step, tool and finish, for latency reports.
     pub timeline: Mutex<Vec<(f64, String)>>,
+    /// Files Waddle opened for the user.
+    pub opened: Mutex<Vec<PathBuf>>,
     started: Instant,
 }
 
@@ -48,6 +51,7 @@ impl FakeHost {
             screenshot: Mutex::default(),
             os: Mutex::new("TestOS".into()),
             timeline: Mutex::default(),
+            opened: Mutex::default(),
             started: Instant::now(),
         })
     }
@@ -104,5 +108,8 @@ impl Host for FakeHost {
     async fn apply_settings(&self, settings: Settings) -> anyhow::Result<()> {
         self.applied.lock().unwrap().push(settings);
         Ok(())
+    }
+    fn open_path(&self, path: &Path) {
+        self.opened.lock().unwrap().push(path.to_path_buf());
     }
 }

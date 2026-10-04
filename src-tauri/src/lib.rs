@@ -23,6 +23,7 @@ use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
 use waddle_core::decide::{Decider, Jev};
+use waddle_core::facts::FactStore;
 use waddle_core::reminders::ReminderStore;
 use waddle_core::skills::SkillStore;
 use waddle_core::traces::TraceStore;
@@ -43,6 +44,7 @@ pub struct AppState {
     pub recording: Mutex<Option<voice::Recording>>,
     pub skills: Arc<SkillStore>,
     pub reminders: Arc<ReminderStore>,
+    pub facts: Arc<FactStore>,
     pub decider: RwLock<Option<Arc<dyn Decider>>>,
     pub traces: Arc<TraceStore>,
     settings_path: PathBuf,
@@ -112,6 +114,7 @@ impl AppState {
             workspace: workspace.clone(),
             skills: Some(self.skills.clone()),
             reminders: Some(self.reminders.clone()),
+            facts: Some(self.facts.clone()),
             decider: decider.clone(),
             self_source,
             traces: Some(self.traces.clone()),
@@ -244,6 +247,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
     let reminders = Arc::new(ReminderStore::new(data_dir.join("reminders.json")));
+    let facts = Arc::new(FactStore::new(data_dir.join("facts.json")));
     let self_source = self_source_for(&settings).unwrap_or_else(|e| {
         log::warn!("{e}");
         None
@@ -259,6 +263,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             workspace: workspace.clone(),
             skills: Some(skills.clone()),
             reminders: Some(reminders.clone()),
+            facts: Some(facts.clone()),
             decider: decider.clone(),
             self_source,
             traces: Some(traces.clone()),
@@ -275,6 +280,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         recording: Mutex::default(),
         skills,
         reminders: reminders.clone(),
+        facts,
         decider: RwLock::new(decider),
         traces,
         settings_path,
@@ -291,6 +297,9 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
         if let Err(e) = handle.global_shortcut().register(shortcuts::talk_key()) {
             log::warn!("could not register Ctrl+Alt+Space: {e}");
+        }
+        if let Err(e) = handle.global_shortcut().register(shortcuts::selection_key()) {
+            log::warn!("could not register Ctrl+Alt+A: {e}");
         }
     }
     Ok(())
@@ -338,6 +347,11 @@ pub fn run() {
             commands::clear_memory,
             commands::skills_list,
             commands::skill_forget,
+            commands::facts_list,
+            commands::fact_add,
+            commands::fact_forget,
+            commands::open_answer,
+            commands::drop_selection,
             commands::rate_task,
             commands::traces_summary,
             commands::export_traces,

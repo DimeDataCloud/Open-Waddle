@@ -61,7 +61,7 @@ pub async fn probe_model(provider: &dyn Provider, model: &str) -> anyhow::Result
         Message::system("You are being tested. Do exactly what the user asks."),
         Message::user("Call the ping tool with the word \"ready\"."),
     ];
-    let req = ChatRequest { model, messages: &messages, tools: &tools, temperature: 0.0, max_tokens: 64 };
+    let req = ChatRequest { model, messages: &messages, tools: &tools, temperature: 0.0, max_tokens: 64, web: None };
     let started = Instant::now();
     let mut first_token = None;
     let mut on_event = |_: StreamEvent| {

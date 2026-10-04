@@ -167,6 +167,8 @@ pub struct Settings {
     pub ambient_brain: bool,
     /// Save each task (conversation and screenshots) on this computer as training data.
     pub record_traces: bool,
+    /// On OpenRouter, use only providers that don't store or train on what Waddle sends.
+    pub no_training: bool,
     pub tier2_mode: Tier2Mode,
     pub tier2_countdown_ms: u64,
     pub max_steps: u32,
@@ -200,6 +202,7 @@ impl Default for Settings {
             quick_chat: true,
             ambient_brain: true,
             record_traces: false,
+            no_training: true,
             tier2_mode: Tier2Mode::Countdown,
             tier2_countdown_ms: 2000,
             max_steps: 20,
@@ -232,6 +235,10 @@ impl Settings {
     /// The model runs on this machine (Ollama, or an OpenAI-compatible server on localhost).
     pub fn is_local(&self) -> bool {
         self.provider == ProviderKind::Ollama || ["://localhost", "://127.0.0.1", "://[::1]"].iter().any(|h| self.base_url.contains(h))
+    }
+
+    pub fn is_openrouter(&self) -> bool {
+        self.provider == ProviderKind::OpenaiCompat && self.base_url.contains("openrouter.ai")
     }
 
     /// How many screenshots a task keeps in its conversation before older ones are dropped.

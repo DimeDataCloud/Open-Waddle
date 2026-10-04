@@ -51,6 +51,8 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "scroll" => assess(Tier::NonDestructive, "scrolls"),
         "read_clipboard" => assess(Tier::NonDestructive, "reads the clipboard"),
         "reminder" => assess(Tier::NonDestructive, "manages reminders"),
+        "remember" | "forget" => assess(Tier::NonDestructive, "updates the facts Waddle keeps about you (listed in Settings)"),
+        "replace_selection" => assess(Tier::ScopedMutation, "replaces the text you selected"),
         "copy_to_clipboard" => assess(Tier::ScopedMutation, "replaces what's on the clipboard"),
         "drag" => assess(Tier::ScopedMutation, "drags in another application"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
@@ -184,6 +186,9 @@ mod tests {
         assert_eq!(tier_of("reminder", json!({"action":"add"}), false), Tier::NonDestructive);
         assert_eq!(tier_of("drag", json!({}), false), Tier::ScopedMutation);
         assert_eq!(tier_of("copy_to_clipboard", json!({"text":"x"}), false), Tier::ScopedMutation);
+        assert_eq!(tier_of("remember", json!({"fact":"x"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("forget", json!({"id":"x"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("replace_selection", json!({"text":"x"}), false), Tier::ScopedMutation);
     }
 
     #[test]

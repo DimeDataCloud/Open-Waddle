@@ -142,6 +142,17 @@ pub fn restore_foreground() {
     }
 }
 
+pub fn focus(id: u64) {
+    unsafe {
+        let _ = SetForegroundWindow(HWND(id as isize as *mut c_void));
+    }
+}
+
+pub fn open_path(path: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(shell_open(&path.to_string_lossy()), "Windows couldn't open {}", path.display());
+    Ok(())
+}
+
 fn shell_open(target: &str) -> bool {
     let file = HSTRING::from(target);
     let verb = HSTRING::from("open");

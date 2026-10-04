@@ -141,9 +141,42 @@ body {
 
 .chat {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
   width: 300px;
+}
+
+/* Text selected with Ctrl+Alt+A, riding along with the next message */
+.chat .chip {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  background: #f1e6c8;
+  border-radius: 6px;
+  padding: 2px 2px 2px 6px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.chat .chip.hidden {
+  display: none;
+}
+
+.chat .chip span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat .chip button {
+  width: 22px;
+  background: transparent;
 }
 
 .chat input {

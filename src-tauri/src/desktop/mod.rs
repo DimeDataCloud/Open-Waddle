@@ -49,6 +49,34 @@ pub fn restore_foreground() {
     windows::restore_foreground();
 }
 
+/// Brings a window (by id from `list_windows`) to the front; elsewhere, the last app the user was in.
+pub fn focus_window(id: Option<u64>) {
+    #[cfg(windows)]
+    match id {
+        Some(id) => windows::focus(id),
+        None => windows::restore_foreground(),
+    }
+    // X11 has no portable focus call without a library; use xdotool when it's installed.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Some(id) = id {
+        let _ = std::process::Command::new("xdotool").args(["windowactivate", "--sync", &id.to_string()]).status();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = id;
+}
+
+/// Opens a file or folder in its default app.
+pub fn open_path(path: &std::path::Path) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    return windows::open_path(path);
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(path).spawn();
+    #[cfg(not(windows))]
+    r.map(|_| ()).map_err(|e| anyhow::anyhow!("couldn't open {}: {e}", path.display()))
+}
+
 /// Launches an application by name without going through a shell.
 pub fn open_app(name: &str) -> anyhow::Result<String> {
     #[cfg(windows)]

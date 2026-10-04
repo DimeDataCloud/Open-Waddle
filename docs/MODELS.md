@@ -101,6 +101,8 @@ The suite now has 21 tasks: the 15 above plus 6 assistant tasks (point at someth
 | qwen/qwen3.8-27b | 18/42* | — | 15 s | $0.0024 | First clicks look right; then re-checks the static screen and re-clicks |
 | google/gemini-3.1-flash-lite | 6/42* | — | 8 s | $0.0038 | First clicks right (Night light, Delete, Compose), then re-clicks to the step limit; pricier than Qwen |
 
+**Quiet mode (0.1.9 default voice):** the same 21 tasks × 2 with openai/gpt-6-luna, now that the model acts without narrating and speaks only to finish, answer or ask: **25/42 strict, 42/42 hit, 7.1 s and $0.00064 per task** (3.6 steps on average). Faster and cheaper than the narrating run above, with fewer wasted re-checks.
+
 \* First run, before the hit score and the concurrency cap. Rate limits and re-checks count as failures, so these numbers are a floor.
 † Includes the wasted re-check steps on the static screen; on real pages, where the screen changes, Luna needs fewer steps (below).
 
@@ -140,7 +142,11 @@ These are "System One" models: one quick pass that returns a yes/no probability,
   - nap after a minute with no mouse movement
 
   Each decision took 0.26–0.6 s, and a busy day costs a few cents at most.
-- **Chat lane:** messages Jev rates at least 0.8 "just conversation" get an instant answer from the fast model. On 22 sample messages it scored 22/22: chat came out at 0.98–1.00 and tasks at 0.17 or lower. Median latency was 0.32 s.
+- **Router (0.1.9):** one Jev call per message asks two questions at once: *chat, research or task?* and *does it need current facts from the web?*
+  - Chat at 0.8 or more gets an instant answer from the fast model; research at 0.7 or more gets a cited web answer; anything else is a task. A chat that scores 0.6 or more on the web question gets a web search (OpenRouter's `web` plugin, about $0.007).
+  - On the 45 labelled messages in `crates/waddle-core/tests/fixtures/router.json` it routed 44/45 correctly and got the web question right on 42/45, in one call (median 0.4 s, slowest 1.0 s, about $0.00002).
+  - Tasks start before the answer comes back: the planner looks at the screen while Jev decides and is dropped silently if the message turns out to be chat or research. The first model call waits for the decision, so nothing on screen happens until it's a task.
+  - Measured costs: a chat reply about $0.00002, a web chat about $0.007, a research answer about $0.008 (5 sources).
 
 **Jev Router (`typesafe/jev-router`)** is a different product: it picks a chat model for each request. It isn't tested here, because its per-request model choice makes cost unpredictable.
 

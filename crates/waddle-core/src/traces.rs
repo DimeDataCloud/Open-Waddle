@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-use crate::agent::Outcome;
+use crate::agent::{Outcome, Timing};
 use crate::llm::{Message, Role, ToolSpec, Usage};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +25,9 @@ pub struct TraceMeta {
     pub cost: Option<f64>,
     /// The user's verdict: Some(true) = 👍, Some(false) = 👎.
     pub rating: Option<bool>,
+    /// Where the time went: the opening look, then each step's model call and tools.
+    #[serde(default)]
+    pub timing: Timing,
 }
 
 pub struct TraceStore {
@@ -176,6 +179,7 @@ impl TraceMeta {
             completion_tokens: usage.completion_tokens,
             cost: usage.cost,
             rating: None,
+            timing: Timing::default(),
         }
     }
 }

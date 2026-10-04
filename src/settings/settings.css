@@ -171,6 +171,16 @@ h4 {
   font-size: 13px;
 }
 
+.add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.add-row input {
+  flex: 1;
+}
+
 .skills {
   list-style: none;
   padding: 0;
