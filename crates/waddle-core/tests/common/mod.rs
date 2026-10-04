@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use waddle_core::agent::ApprovalRequest;
 use waddle_core::llm::ImageData;
-use waddle_core::tools::{Capabilities, ElementInfo, GuiAction, GuiResult};
+use waddle_core::tools::{Capabilities, ElementInfo, GuiAction, GuiResult, WindowInfo};
 use waddle_core::{AgentEvent, Decision, EnvInfo, Host, Settings};
 
 pub type Policy = Box<dyn Fn(&ApprovalRequest) -> Option<Decision> + Send + Sync>;
@@ -23,7 +23,8 @@ pub struct FakeHost {
     pub policy: Policy,
     pub busy: Mutex<Vec<bool>>,
     pub applied: Mutex<Vec<Settings>>,
-    /// What find_elements and look_at_screen return (defaults: "ok" and a stub image).
+    /// What list_windows, find_elements and look_at_screen return (defaults: "ok" and a stub image).
+    pub windows: Mutex<Vec<WindowInfo>>,
     pub elements: Mutex<Vec<ElementInfo>>,
     pub screenshot: Mutex<Option<ImageData>>,
     /// Seconds since creation for each step, tool and finish, for latency reports.
@@ -40,6 +41,7 @@ impl FakeHost {
             policy,
             busy: Mutex::default(),
             applied: Mutex::default(),
+            windows: Mutex::default(),
             elements: Mutex::default(),
             screenshot: Mutex::default(),
             timeline: Mutex::default(),
@@ -66,7 +68,9 @@ impl Host for FakeHost {
         self.events.lock().unwrap().push(event);
     }
     fn env(&self) -> EnvInfo {
-        EnvInfo { os: "TestOS".into(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, ..Default::default() } }
+        // Like Windows: the accessibility fast path exists when there are elements to list.
+        let accessibility = !self.elements.lock().unwrap().is_empty();
+        EnvInfo { os: "TestOS".into(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: true, accessibility, ..Default::default() } }
     }
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {
         self.approvals.lock().unwrap().push(req.clone());
@@ -84,6 +88,7 @@ impl Host for FakeHost {
                 width: 1440,
                 height: 960,
             },
+            GuiAction::ListWindows if !self.windows.lock().unwrap().is_empty() => GuiResult::Windows(self.windows.lock().unwrap().clone()),
             GuiAction::FindElements { .. } if !self.elements.lock().unwrap().is_empty() => {
                 GuiResult::Elements { window: "Test App".into(), elements: self.elements.lock().unwrap().clone() }
             }

@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -160,6 +160,7 @@ Strategy:
 {perception}
 - Use run_command, read_file and write_file for file and terminal work instead of clicking through apps.
 - After acting in an app, check the result before saying it worked. Never invent file contents or command output.
+- Do only what the task needs. Don't press keys, close windows or click around unless the task calls for it.
 
 Safety:
 - Some actions need the user's approval. If one is denied, do not retry it; ask or choose another approach.
@@ -203,13 +204,15 @@ pub struct Agent<'a> {
     /// Steps left for the whole tree of tasks, so delegation can't run away.
     steps_left: Arc<AtomicU32>,
     sub_tasks: AtomicU32,
+    /// Whether this task has looked at the desktop yet; blind input is refused.
+    looked: AtomicBool,
 }
 
 impl<'a> Agent<'a> {
     pub fn new(deps: &'a AgentDeps, task_id: String, cancel: CancellationToken, status: Arc<Mutex<TaskStatus>>, env: &EnvInfo) -> Self {
         let coords = Coords { mode: deps.settings.coord_mode(), screen_w: env.screen_w, screen_h: env.screen_h };
         let budget = deps.settings.max_steps * (1 + deps.settings.max_delegation_depth);
-        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0) }
+        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false) }
     }
 
     fn capabilities(&self, env: &EnvInfo) -> Capabilities {
@@ -448,6 +451,13 @@ impl<'a> Agent<'a> {
             None
         };
         if let Some(action) = &gui_action {
+            // Small models sometimes fire off a shortcut after finishing. Without having
+            // looked, that input lands in whatever app the user is working in.
+            if action.is_blind_input() && !self.looked.load(Ordering::SeqCst) {
+                let text = "Error: you haven't looked at the desktop during this task, so this input would go to whatever app the user is using. \
+Use list_windows, find_elements or look_at_screen first. If the task is already done, reply without tool calls.";
+                return (ToolOutcome::trusted(text), false);
+            }
             self.deps.host.approach(action, &self.cancel).await;
         }
 
@@ -482,12 +492,14 @@ impl<'a> Agent<'a> {
             tier: assessment.tier.number(),
         });
         let result = match gui_action {
-            Some(action) => self
-                .deps
-                .host
-                .gui(action, &self.cancel)
-                .await
-                .map(|r| tools::format_gui_result(r, &self.coords)),
+            Some(action) => {
+                let perceives = action.perceives();
+                let r = self.deps.host.gui(action, &self.cancel).await;
+                if perceives && r.is_ok() {
+                    self.looked.store(true, Ordering::SeqCst);
+                }
+                r.map(|r| tools::format_gui_result(r, &self.coords))
+            }
             None => self.run_core_tool(call).await,
         };
         let (ok, outcome) = match result {
@@ -538,6 +550,7 @@ impl<'a> Agent<'a> {
             depth: self.depth + 1,
             steps_left: self.steps_left.clone(),
             sub_tasks: AtomicU32::new(0),
+            looked: AtomicBool::new(false),
         };
         let full_goal = if context.trim().is_empty() { goal.to_string() } else { format!("{goal}\n\nContext from the parent task:\n{context}") };
         self.audit(AuditEntry { kind: "delegate".into(), detail: Some(full_goal.clone()), ..Default::default() });

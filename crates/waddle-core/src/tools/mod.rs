@@ -38,7 +38,13 @@ impl Coords {
     /// Model coordinates → logical screen pixels.
     pub fn to_screen(&self, x: f64, y: f64) -> (f64, f64) {
         match self.mode {
-            CoordMode::Norm1000 => (x / 1000.0 * self.screen_w, y / 1000.0 * self.screen_h),
+            CoordMode::Norm1000 => {
+                // Small models sometimes answer in 0-1 fractions instead of 0-1000.
+                // Nothing real sits within a pixel of the top-left corner, so read those as fractions.
+                let fractions = (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) && (x.fract() != 0.0 || y.fract() != 0.0);
+                let scale = if fractions { 1.0 } else { 1000.0 };
+                (x / scale * self.screen_w, y / scale * self.screen_h)
+            }
             _ => (x, y),
         }
     }
@@ -87,6 +93,16 @@ pub enum GuiAction {
 }
 
 impl GuiAction {
+    /// Input that goes wherever focus happens to be (as opposed to an element Waddle found).
+    pub fn is_blind_input(&self) -> bool {
+        matches!(self, GuiAction::Click { .. } | GuiAction::TypeText { .. } | GuiAction::PressKeys { .. })
+    }
+
+    /// Actions that show Waddle what's on the desktop (or put a known app in front).
+    pub fn perceives(&self) -> bool {
+        matches!(self, GuiAction::ListWindows | GuiAction::LookAtScreen | GuiAction::FindElements { .. } | GuiAction::OpenApp { .. })
+    }
+
     /// Where Waddle should walk before acting, if anywhere.
     pub fn target(&self) -> Option<(f64, f64)> {
         match self {
@@ -390,6 +406,8 @@ mod tests {
         let c = coords(CoordMode::Norm1000);
         assert_eq!(c.to_screen(500.0, 500.0), (720.0, 480.0));
         assert_eq!(c.from_screen(720.0, 480.0), (500, 500));
+        assert_eq!(c.to_screen(0.5, 0.25), (720.0, 240.0), "0-1 fractions are read as fractions");
+        assert_eq!(c.to_screen(1.0, 0.0), (1.44, 0.0), "whole numbers stay on the 0-1000 grid");
         let p = coords(CoordMode::Pixels);
         assert_eq!(p.to_screen(10.0, 20.0), (10.0, 20.0));
     }

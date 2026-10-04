@@ -19,7 +19,7 @@ use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::{build_provider, ImageData};
 use waddle_core::tools::fs::Workspace;
-use waddle_core::tools::{ElementInfo, GuiAction};
+use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::{AgentEvent, Decision, Host, Outcome, Settings};
 
 fn live_settings() -> Settings {
@@ -81,6 +81,12 @@ fn narration(host: &FakeHost) -> String {
         .collect()
 }
 
+/// One focused app window filling the middle of the screen, like `screen_png` draws.
+fn desktop(h: &FakeHost) {
+    *h.windows.lock().unwrap() = vec![WindowInfo { title: "Report - Editor".into(), app: "editor".into(), x: 120.0, y: 120.0, w: 1200.0, h: 740.0, focused: true }];
+    *h.screenshot.lock().unwrap() = Some(screen_png());
+}
+
 /// A 1440x960 "screen" with a blue button on the left and a red one at the bottom right.
 fn screen_png() -> ImageData {
     let mut img = image::RgbImage::from_pixel(1440, 960, image::Rgb([236, 236, 236]));
@@ -113,6 +119,7 @@ async fn writes_a_file() {
 #[ignore = "needs a local Ollama server with the model pulled"]
 async fn clicks_an_accessibility_element() {
     let r = run("In the app that's open, press the Save button", |h| {
+        desktop(h);
         let el = |id, role: &str, name: &str, x| ElementInfo { id, role: role.into(), name: name.into(), x, y: 600.0, w: 90.0, h: 32.0 };
         *h.elements.lock().unwrap() = vec![el(1, "button", "Open", 300.0), el(2, "edit", "File name", 420.0), el(3, "button", "Save", 900.0), el(4, "button", "Cancel", 1010.0)];
     })
@@ -124,7 +131,7 @@ async fn clicks_an_accessibility_element() {
 #[tokio::test]
 #[ignore = "needs a local Ollama server with the model pulled"]
 async fn clicks_what_it_sees_in_a_screenshot() {
-    let r = run("Look at the screen and click the red button", |h| *h.screenshot.lock().unwrap() = Some(screen_png())).await;
+    let r = run("Look at the screen and click the red button", desktop).await;
     let calls = r.host.gui_calls.lock().unwrap().clone();
     let click = calls.iter().find_map(|c| match c {
         GuiAction::Click { x, y, .. } => Some((*x, *y)),

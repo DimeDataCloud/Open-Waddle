@@ -156,6 +156,27 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
     assert!(second.iter().any(|m| m.role == Role::User && !m.images.is_empty()));
 }
 
+#[tokio::test]
+async fn blind_input_is_refused_until_waddle_has_looked() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Saving.", vec![call("press_keys", json!({"keys": "ctrl+s"}))]),
+        reply("Let me look first.", vec![call("list_windows", json!({}))]),
+        reply("Saving.", vec![call("press_keys", json!({"keys": "ctrl+s"}))]),
+        reply("Saved.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let gui = host.gui_calls.lock().unwrap().clone();
+    assert_eq!(gui, vec![GuiAction::ListWindows, GuiAction::PressKeys { keys: "ctrl+s".into() }]);
+    let second = provider.requests.lock().unwrap()[1].clone();
+    let refusal = second.iter().rev().find(|m| m.role == Role::Tool).unwrap();
+    assert!(refusal.text.contains("haven't looked"), "{}", refusal.text);
+    let key_approvals = host.approvals.lock().unwrap().iter().filter(|a| a.tool == "press_keys").count();
+    assert_eq!(key_approvals, 1, "the refused attempt never reaches the approval gate");
+}
+
 #[test]
 fn only_the_latest_screenshot_is_kept() {
     let img = || ImageData { mime: "image/png".into(), base64: "X".into() };
