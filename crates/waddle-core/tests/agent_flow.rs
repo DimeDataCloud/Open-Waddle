@@ -573,3 +573,35 @@ fn spots_tool_calls_written_as_text() {
     assert!(!writes_tool_call("Double-click {the file} to open it.", &tools), "click inside another word doesn't count");
     assert!(promises_action("I'll show you where it is."));
 }
+
+/// A scripted provider whose screen check answers `p`.
+struct ScreenCheck(Arc<MockProvider>, Option<f64>);
+
+#[async_trait]
+impl Provider for ScreenCheck {
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        self.0.chat(req, on_event).await
+    }
+    async fn needs_screen(&self, _goal: &str) -> Option<f64> {
+        self.1
+    }
+}
+
+#[tokio::test]
+async fn the_opening_look_is_skipped_only_when_the_screen_check_is_confident() {
+    for (p, looks) in [(Some(0.1), false), (Some(0.5), true), (None, true)] {
+        let f = fixture();
+        let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+        let mock = Arc::new(MockProvider::scripted(vec![reply("Done.", vec![])]));
+        let deps = AgentDeps {
+            settings: Settings { look_first: true, ..settings() },
+            ..deps_with(&f, host.clone(), mock.clone(), None, None)
+        };
+        let deps = AgentDeps { provider: Arc::new(ScreenCheck(mock.clone(), p)), ..deps };
+        run_with(&deps).await;
+        let looked = host.gui_calls.lock().unwrap().contains(&GuiAction::LookAtScreen);
+        assert_eq!(looked, looks, "screen check {p:?}");
+        let first = mock.requests.lock().unwrap()[0].last().unwrap().text.clone();
+        assert!(first.contains("It's "), "the time is always given: {first}");
+    }
+}

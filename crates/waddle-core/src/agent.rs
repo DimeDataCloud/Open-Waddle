@@ -192,6 +192,10 @@ pub fn prune_images(messages: &mut [Message], keep: usize) {
 /// Told to the model when it announces an action but doesn't take it.
 const NUDGE: &str = "You said you'd do something but didn't call a tool, so nothing happened. Call the tool now. If the task is already finished, just give your final reply.";
 
+/// The opening look is skipped when the screen check puts "needs the screen" below this.
+/// On 32 sample requests, every task that needed the screen scored 0.5 or more.
+const SKIP_LOOK_BELOW: f64 = 0.3;
+
 /// Told to the model when it writes a tool call as plain text.
 const NUDGE_TEXT_CALL: &str = "You wrote the tool call as text, so nothing happened. Make it a real tool call now.";
 
@@ -359,7 +363,7 @@ impl<'a> Agent<'a> {
         let (opening, tools) = self.opening(memory);
         *messages = opening;
         *tools_out = tools.clone();
-        messages.push(match self.observe().await {
+        messages.push(match self.observe(goal).await {
             Some((seen, Some(image))) => Message::user_with_image(format!("{goal}\n\n{seen}"), image),
             Some((seen, None)) => Message::user(format!("{goal}\n\n{seen}")),
             None => Message::user(goal),
@@ -473,10 +477,15 @@ impl<'a> Agent<'a> {
     /// Looks at the desktop before the first step, so the model starts from what the
     /// user is looking at instead of guessing, refusing or opening a fresh app.
     /// Without this, small models often answer "I can't see your screen" or click blind.
-    async fn observe(&self) -> Option<(String, Option<ImageData>)> {
+    async fn observe(&self, goal: &str) -> Option<(String, Option<ImageData>)> {
         let env = self.deps.host.env();
         if self.depth > 0 || !self.deps.settings.look_first || !self.capabilities(&env).gui {
             return None;
+        }
+        // Only skip when the check is confident: a needless look costs a second,
+        // a missing one sends the model in blind (it can still look itself).
+        if self.deps.settings.smart_look && self.deps.provider.needs_screen(goal).await.is_some_and(|p| p < SKIP_LOOK_BELOW) {
+            return Some((format!("It's {}.", crate::reminders::now_line()), None));
         }
         let host = &self.deps.host;
         let call_id = new_id("observe");
