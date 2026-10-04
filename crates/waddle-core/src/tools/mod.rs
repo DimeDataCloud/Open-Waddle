@@ -90,6 +90,9 @@ pub enum GuiAction {
     ClickElement { id: u32 },
     TypeText { text: String, at: Option<(f64, f64)> },
     PressKeys { keys: String },
+    /// Play mode: a frozen copy of the screen becomes a playground to blast.
+    /// `target` names a window to aim at; `autoplay` lets the duck play by itself.
+    Play { autoplay: bool, target: Option<String>, weapon: Option<String> },
 }
 
 impl GuiAction {
@@ -210,6 +213,18 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             &["text"],
         ));
         v.push(spec(
+            "play",
+            "Start play mode: a harmless copy of the screen becomes a playground that gets blasted apart with silly weapons \
+(pea shooter, egg bazooka, laser eyes...). Nothing real is touched and Esc ends it. Use it when the user wants to play, \
+is bored or stressed, or asks you to wreck, smash or blow up their screen or a window. It ends your task: say something fun first.",
+            json!({
+                "autoplay": { "type": "boolean", "description": "true = you play by yourself while the user watches" },
+                "target": { "type": "string", "description": "title of a window to aim at" },
+                "weapon": { "type": "string", "enum": ["pea", "crumbs", "feathers", "egg", "laser", "flame", "quack"] }
+            }),
+            &[],
+        ));
+        v.push(spec(
             "press_keys",
             "Press a key or shortcut, e.g. \"enter\" or \"ctrl+s\".",
             json!({ "keys": { "type": "string" } }),
@@ -272,7 +287,7 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
 pub fn is_gui_tool(name: &str) -> bool {
     matches!(
         name,
-        "list_windows" | "look_at_screen" | "find_elements" | "open_app" | "click" | "click_element" | "type_text" | "press_keys"
+        "list_windows" | "look_at_screen" | "find_elements" | "open_app" | "click" | "click_element" | "type_text" | "press_keys" | "play"
     )
 }
 
@@ -312,6 +327,11 @@ pub fn parse_gui_action(call: &ToolCall, coords: &Coords) -> Result<GuiAction, S
         "click_element" => GuiAction::ClickElement { id: num(a, "id").ok_or("`id` is required")? as u32 },
         "type_text" => GuiAction::TypeText { text: text(a, "text").ok_or("`text` is required")?, at: point(false)? },
         "press_keys" => GuiAction::PressKeys { keys: text(a, "keys").filter(|s| !s.trim().is_empty()).ok_or("`keys` is required")? },
+        "play" => GuiAction::Play {
+            autoplay: a.get("autoplay").and_then(Value::as_bool).unwrap_or(false),
+            target: text(a, "target").filter(|s| !s.trim().is_empty()),
+            weapon: text(a, "weapon").filter(|s| !s.trim().is_empty()),
+        },
         other => return Err(format!("`{other}` is not a GUI tool")),
     })
 }
@@ -383,6 +403,7 @@ pub fn summarize(call: &ToolCall) -> String {
         "click_element" => format!("Click element {}", num(a, "id").unwrap_or(0.0)),
         "type_text" => format!("Type \"{}\"", short(s("text"))),
         "press_keys" => format!("Press {}", s("keys")),
+        "play" => if s("target").is_empty() { "Play time!".into() } else { format!("Play time: aiming at {}", short(s("target"))) },
         "run_command" => format!("Run `{}`", short(s("command"))),
         "read_file" => format!("Read {}", s("path")),
         "write_file" => format!("Write {}", s("path")),
@@ -416,6 +437,16 @@ mod tests {
         assert_eq!(c.to_screen(1.0, 0.0), (1.44, 0.0), "whole numbers stay on the 0-1000 grid");
         let p = coords(CoordMode::Pixels);
         assert_eq!(p.to_screen(10.0, 20.0), (10.0, 20.0));
+    }
+
+    #[test]
+    fn parses_play() {
+        let c = coords(CoordMode::Pixels);
+        let a = parse_gui_action(&call("play", json!({"autoplay": true, "target": "Chrome", "weapon": "egg"})), &c).unwrap();
+        assert_eq!(a, GuiAction::Play { autoplay: true, target: Some("Chrome".into()), weapon: Some("egg".into()) });
+        let a = parse_gui_action(&call("play", json!({"target": " "})), &c).unwrap();
+        assert_eq!(a, GuiAction::Play { autoplay: false, target: None, weapon: None });
+        assert!(!a.is_blind_input(), "play needs no look first: it only touches a copy");
     }
 
     #[test]

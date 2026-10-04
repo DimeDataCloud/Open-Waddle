@@ -179,7 +179,6 @@ impl TauriHost {
         Ok((target.app, elements.len()))
     }
 
-    #[cfg(windows)]
     fn target_window(&self, filter: Option<&str>) -> Option<DesktopWindow> {
         let list = self.windows.read().unwrap().clone();
         match filter {
@@ -330,6 +329,20 @@ impl Host for TauriHost {
                 let n = text.chars().count();
                 Self::blocking(move || actuate::type_text(&text)).await?;
                 Ok(GuiResult::Done(format!("Typed {n} characters.")))
+            }
+            GuiAction::Play { autoplay, target, weapon } => {
+                let rect = target.as_deref().and_then(|t| self.target_window(Some(t))).map(|w| {
+                    let (x, y, ww, hh) = self.to_logical(&w);
+                    let (ox, oy) = g.screen_to_overlay(x, y);
+                    json!({ "x": ox, "y": oy, "w": ww, "h": hh })
+                });
+                let aimed = rect.is_some();
+                self.emit_overlay("play:start", json!({ "autoplay": autoplay, "weapon": weapon, "target": rect }));
+                let mut msg = String::from("Play mode started on a copy of the screen. The user ends it with Esc.");
+                if target.is_some() && !aimed {
+                    msg.push_str(" (No window matched the target, so the whole screen is the playground.)");
+                }
+                Ok(GuiResult::Done(msg))
             }
             GuiAction::PressKeys { keys } => {
                 let combo = actuate::parse_combo(&keys)?;

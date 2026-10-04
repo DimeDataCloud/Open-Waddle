@@ -85,6 +85,28 @@ pub fn set_capture(state: State<'_, AppState>, on: bool) {
     state.overlay.set_capture(on);
 }
 
+/// Play mode: a copy of the screen under the overlay (its work area), at the overlay's logical size.
+#[tauri::command]
+pub async fn play_snapshot(state: State<'_, AppState>) -> CmdResult<String> {
+    let g = state.overlay.geometry();
+    let (x, y) = ((g.origin_x - g.screen_x).max(0) as u32, (g.origin_y - g.screen_y).max(0) as u32);
+    let (out_w, out_h) = ((g.width as f64 / g.scale).round() as u32, (g.height as f64 / g.scale).round() as u32);
+    tauri::async_runtime::spawn_blocking(move || actuate::capture_area_data_url(x, y, g.width, g.height, out_w, out_h))
+        .await
+        .map_err(err)?
+        .map_err(err)
+}
+
+/// Play mode takes the whole overlay: every click and key goes to the game until it ends.
+#[tauri::command]
+pub fn play_input(app: AppHandle, state: State<'_, AppState>, on: bool) {
+    state.overlay.set_capture(on);
+    crate::shortcuts::set_playing(&app, on);
+    if on {
+        crate::focus_overlay(&app);
+    }
+}
+
 #[tauri::command]
 pub fn bootstrap(state: State<'_, AppState>) -> Bootstrap {
     let s = state.settings.read().unwrap();

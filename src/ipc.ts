@@ -63,6 +63,8 @@ export const api = {
   duckArrived: (id: string) => invoke<void>("duck_arrived", { id }),
   setHitRects: (rects: HitRect[]) => invoke<void>("set_hit_rects", { rects }),
   setCapture: (on: boolean) => invoke<void>("set_capture", { on }),
+  playSnapshot: () => invoke<string>("play_snapshot"),
+  playInput: (on: boolean) => invoke<void>("play_input", { on }),
   openSettings: () => invoke<void>("open_settings"),
   voiceStart: () => invoke<"system" | "recording">("voice_start"),
   voiceStop: () => invoke<string | null>("voice_stop"),
@@ -78,6 +80,8 @@ export interface Events {
   settings: { color: string; wander: boolean; demo: boolean };
   "chat:open": { voice: boolean };
   "wander:toggle": null;
+  "play:start": { autoplay: boolean; weapon?: string | null; target?: HitRect | null };
+  "play:stop": null;
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {

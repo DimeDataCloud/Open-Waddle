@@ -167,10 +167,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let talk = MenuItem::with_id(app, "talk", "Talk to Waddle", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let wander = MenuItem::with_id(app, "wander", "Pause / resume wandering", true, None::<&str>)?;
+    let play = MenuItem::with_id(app, "play", "Play: wreck the desktop!", true, None::<&str>)?;
     let halt = MenuItem::with_id(app, "halt", "Halt current task", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Waddle", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&talk, &settings, &wander, &halt, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&talk, &play, &settings, &wander, &halt, &sep, &quit])?;
     let mut tray = TrayIconBuilder::with_id("waddle").tooltip("Project Waddle").menu(&menu);
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
@@ -181,6 +182,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": false }));
         }
         "settings" => open_settings_soon(app),
+        "play" => {
+            let _ = app.emit_to("overlay", "play:start", serde_json::json!({ "autoplay": false }));
+        }
         "wander" => {
             let _ = app.emit_to("overlay", "wander:toggle", ());
         }
@@ -188,6 +192,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             if let Some(state) = app.try_state::<AppState>() {
                 state.session.halt();
             }
+            let _ = app.emit_to("overlay", "play:stop", ());
         }
         "quit" => app.exit(0),
         _ => {}
@@ -290,6 +295,8 @@ pub fn run() {
             commands::duck_arrived,
             commands::set_hit_rects,
             commands::set_capture,
+            commands::play_snapshot,
+            commands::play_input,
             commands::bootstrap,
             commands::get_settings,
             commands::save_settings,
