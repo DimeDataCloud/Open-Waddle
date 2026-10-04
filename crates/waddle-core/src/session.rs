@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use crate::agent::{self, Agent, AgentDeps, AgentEvent, Host, Lane, Outcome, RunResult, TaskStatus};
 use crate::audit::{AuditEntry, AuditLog};
 use crate::config::Settings;
+use crate::decide::Decider;
 use crate::reminders::ReminderStore;
 use crate::skills::SkillStore;
 use crate::traces::{TraceMeta, TraceStore};
@@ -18,6 +19,11 @@ use crate::llm::{ChatRequest, Message, Provider, StreamEvent};
 use crate::tools::fs::Workspace;
 
 const MEMORY_MESSAGES: usize = 20;
+/// Small talk goes straight to the fast model when the chat check is at least this sure.
+/// On 22 sample messages, chat scored 0.98 or more and tasks 0.17 or less.
+const CHAT_ABOVE: f64 = 0.8;
+/// The chat lane's reply when the message turns out to need the computer after all.
+const HAND_OFF: &str = "[task]";
 
 struct Active {
     cancel: CancellationToken,
@@ -33,6 +39,7 @@ pub struct SessionConfig {
     pub workspace: Arc<Workspace>,
     pub skills: Option<Arc<SkillStore>>,
     pub reminders: Option<Arc<ReminderStore>>,
+    pub decider: Option<Arc<dyn Decider>>,
     pub self_source: Option<Arc<Workspace>>,
     /// Where tasks are saved when `settings.record_traces` is on.
     pub traces: Option<Arc<TraceStore>>,
@@ -46,6 +53,8 @@ pub struct Session {
     config: RwLock<SessionConfig>,
     memory: Mutex<Vec<Message>>,
     active: Mutex<Option<Active>>,
+    /// Some while the chat check runs; messages arriving meanwhile wait here.
+    deciding: Mutex<Option<Vec<String>>>,
 }
 
 /// True when the whole utterance is a request to stop ("stop", "wait!", "please cancel", "stop stop").
@@ -80,6 +89,7 @@ impl Session {
             config: RwLock::new(config),
             memory: Mutex::default(),
             active: Mutex::default(),
+            deciding: Mutex::default(),
         })
     }
 
@@ -140,6 +150,7 @@ impl Session {
             settings: config.settings,
             skills: config.skills,
             reminders: config.reminders,
+            decider: config.decider,
             self_source: config.self_source,
         }
     }
@@ -164,8 +175,71 @@ impl Session {
         };
         match steered {
             Some(status) => self.spawn_quick_reply(text, status),
-            None => self.start_task(text),
+            None => self.route(text),
         }
+    }
+
+    /// Small talk gets an instant answer from the fast model; everything else,
+    /// and any doubt, starts a task.
+    fn route(self: &Arc<Self>, text: String) {
+        let decider = {
+            let c = self.config.read().unwrap();
+            c.decider.clone().filter(|_| c.settings.quick_chat)
+        };
+        let Some(decider) = decider else { return self.start_task(text) };
+        {
+            let mut d = self.deciding.lock().unwrap();
+            if let Some(queue) = d.as_mut() {
+                queue.push(text);
+                return;
+            }
+            *d = Some(vec![]);
+        }
+        let this = self.clone();
+        self.rt.spawn(async move {
+            let p = decider.chat_only(&text).await;
+            let queued = this.deciding.lock().unwrap().take().unwrap_or_default();
+            if queued.is_empty() && p.is_some_and(|p| p >= CHAT_ABOVE) && this.chat_reply(&text).await {
+                return;
+            }
+            let all: Vec<String> = std::iter::once(text).chain(queued).collect();
+            this.start_task(all.join("\n"));
+        });
+    }
+
+    /// Answers small talk without tools or a screenshot. Returns false when the
+    /// model says the message needs the computer after all (or fails), so a task starts.
+    async fn chat_reply(self: &Arc<Self>, text: &str) -> bool {
+        let (settings, provider) = {
+            let c = self.config.read().unwrap();
+            (c.settings.clone(), c.provider.clone())
+        };
+        let system = format!(
+            "You are Waddle, a small pixel-art duck who lives on the user's desktop and helps with their computer. \
+Reply to their message in one to three short, friendly sentences. \
+If it actually asks you to do, check or show something on their computer (apps, the screen, files, reminders, the time), reply with exactly {HAND_OFF} and nothing else."
+        );
+        let mut messages = vec![Message::system(system)];
+        messages.extend(self.memory.lock().unwrap().iter().cloned());
+        messages.push(Message::user(text));
+        let req = ChatRequest { model: settings.fast_model(), messages: &messages, tools: &[], temperature: 0.6, max_tokens: 200 };
+        let reply = match provider.chat(req, &mut |_| {}).await {
+            Ok(r) if !r.text.trim().is_empty() && !r.text.contains(HAND_OFF) => r.text.trim().to_string(),
+            Ok(_) => return false,
+            Err(e) => {
+                log::warn!("chat reply failed: {e:#}");
+                return false;
+            }
+        };
+        let task_id = "chat".to_string();
+        self.host.emit(AgentEvent::TextDelta { task_id: task_id.clone(), lane: Lane::Planner, text: reply.clone() });
+        self.host.emit(AgentEvent::TextDone { task_id, lane: Lane::Planner });
+        let _ = self.audit.append(AuditEntry { task_id: "chat".into(), kind: "chat".into(), detail: Some(format!("{text} → {reply}")), ..Default::default() });
+        let mut mem = self.memory.lock().unwrap();
+        mem.extend([Message::user(text), Message::assistant(reply, vec![])]);
+        let excess = mem.len().saturating_sub(MEMORY_MESSAGES);
+        mem.drain(..excess);
+        true
     }
 
     fn start_task(self: &Arc<Self>, goal: String) {

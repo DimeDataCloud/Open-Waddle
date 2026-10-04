@@ -17,6 +17,7 @@ use crate::audit::{AuditEntry, AuditLog};
 use crate::config::{Settings, Tier2Mode};
 use crate::llm::{ChatRequest, ImageData, Message, Provider, StreamEvent, ToolCall, ToolSpec, Usage};
 use crate::safety::{self, Assessment, Tier};
+use crate::decide::Decider;
 use crate::reminders::ReminderStore;
 use crate::skills::SkillStore;
 use crate::tools::{self, fs::Workspace, shell, Capabilities, Coords, GuiAction, GuiResult, ToolOutcome};
@@ -128,6 +129,8 @@ pub struct AgentDeps {
     pub settings: Settings,
     /// Long-term skill memory (self-improvement). None = off.
     pub skills: Option<Arc<SkillStore>>,
+    /// Quick decisions (Jev) around the main model. None = always take the careful path.
+    pub decider: Option<Arc<dyn Decider>>,
     /// Reminders the app pops up when due. None = off.
     pub reminders: Option<Arc<ReminderStore>>,
     /// Waddle's own source folder, reachable as `self/...`. None = off.
@@ -484,7 +487,11 @@ impl<'a> Agent<'a> {
         }
         // Only skip when the check is confident: a needless look costs a second,
         // a missing one sends the model in blind (it can still look itself).
-        if self.deps.settings.smart_look && self.deps.provider.needs_screen(goal).await.is_some_and(|p| p < SKIP_LOOK_BELOW) {
+        let p = match self.deps.decider.as_ref().filter(|_| self.deps.settings.smart_look) {
+            Some(d) => d.needs_screen(goal).await,
+            None => None,
+        };
+        if p.is_some_and(|p| p < SKIP_LOOK_BELOW) {
             return Some((format!("It's {}.", crate::reminders::now_line()), None));
         }
         let host = &self.deps.host;

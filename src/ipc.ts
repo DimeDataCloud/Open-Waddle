@@ -1,5 +1,6 @@
 // Typed wrappers around the app's commands and events.
 
+import type { Intent } from "./body/intent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -79,6 +80,7 @@ export interface Events {
   "duck:act": { kind: "peck" | "type" | "look" };
   "duck:point": { x: number; y: number; label: string };
   reminder: { text: string; late: boolean };
+  "duck:intent": { intent: Intent; window: Platform | null; cursor: { x: number; y: number } | null };
   settings: { color: string; wander: boolean; demo: boolean };
   "chat:open": { voice: boolean };
   "wander:toggle": null;
