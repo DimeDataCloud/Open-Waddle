@@ -1,8 +1,12 @@
-//! Real-model checks against a local Ollama server. Ignored by default (CI has
-//! no model). Run with:
+//! Real-model checks. Ignored by default (CI has no model). Against a local
+//! Ollama server:
 //!
 //!   ollama pull qwen3.5:4b
-//!   cargo test -p waddle-core --test live_ollama -- --ignored --nocapture --test-threads=1
+//!   cargo test -p waddle-core --test live -- --ignored --nocapture --test-threads=1
+//!
+//! Against OpenRouter (the default cloud brain; about $0.001 per test):
+//!
+//!   WADDLE_LIVE=openrouter OPENROUTER_API_KEY=... cargo test -p waddle-core --test live -- --ignored --nocapture
 //!
 //! WADDLE_LIVE_MODEL and WADDLE_OLLAMA_URL override the model and server.
 
@@ -23,7 +27,20 @@ use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::{AgentEvent, Decision, Host, Outcome, Settings};
 
+fn openrouter() -> bool {
+    std::env::var("WADDLE_LIVE").is_ok_and(|v| v == "openrouter")
+}
+
 fn live_settings() -> Settings {
+    if openrouter() {
+        let defaults = Settings::default();
+        return Settings {
+            model: std::env::var("WADDLE_LIVE_MODEL").unwrap_or(defaults.model.clone()),
+            tier2_countdown_ms: 20,
+            max_steps: 6,
+            ..defaults
+        };
+    }
     let mut s = Settings {
         provider: ProviderKind::Ollama,
         base_url: std::env::var("WADDLE_OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into()),
@@ -59,7 +76,7 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
     setup(&host);
     let settings = live_settings();
     let deps = AgentDeps {
-        provider: build_provider(&settings, None),
+        provider: build_provider(&settings, std::env::var("OPENROUTER_API_KEY").ok().filter(|_| openrouter())),
         host: host.clone(),
         audit: Arc::new(AuditLog::open_in_memory().unwrap()),
         workspace: workspace.clone(),
@@ -78,6 +95,7 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let r = agent.run(goal, &[], &mut rx).await;
     report(goal, &host, &r.outcome, &r.message);
+    println!("used: {}", agent.usage());
     Run { outcome: r.outcome, message: r.message, host, _dir: dir, workspace }
 }
 
@@ -147,7 +165,7 @@ fn screen_png() -> ImageData {
 }
 
 #[tokio::test]
-#[ignore = "needs a local Ollama server with the model pulled"]
+#[ignore = "needs a model: a local Ollama server, or WADDLE_LIVE=openrouter"]
 async fn writes_a_file() {
     let r = run("Create a file named hello.txt that contains the text hi", |_| {}).await;
     assert_eq!(r.outcome, Outcome::Done, "{}", r.message);
@@ -157,7 +175,7 @@ async fn writes_a_file() {
 }
 
 #[tokio::test]
-#[ignore = "needs a local Ollama server with the model pulled"]
+#[ignore = "needs a model: a local Ollama server, or WADDLE_LIVE=openrouter"]
 async fn clicks_an_accessibility_element() {
     let r = run("In the app that's open, press the Save button", |h| {
         desktop(h);
@@ -170,7 +188,7 @@ async fn clicks_an_accessibility_element() {
 }
 
 #[tokio::test]
-#[ignore = "needs a local Ollama server with the model pulled"]
+#[ignore = "needs a model: a local Ollama server, or WADDLE_LIVE=openrouter"]
 async fn clicks_what_it_sees_in_a_screenshot() {
     let r = run("Look at the screen and click the red button", desktop).await;
     let calls = r.host.gui_calls.lock().unwrap().clone();
@@ -183,7 +201,7 @@ async fn clicks_what_it_sees_in_a_screenshot() {
 }
 
 #[tokio::test]
-#[ignore = "needs a local Ollama server with the model pulled"]
+#[ignore = "needs a model: a local Ollama server, or WADDLE_LIVE=openrouter"]
 async fn two_screenshots_keep_the_cache() {
     // Watch the server log while this runs: the second look_at_screen step should
     // restore the previous checkpoint instead of "erased invalidated context checkpoint".
@@ -193,10 +211,42 @@ async fn two_screenshots_keep_the_cache() {
     assert!(clicks.iter().any(|c| inside(*c, (1000.0, 700.0, 1240.0, 780.0))), "no click on the red button: {clicks:?}");
 }
 
+/// A browser showing a real web form (a screenshot from the Linux test desktop), with no accessibility list.
+fn signup_page(h: &FakeHost) {
+    *h.os.lock().unwrap() = "linux".into();
+    *h.windows.lock().unwrap() = vec![WindowInfo { title: "Signup form".into(), app: "chromium".into(), x: 150.0, y: 120.0, w: 1100.0, h: 650.0, focused: true }];
+    let png = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/signup.png")).unwrap();
+    *h.screenshot.lock().unwrap() = Some(ImageData { mime: "image/png".into(), base64: base64::engine::general_purpose::STANDARD.encode(png) });
+}
+
 #[tokio::test]
-#[ignore = "needs a local Ollama server with the model pulled"]
+#[ignore = "needs a model: a local Ollama server, or WADDLE_LIVE=openrouter"]
+async fn fills_in_a_web_form() {
+    let r = run("Type Ada in the name box on the signup page, then press Subscribe", signup_page).await;
+    let calls = r.host.gui_calls.lock().unwrap().clone();
+    let name_box = (254.0, 336.0, 594.0, 380.0);
+    // Either type_text at the box, or a click in the box followed by type_text.
+    let typed = calls.iter().enumerate().any(|(i, c)| match c {
+        GuiAction::TypeText { text, at } if text.trim() == "Ada" => match at {
+            Some(p) => inside(*p, name_box),
+            None => calls[..i].iter().rev().find_map(|c| match c {
+                GuiAction::Click { x, y, .. } => Some(inside((*x, *y), name_box)),
+                _ => None,
+            }) == Some(true),
+        },
+        _ => false,
+    });
+    assert!(typed, "Ada wasn't typed into the name box: {calls:?}");
+    assert!(clicks(&r.host).iter().any(|c| inside(*c, (360.0, 404.0, 530.0, 458.0))), "Subscribe wasn't clicked: {calls:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs a model: a local Ollama server, or WADDLE_LIVE=openrouter"]
 async fn warm_up_hides_the_model_load_and_the_prompt() {
     let settings = live_settings();
+    if !settings.is_local() {
+        return println!("warm-up only applies to local models");
+    }
     // From the first model call to the first tool: what the user waits for after Enter.
     let first_step = |r: &Run| {
         let t = r.host.timeline.lock().unwrap();

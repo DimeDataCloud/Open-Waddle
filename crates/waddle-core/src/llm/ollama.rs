@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
-use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall};
+use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
 use crate::config::OllamaSettings;
 
 pub struct Ollama {
@@ -84,6 +84,7 @@ pub(crate) fn apply_line(
     line: &str,
     text: &mut String,
     calls: &mut Vec<ToolCall>,
+    usage: &mut Usage,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
 ) -> anyhow::Result<bool> {
     let line = line.trim();
@@ -111,7 +112,13 @@ pub(crate) fn apply_line(
             calls.push(ToolCall { id: super::new_call_id(), name: name.to_string(), arguments });
         }
     }
-    Ok(v.get("done").and_then(Value::as_bool).unwrap_or(false))
+    let done = v.get("done").and_then(Value::as_bool).unwrap_or(false);
+    if done {
+        // Counts only the prompt tokens the server had to read, not the cached ones.
+        let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+        *usage = Usage { prompt_tokens: n("prompt_eval_count"), completion_tokens: n("eval_count"), cost: None };
+    }
+    Ok(done)
 }
 
 /// The warm-up request: the real request's opening, one token, thinking on.
@@ -159,27 +166,28 @@ impl Provider for Ollama {
         }
         let mut text = String::new();
         let mut calls = vec![];
+        let mut usage = Usage::default();
         let mut buffer = String::new();
         let mut stream = resp.bytes_stream();
         'outer: while let Some(chunk) = stream.next().await {
             buffer.push_str(&String::from_utf8_lossy(&chunk.context("stream interrupted")?));
             while let Some(pos) = buffer.find('\n') {
                 let line: String = buffer.drain(..=pos).collect();
-                if apply_line(&line, &mut text, &mut calls, on_event)? {
+                if apply_line(&line, &mut text, &mut calls, &mut usage, on_event)? {
                     break 'outer;
                 }
             }
         }
         if !buffer.trim().is_empty() {
-            apply_line(&buffer, &mut text, &mut calls, on_event)?;
+            apply_line(&buffer, &mut text, &mut calls, &mut usage, on_event)?;
         }
         if calls.is_empty() {
             let (cleaned, extracted) = textcalls::extract(&text);
             if !extracted.is_empty() {
-                return Ok(ChatResponse { text: cleaned, tool_calls: extracted });
+                return Ok(ChatResponse { text: cleaned, tool_calls: extracted, usage });
             }
         }
-        Ok(ChatResponse { text, tool_calls: calls })
+        Ok(ChatResponse { text, tool_calls: calls, usage })
     }
 }
 
@@ -192,22 +200,23 @@ mod tests {
         let lines = [
             r#"{"message":{"role":"assistant","content":"Writing "},"done":false}"#,
             r#"{"message":{"role":"assistant","content":"it.","tool_calls":[{"function":{"name":"write_file","arguments":{"path":"a.txt","content":"hi"}}}]},"done":false}"#,
-            r#"{"message":{"role":"assistant","content":""},"done":true}"#,
+            r#"{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":22,"eval_count":9}"#,
         ];
-        let (mut text, mut calls, mut deltas) = (String::new(), vec![], vec![]);
+        let (mut text, mut calls, mut deltas, mut usage) = (String::new(), vec![], vec![], Usage::default());
         let mut sink = |e: StreamEvent| {
             let StreamEvent::TextDelta(t) = e;
             deltas.push(t);
         };
         let mut done = false;
         for l in lines {
-            done = apply_line(l, &mut text, &mut calls, &mut sink).unwrap();
+            done = apply_line(l, &mut text, &mut calls, &mut usage, &mut sink).unwrap();
         }
         assert!(done);
         assert_eq!(text, "Writing it.");
         assert_eq!(deltas.len(), 2);
         assert_eq!(calls[0].name, "write_file");
         assert_eq!(calls[0].arguments["path"], "a.txt");
+        assert_eq!((usage.prompt_tokens, usage.completion_tokens, usage.cost), (22, 9, None));
     }
 
     #[test]

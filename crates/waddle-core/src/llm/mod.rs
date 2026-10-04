@@ -93,6 +93,40 @@ pub struct ChatRequest<'a> {
 pub struct ChatResponse {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
+    pub usage: Usage,
+}
+
+/// What a call (or a whole task) used, as reported by the server.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Usage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    /// In US dollars, when the server says (OpenRouter does).
+    pub cost: Option<f64>,
+}
+
+impl Usage {
+    pub fn add(&mut self, other: Usage) {
+        self.prompt_tokens += other.prompt_tokens;
+        self.completion_tokens += other.completion_tokens;
+        if let Some(c) = other.cost {
+            self.cost = Some(self.cost.unwrap_or(0.0) + c);
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.prompt_tokens == 0 && self.completion_tokens == 0 && self.cost.is_none()
+    }
+}
+
+impl std::fmt::Display for Usage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} tokens in, {} out", self.prompt_tokens, self.completion_tokens)?;
+        match self.cost {
+            Some(c) => write!(f, ", ${c:.5}"),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

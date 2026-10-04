@@ -203,11 +203,14 @@ impl Session {
             while let Ok(s) = steer_rx.try_recv() {
                 leftover.push(s);
             }
+            let usage = agent.usage();
+            let detail = if usage.is_empty() { result.message.clone() } else { format!("{} ({usage})", result.message) };
+            log::info!("task {task_id} {:?}: {usage}", result.outcome);
             let _ = this.audit.append(AuditEntry {
                 task_id: task_id.clone(),
                 kind: "task_end".into(),
                 decision: Some(format!("{:?}", result.outcome).to_lowercase()),
-                detail: Some(result.message.clone()),
+                detail: Some(detail),
                 ..Default::default()
             });
             host.set_busy(false);

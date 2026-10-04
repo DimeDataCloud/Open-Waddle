@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::audit::{AuditEntry, AuditLog};
 use crate::config::{Settings, Tier2Mode};
-use crate::llm::{ChatRequest, Message, Provider, StreamEvent, ToolCall, ToolSpec};
+use crate::llm::{ChatRequest, Message, Provider, StreamEvent, ToolCall, ToolSpec, Usage};
 use crate::safety::{self, Assessment, Tier};
 use crate::skills::SkillStore;
 use crate::tools::{self, fs::Workspace, shell, Capabilities, Coords, GuiAction, GuiResult, ToolOutcome};
@@ -147,7 +147,7 @@ pub fn system_prompt(env: &EnvInfo, coords: &Coords, workspace: &Path, extra: &[
 You walk to whatever you act on, so the user can watch you work.
 
 - Your words appear in a speech bubble: one or two short, friendly sentences.
-- Before each action, say in one short sentence what you're doing (\"Opening Notepad to jot that down.\").
+- Before each action, say in one short sentence what you're doing (\"Opening Notepad to jot that down.\"), and call the tool in the same reply.
 - When the task is done, reply with a brief summary and no tool calls. If you need something from the user, ask one clear question and stop.
 - Messages from the user while you work update the task; adapt.
 - OS: {os}. Workspace folder: {ws}; file tools and commands run there.
@@ -180,6 +180,29 @@ pub fn prune_images(messages: &mut [Message], keep: usize) {
     }
 }
 
+/// Told to the model when it announces an action but doesn't take it.
+const NUDGE: &str = "You said you'd do something but didn't call a tool, so nothing happened. Call the tool now. If the task is already finished, just give your final reply.";
+
+/// Whether a reply without tool calls announces an action ("I'll click it for you.").
+/// Small models sometimes stop there, which would end the task with nothing done.
+pub fn promises_action(text: &str) -> bool {
+    const MARKERS: [&str; 5] = ["i'll ", "i will ", "let me ", "i'm going to ", "i am going to "];
+    const FILLER: [&str; 8] = ["now", "first", "just", "quickly", "go", "ahead", "and", "then"];
+    const VERBS: [&str; 30] = [
+        "click", "press", "tap", "type", "enter", "open", "launch", "start", "close", "take", "look", "check", "see", "find", "search",
+        "read", "write", "create", "save", "delete", "run", "list", "select", "scroll", "drag", "fill", "grab", "capture", "try", "do",
+    ];
+    let text = text.to_lowercase().replace('\u{2019}', "'");
+    text.split(['.', '!', '?', '\n']).any(|sentence| {
+        MARKERS.iter().any(|m| {
+            sentence.match_indices(m).any(|(i, _)| {
+                let mut words = sentence[i + m.len()..].split_whitespace().skip_while(|w| FILLER.contains(w));
+                words.next().is_some_and(|w| VERBS.contains(&w.trim_matches(|c: char| !c.is_alphanumeric())))
+            })
+        })
+    })
+}
+
 fn new_id(prefix: &str) -> String {
     let mut bytes = [0u8; 5];
     let _ = getrandom::fill(&mut bytes);
@@ -203,13 +226,17 @@ pub struct Agent<'a> {
     sub_tasks: AtomicU32,
     /// Whether this task has looked at the desktop yet; blind input is refused.
     looked: AtomicBool,
+    /// Whether it has seen where things are (a screenshot or an element list); clicking a point needs this.
+    located: AtomicBool,
+    /// Tokens and cost of the whole tree of tasks.
+    usage: Arc<Mutex<Usage>>,
 }
 
 impl<'a> Agent<'a> {
     pub fn new(deps: &'a AgentDeps, task_id: String, cancel: CancellationToken, status: Arc<Mutex<TaskStatus>>, env: &EnvInfo) -> Self {
         let coords = Coords { mode: deps.settings.coord_mode(), screen_w: env.screen_w, screen_h: env.screen_h };
         let budget = deps.settings.max_steps * (1 + deps.settings.max_delegation_depth);
-        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false) }
+        Self { deps, task_id, cancel, status, coords, depth: 0, steps_left: Arc::new(AtomicU32::new(budget)), sub_tasks: AtomicU32::new(0), looked: AtomicBool::new(false), located: AtomicBool::new(false), usage: Arc::default() }
     }
 
     fn capabilities(&self, env: &EnvInfo) -> Capabilities {
@@ -239,6 +266,11 @@ impl<'a> Agent<'a> {
             extra.push(section);
         }
         extra
+    }
+
+    /// What the model calls of this task and its sub-tasks used so far.
+    pub fn usage(&self) -> Usage {
+        *self.usage.lock().unwrap()
     }
 
     /// Boxed entry point so `delegate` can run an agent inside an agent.
@@ -278,6 +310,7 @@ impl<'a> Agent<'a> {
             self.status.lock().unwrap().goal = goal.to_string();
         }
 
+        let mut nudged = false;
         for step in 0..self.deps.settings.max_steps {
             if self.cancel.is_cancelled() {
                 return self.halted();
@@ -318,7 +351,10 @@ impl<'a> Agent<'a> {
             };
             self.emit(AgentEvent::TextDone { task_id: self.task_id.clone(), lane: Lane::Planner });
             let resp = match resp {
-                Ok(r) => r,
+                Ok(r) => {
+                    self.usage.lock().unwrap().add(r.usage);
+                    r
+                }
                 Err(e) => {
                     log::warn!("model call failed ({}): {e:#}", self.deps.settings.model);
                     let message = format!("I couldn't reach my brain: {e:#}");
@@ -328,6 +364,11 @@ impl<'a> Agent<'a> {
             };
             messages.push(Message::assistant(resp.text.clone(), resp.tool_calls.clone()));
             if resp.tool_calls.is_empty() {
+                if !nudged && promises_action(&resp.text) {
+                    nudged = true;
+                    messages.push(Message::user(NUDGE));
+                    continue;
+                }
                 let message = if resp.text.trim().is_empty() { "Done!".to_string() } else { resp.text };
                 return RunResult { outcome: Outcome::Done, message };
             }
@@ -463,6 +504,12 @@ impl<'a> Agent<'a> {
 Use list_windows, find_elements or look_at_screen first. If the task is already done, reply without tool calls.";
                 return (ToolOutcome::trusted(text), false);
             }
+            // A window list says where windows are, not what's in them; a point picked from it is a guess.
+            if action.target().is_some() && !self.located.load(Ordering::SeqCst) {
+                let text = "Error: you haven't seen the screen during this task, so you'd be clicking blind. \
+Use look_at_screen first to see where things are, then click.";
+                return (ToolOutcome::trusted(text), false);
+            }
             self.deps.host.approach(action, &self.cancel).await;
         }
 
@@ -498,10 +545,13 @@ Use list_windows, find_elements or look_at_screen first. If the task is already 
         });
         let result = match gui_action {
             Some(action) => {
-                let perceives = action.perceives();
+                let (perceives, locates) = (action.perceives(), action.locates());
                 let r = self.deps.host.gui(action, &self.cancel).await;
                 if perceives && r.is_ok() {
                     self.looked.store(true, Ordering::SeqCst);
+                }
+                if locates && r.is_ok() {
+                    self.located.store(true, Ordering::SeqCst);
                 }
                 r.map(|r| tools::format_gui_result(r, &self.coords))
             }
@@ -559,6 +609,8 @@ Use list_windows, find_elements or look_at_screen first. If the task is already 
             steps_left: self.steps_left.clone(),
             sub_tasks: AtomicU32::new(0),
             looked: AtomicBool::new(false),
+            located: AtomicBool::new(false),
+            usage: self.usage.clone(),
         };
         let full_goal = if context.trim().is_empty() { goal.to_string() } else { format!("{goal}\n\nContext from the parent task:\n{context}") };
         self.audit(AuditEntry { kind: "delegate".into(), detail: Some(full_goal.clone()), ..Default::default() });

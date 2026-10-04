@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use waddle_core::agent::{prune_images, Agent, AgentDeps, TaskStatus};
+use waddle_core::agent::{promises_action, prune_images, Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
@@ -176,6 +176,54 @@ async fn blind_input_is_refused_until_waddle_has_looked() {
     assert!(refusal.text.contains("haven't looked"), "{}", refusal.text);
     let key_approvals = host.approvals.lock().unwrap().iter().filter(|a| a.tool == "press_keys").count();
     assert_eq!(key_approvals, 1, "the refused attempt never reaches the approval gate");
+}
+
+#[tokio::test]
+async fn clicking_a_point_needs_a_look_at_the_screen_first() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Checking windows.", vec![call("list_windows", json!({}))]),
+        reply("Clicking the name box.", vec![call("click", json!({"x": 500, "y": 300}))]),
+        reply("Looking.", vec![call("look_at_screen", json!({}))]),
+        reply("Clicking the name box.", vec![call("click", json!({"x": 500, "y": 300}))]),
+        reply("Done.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let gui = host.gui_calls.lock().unwrap().clone();
+    assert!(matches!(gui.as_slice(), [GuiAction::ListWindows, GuiAction::LookAtScreen, GuiAction::Click { .. }]), "{gui:?}");
+    let third = provider.requests.lock().unwrap()[2].clone();
+    let refusal = third.iter().rev().find(|m| m.role == Role::Tool).unwrap();
+    assert!(refusal.text.contains("clicking blind"), "{}", refusal.text);
+}
+
+#[tokio::test]
+async fn an_announced_action_without_a_tool_call_gets_one_nudge() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("I see the red button. I'll click it for you.", vec![]),
+        reply("Clicking it.", vec![call("list_windows", json!({}))]),
+        reply("Let me take another look.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let (outcome, message) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    assert_eq!(host.gui_calls.lock().unwrap().clone(), vec![GuiAction::ListWindows]);
+    let second = provider.requests.lock().unwrap()[1].clone();
+    assert!(second.last().unwrap().text.contains("didn't call a tool"), "{:?}", second.last());
+    // Only one nudge per task, so a model that keeps talking still finishes.
+    assert_eq!((outcome, message.as_str(), provider.request_count()), (Outcome::Done, "Let me take another look.", 3));
+}
+
+#[test]
+fn only_replies_that_announce_an_action_count_as_promises() {
+    for t in ["I'll click it for you.", "Let me take a screenshot first.", "Now I\u{2019}m going to open Notepad", "Okay! I will go ahead and type it."] {
+        assert!(promises_action(t), "{t}");
+    }
+    for t in ["Okay, I'll leave it.", "Done! Let me know if you need anything else.", "I clicked the red button.", "I'll be here if you need me."] {
+        assert!(!promises_action(t), "{t}");
+    }
 }
 
 #[test]

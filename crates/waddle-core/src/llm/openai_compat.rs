@@ -7,7 +7,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall};
+use super::{textcalls, ChatRequest, ChatResponse, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
 
 pub struct OpenAiCompat {
     base_url: String,
@@ -103,6 +103,7 @@ pub(crate) struct SseAccumulator {
     buffer: String,
     text: String,
     calls: BTreeMap<u64, PartialCall>,
+    usage: Usage,
     done: bool,
 }
 
@@ -129,6 +130,11 @@ impl SseAccumulator {
         if let Some(err) = v.get("error") {
             let msg = err.get("message").and_then(Value::as_str).unwrap_or("unknown error");
             bail!("provider error: {msg}");
+        }
+        // OpenRouter sends token counts and the price with the last chunk.
+        if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
+            let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+            self.usage = Usage { prompt_tokens: n("prompt_tokens"), completion_tokens: n("completion_tokens"), cost: u.get("cost").and_then(Value::as_f64) };
         }
         let Some(delta) = v.pointer("/choices/0/delta") else { return Ok(()) };
         if let Some(t) = delta.get("content").and_then(Value::as_str) {
@@ -182,7 +188,7 @@ impl SseAccumulator {
                 tool_calls = calls;
             }
         }
-        ChatResponse { text, tool_calls }
+        ChatResponse { text, tool_calls, usage: self.usage }
     }
 }
 
@@ -248,6 +254,7 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"Notepad.\"}}]}\n",
             "\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"open_app\",\"arguments\":\"{\\\"na\"}}]}}]}\n\n",
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"me\\\":\\\"notepad\\\"}\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1800,\"completion_tokens\":30,\"cost\":0.00023}}\n\n",
             "data: [DONE]\n\n",
         ];
         let (resp, deltas) = feed(&chunks);
@@ -257,6 +264,7 @@ mod tests {
         assert_eq!(resp.tool_calls[0].id, "c1");
         assert_eq!(resp.tool_calls[0].name, "open_app");
         assert_eq!(resp.tool_calls[0].arguments, json!({"name": "notepad"}));
+        assert_eq!(resp.usage, Usage { prompt_tokens: 1800, completion_tokens: 30, cost: Some(0.00023) });
     }
 
     #[test]
