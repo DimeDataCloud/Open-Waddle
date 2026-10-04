@@ -142,7 +142,7 @@ pub struct RunResult {
     pub message: String,
 }
 
-pub fn system_prompt(env: &EnvInfo, coords: &Coords, workspace: &Path, extra: &[String]) -> String {
+pub fn system_prompt(env: &EnvInfo, coords: &Coords, workspace: &Path, extra: &[String], narrate: bool) -> String {
     const ON_SCREEN: &str = "- What the user mentions (a playlist, an email, a button) is on their screen: do it in the app that's showing instead of opening a new one. \
 If you haven't been shown the screen yet, look before acting. Never say you can't see or use it. \
 The screenshot is context, not a to-do list: leave dialogs and windows the task doesn't mention alone.
@@ -154,13 +154,20 @@ The screenshot is context, not a to-do list: leave dialogs and windows the task 
     } else {
         "- You have no screen access in this mode; work through files and commands."
     };
+    let voice = if narrate {
+        "- Your words appear in a speech bubble: one or two short, friendly sentences.
+- Before each action, say in one short sentence what you're doing (\"Opening Notepad to jot that down.\"), and call the tool in the same reply.
+- When the task is done, reply with a brief summary and no tool calls."
+    } else {
+        "- The user watches every action on screen, so don't describe what you're doing: call tools without commentary.
+- Speak only to finish, answer or ask. When the task is done, reply with one short, friendly sentence and no tool calls (an answer the user asked for may be longer)."
+    };
     format!(
         "You are Waddle, a small pixel-art duck who lives on the user's desktop and gets things done on their computer. \
 You walk to whatever you act on, so the user can watch you work.
 
-- Your words appear in a speech bubble: one or two short, friendly sentences.
-- Before each action, say in one short sentence what you're doing (\"Opening Notepad to jot that down.\"), and call the tool in the same reply.
-- When the task is done, reply with a brief summary and no tool calls. If you need something from the user, ask one clear question and stop.
+{voice}
+- If you need something from the user, ask one clear question and stop.
 - Messages from the user while you work update the task; adapt.
 - OS: {os}. Workspace folder: {ws}; file tools and commands run there.
 - {coords}
@@ -337,7 +344,7 @@ impl<'a> Agent<'a> {
         let env = self.deps.host.env();
         let caps = self.capabilities(&env);
         let extra = self.prompt_extras(&caps);
-        let mut messages = vec![Message::system(system_prompt(&env, &self.coords, self.deps.workspace.root(), &extra))];
+        let mut messages = vec![Message::system(system_prompt(&env, &self.coords, self.deps.workspace.root(), &extra, self.deps.settings.narrate))];
         messages.extend_from_slice(memory);
         (messages, tools::specs(caps, &self.coords))
     }
@@ -393,6 +400,8 @@ impl<'a> Agent<'a> {
             }
             self.emit(AgentEvent::Thinking { task_id: self.task_id.clone() });
 
+            // Quiet mode holds the words back until the reply turns out to be the final one.
+            let narrate = self.deps.settings.narrate;
             let resp = {
                 let host = self.deps.host.clone();
                 let status = self.status.clone();
@@ -400,7 +409,9 @@ impl<'a> Agent<'a> {
                 let mut on_event = move |e: StreamEvent| {
                     let StreamEvent::TextDelta(text) = e;
                     status.lock().unwrap().narration.push_str(&text);
-                    host.emit(AgentEvent::TextDelta { task_id: task_id.clone(), lane: Lane::Planner, text });
+                    if narrate {
+                        host.emit(AgentEvent::TextDelta { task_id: task_id.clone(), lane: Lane::Planner, text });
+                    }
                 };
                 let req = ChatRequest {
                     model: &self.deps.settings.model,
@@ -414,7 +425,9 @@ impl<'a> Agent<'a> {
                     _ = self.cancel.cancelled() => return self.halted(),
                 }
             };
-            self.emit(AgentEvent::TextDone { task_id: self.task_id.clone(), lane: Lane::Planner });
+            if narrate {
+                self.emit(AgentEvent::TextDone { task_id: self.task_id.clone(), lane: Lane::Planner });
+            }
             let resp = match resp {
                 Ok(r) => {
                     self.usage.lock().unwrap().add(r.usage);
@@ -440,6 +453,10 @@ impl<'a> Agent<'a> {
                     continue;
                 }
                 let message = if resp.text.trim().is_empty() { "Done!".to_string() } else { resp.text };
+                if !narrate && self.depth == 0 {
+                    self.emit(AgentEvent::TextDelta { task_id: self.task_id.clone(), lane: Lane::Planner, text: message.clone() });
+                    self.emit(AgentEvent::TextDone { task_id: self.task_id.clone(), lane: Lane::Planner });
+                }
                 return RunResult { outcome: Outcome::Done, message };
             }
             for (i, call) in resp.tool_calls.iter().enumerate() {
