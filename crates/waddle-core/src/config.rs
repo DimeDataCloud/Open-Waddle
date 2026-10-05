@@ -97,6 +97,43 @@ impl Default for VoiceSettings {
     }
 }
 
+/// An MCP server the user added: a program Waddle starts whose tools it may use.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct McpServerSettings {
+    /// A short name, shown to the user and in tool names.
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    /// Environment variables it needs (API keys); their values are in the keychain.
+    pub env_keys: Vec<String>,
+    /// Its tools that say they only read may run without asking, and others after a countdown.
+    pub trusted: bool,
+    pub enabled: bool,
+}
+
+impl Default for McpServerSettings {
+    fn default() -> Self {
+        Self { name: String::new(), command: String::new(), args: vec![], env_keys: vec![], trusted: false, enabled: true }
+    }
+}
+
+/// Server names must be short, distinct and plain (they become part of tool names).
+pub fn check_mcp_servers(servers: &[McpServerSettings]) -> anyhow::Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for s in servers {
+        let name = s.name.trim();
+        anyhow::ensure!(!name.is_empty(), "every MCP server needs a name");
+        anyhow::ensure!(name.len() <= 24 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'), "MCP server name \"{name}\": use up to 24 letters, digits, - or _");
+        anyhow::ensure!(seen.insert(name.to_ascii_lowercase()), "two MCP servers are called \"{name}\"");
+        anyhow::ensure!(!s.command.trim().is_empty(), "MCP server \"{name}\" needs a command");
+        for k in &s.env_keys {
+            anyhow::ensure!(!k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "MCP server \"{name}\": \"{k}\" isn't a valid variable name");
+        }
+    }
+    Ok(())
+}
+
 /// Spoken replies: Waddle reads its answers (and nudges) aloud.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -212,6 +249,8 @@ pub struct Settings {
     pub voice: VoiceSettings,
     /// Reading replies aloud.
     pub voice_out: VoiceOutSettings,
+    /// MCP servers whose tools Waddle may use. Only the user changes these.
+    pub mcp_servers: Vec<McpServerSettings>,
     /// OAuth client ID of the user's Google Cloud project (Desktop app type). Empty = Google off.
     pub google_client_id: String,
     /// Hours (local, 24h) that `calendar_free` proposes meetings in, on weekdays.
@@ -269,6 +308,7 @@ impl Default for Settings {
             ollama: OllamaSettings::default(),
             voice: VoiceSettings::default(),
             voice_out: VoiceOutSettings::default(),
+            mcp_servers: vec![],
             google_client_id: String::new(),
             working_hours: (9, 17),
             send_undo_secs: 10,
@@ -407,6 +447,22 @@ mod tests {
         ] {
             assert!(apply_patch(&base, &bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn mcp_servers_need_plain_distinct_names() {
+        let ok = McpServerSettings { name: "github".into(), command: "npx".into(), env_keys: vec!["GITHUB_TOKEN".into()], ..Default::default() };
+        assert!(check_mcp_servers(&[ok.clone(), McpServerSettings { name: "files".into(), ..ok.clone() }]).is_ok());
+        for bad in [
+            vec![McpServerSettings { name: "".into(), ..ok.clone() }],
+            vec![McpServerSettings { name: "my server".into(), ..ok.clone() }],
+            vec![ok.clone(), McpServerSettings { name: "GitHub".into(), ..ok.clone() }],
+            vec![McpServerSettings { command: " ".into(), ..ok.clone() }],
+            vec![McpServerSettings { env_keys: vec!["BAD-KEY".into()], ..ok.clone() }],
+        ] {
+            assert!(check_mcp_servers(&bad).is_err(), "{bad:?}");
+        }
+        assert!(apply_patch(&Settings::default(), &serde_json::json!({ "mcp_servers": [] })).is_err(), "the model can't change them");
     }
 
     #[test]

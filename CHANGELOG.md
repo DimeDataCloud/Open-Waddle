@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.6: MCP tools
+
+- **Waddle can use MCP servers.** Add the MCP servers of apps and services you use (GitHub, Notion, a folder of notes, a database…) in the new Settings → **Tools (MCP)** section, and their tools are offered to every task. See [docs/MCP.md](docs/MCP.md).
+  - Type a name and command, or paste the JSON block from the server's instructions and press **Import**.
+  - **Test** starts the server once and lists its tools.
+  - Keys a server needs go in the keychain, not the settings file.
+- **Safe by default.**
+  - Every tool of a server you haven't marked trusted waits for your click; tools that say they only read get a countdown.
+  - On trusted servers, read-only tools run at once and others after a countdown, or a click if they say they may delete things.
+  - Tool answers are untrusted text, and Waddle can't add, change or remove servers.
+- **Light on resources.** A server starts only when a task first uses one of its tools and stops after 10 idle minutes. Tool lists are remembered, so tasks don't wait for servers to start. A server that crashed is started again for the next call. Stop halts a slow tool at once.
+
 ## 0.2.5: spoken replies
 
 - **Waddle can read its answers aloud.** Settings → Voice → **Spoken replies** (off by default).

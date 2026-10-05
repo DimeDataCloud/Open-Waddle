@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { cleanName, importJson, joinCommand, parseEnv, splitCommand, type McpEnv, type McpServer } from "./mcp";
 
 interface Settings {
   provider: "openai_compat" | "ollama" | "mock";
@@ -33,6 +34,7 @@ interface Settings {
   character: { id: string; color: string };
   ollama: { num_thread: number | null; keep_alive: string; num_ctx: number };
   voice: { backend: "system" | "whisper_api" | "off"; base_url: string; model: string; language: string | null };
+  mcp_servers: McpServer[];
   voice_out: { enabled: boolean; replies: boolean; nudges: boolean; voice: string; rate: number; talk_mode: boolean };
 }
 
@@ -108,8 +110,174 @@ async function loadVoices(): Promise<void> {
   }
 }
 
+// ---------- Tools (MCP) ----------
+
+interface McpStatus {
+  name: string;
+  tools: string[];
+  problem: string | null;
+  saved_env: string[];
+}
+
+/** The servers as edited here; saved with the rest of the form. */
+let mcpServers: McpServer[] = [];
+/** Values typed for servers' variables, saved to the keychain with the form. */
+let mcpEnv: McpEnv = {};
+let mcpStatus: McpStatus[] = [];
+
+function mcpLabel(s: McpServer): string {
+  return joinCommand([s.command, ...s.args]);
+}
+
+function renderMcp(): void {
+  const list = $("mcp-list");
+  if (!mcpServers.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "No servers yet.";
+    list.replaceChildren(li);
+    return;
+  }
+  list.replaceChildren(
+    ...mcpServers.map((srv, i) => {
+      const li = document.createElement("li");
+      const info = document.createElement("div");
+      info.className = "mcp-server";
+      const name = document.createElement("strong");
+      name.textContent = srv.name;
+      const cmd = document.createElement("code");
+      cmd.textContent = mcpLabel(srv);
+      info.append(name, cmd);
+      const st = mcpStatus.find((x) => x.name === srv.name);
+      const pending = Object.keys(mcpEnv[srv.name] ?? {});
+      if (srv.env_keys.length) {
+        const env = document.createElement("div");
+        env.className = "tools";
+        env.textContent = `Needs ${srv.env_keys
+          .map((k) => `${k}${st?.saved_env.includes(k) || pending.includes(k) ? " ✓" : " (no value yet)"}`)
+          .join(", ")}`;
+        info.append(env);
+      }
+      const line = document.createElement("div");
+      if (st?.problem) {
+        line.className = "problem";
+        line.textContent = `Couldn't start it: ${st.problem}`;
+      } else {
+        line.className = "tools";
+        line.textContent = st?.tools.length ? `${st.tools.length} tools: ${st.tools.slice(0, 8).join(", ")}${st.tools.length > 8 ? "…" : ""}` : "Tools are listed after Save.";
+      }
+      info.append(line);
+      const actions = document.createElement("div");
+      actions.className = "mcp-actions";
+      const toggle = (label: string, key: "enabled" | "trusted") => {
+        const l = document.createElement("label");
+        l.className = "check";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = srv[key];
+        box.onchange = () => (srv[key] = box.checked);
+        l.append(box, ` ${label}`);
+        return l;
+      };
+      const test = document.createElement("button");
+      test.type = "button";
+      test.className = "link";
+      test.textContent = "Test";
+      test.onclick = () => void testMcp(srv, mcpEnv[srv.name] ?? {}, line);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "link";
+      remove.textContent = "Remove";
+      remove.onclick = () => {
+        mcpServers.splice(i, 1);
+        delete mcpEnv[srv.name];
+        renderMcp();
+      };
+      actions.append(toggle("On", "enabled"), toggle("Trusted", "trusted"), test, remove);
+      li.append(info, actions);
+      return li;
+    }),
+  );
+}
+
+async function testMcp(srv: McpServer, env: Record<string, string>, out: HTMLElement): Promise<void> {
+  out.className = "tools";
+  out.textContent = "Starting it…";
+  try {
+    const tools = await invoke<string[]>("mcp_test", { server: srv, env });
+    out.textContent = tools.length ? `Works: ${tools.length} tools: ${tools.join(", ")}` : "It started but offers no tools.";
+  } catch (err) {
+    out.className = "problem";
+    out.textContent = `Couldn't start it: ${err}`;
+  }
+}
+
+async function loadMcp(): Promise<void> {
+  try {
+    mcpStatus = await invoke<McpStatus[]>("mcp_status");
+  } catch {
+    mcpStatus = [];
+  }
+  renderMcp();
+}
+
+function draftServer(): { server: McpServer; values: Record<string, string> } | null {
+  const words = splitCommand($("mcp_command").value);
+  const name = cleanName($("mcp_name").value) || cleanName(words[words.length - 1]?.split("/").pop() ?? "");
+  if (!words.length || !name) {
+    $("mcp-status").textContent = "Give it a name and a command.";
+    return null;
+  }
+  const env = parseEnv($<HTMLTextAreaElement>("mcp_env").value);
+  return {
+    server: { name, command: words[0], args: words.slice(1), env_keys: env.keys, trusted: $("mcp_trusted").checked, enabled: true },
+    values: env.values,
+  };
+}
+
+function addServers(servers: McpServer[], env: McpEnv): void {
+  for (const srv of servers) {
+    let name = srv.name;
+    for (let n = 2; mcpServers.some((x) => x.name.toLowerCase() === name.toLowerCase()); n++) name = `${srv.name.slice(0, 21)}-${n}`;
+    mcpServers.push({ ...srv, name });
+    if (env[srv.name]) mcpEnv[name] = { ...env[srv.name] };
+  }
+  renderMcp();
+}
+
+$("mcp-test").addEventListener("click", () => {
+  const d = draftServer();
+  if (d) void testMcp(d.server, d.values, $("mcp-status"));
+});
+
+$("mcp-add-btn").addEventListener("click", () => {
+  const d = draftServer();
+  if (!d) return;
+  addServers([d.server], { [d.server.name]: d.values });
+  for (const id of ["mcp_name", "mcp_command"]) $(id).value = "";
+  $<HTMLTextAreaElement>("mcp_env").value = "";
+  $("mcp_trusted").checked = false;
+  $("mcp-status").textContent = "Added. Press Save to start using it.";
+});
+
+$("mcp-import").addEventListener("click", () => {
+  try {
+    const { servers, env } = importJson($<HTMLTextAreaElement>("mcp_json").value);
+    addServers(servers, env);
+    $<HTMLTextAreaElement>("mcp_json").value = "";
+    $("mcp-status").textContent = `Imported ${servers.map((s) => s.name).join(", ")}. Press Save to start using ${servers.length > 1 ? "them" : "it"}.`;
+  } catch (err) {
+    $("mcp-status").textContent = `Couldn't read that: ${err instanceof Error ? err.message : err}`;
+  }
+});
+
 function fill(view: SettingsView): void {
   const s = (current = view.settings);
+  mcpServers = s.mcp_servers.map((x) => ({ ...x, args: [...x.args], env_keys: [...x.env_keys] }));
+  mcpEnv = {};
+  void loadMcp();
+  // Servers saved just now list their tools in the background.
+  if (mcpServers.length) for (const ms of [2500, 8000]) window.setTimeout(() => void loadMcp(), ms);
   $<HTMLSelectElement>("preset").value = presetFor(s);
   $("base_url").value = s.base_url;
   $("model").value = s.model;
@@ -217,6 +385,7 @@ function collect(): Settings {
       model: $("voice_model").value.trim(),
       language: $("voice_language").value.trim() || null,
     },
+    mcp_servers: mcpServers,
     voice_out: {
       enabled: $("vo_enabled").checked,
       replies: $("vo_replies").checked,
@@ -564,6 +733,7 @@ $<HTMLFormElement>("form").addEventListener("submit", async (e) => {
       settings: collect(),
       apiKey: apiKey ? apiKey : null,
       sttKey: sttKey ? sttKey : null,
+      mcpEnv,
     });
     fill(view);
     status.textContent = view.key_storage === "file" ? "Saved (keychain unavailable: key stored in a private file)." : "Saved.";

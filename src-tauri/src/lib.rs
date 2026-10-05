@@ -61,6 +61,8 @@ pub struct AppState {
     pub style: Arc<StyleNote>,
     /// What Waddle spends on model calls, and the monthly budget.
     pub ledger: Arc<Ledger>,
+    /// The user's MCP servers and their tools.
+    pub mcp: Arc<waddle_core::mcp::McpHub>,
     /// Cancels a Google sign-in that's waiting for the browser.
     pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
     /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
@@ -192,6 +194,7 @@ impl AppState {
         });
         *self.google.write().unwrap() = google;
         self.host.speech.set_settings(settings.voice_out.clone());
+        configure_mcp(&self.mcp, &settings, &self.secrets);
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
         *self.demo.write().unwrap() = demo;
@@ -474,6 +477,10 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
 
     session.keep_memory_in(data_dir.join("memory.json"));
     session.keep_history(history);
+    let mcp = waddle_core::mcp::McpHub::new(Some(data_dir.join("mcp_tools.json")));
+    session.keep_mcp(mcp.clone());
+    configure_mcp(&mcp, &settings, &secrets);
+    spawn_mcp_idle_stop(mcp.clone());
 
     app.manage(AppState {
         app: handle.clone(),
@@ -492,6 +499,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         google: RwLock::new(google),
         style,
         ledger,
+        mcp,
         google_signin: Mutex::default(),
         nudges: nudges.clone(),
         data_dir: data_dir.clone(),
@@ -521,6 +529,39 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The enabled MCP servers, with their secret environment values. Servers whose
+/// tools haven't been listed yet are started in the background to list them.
+fn configure_mcp(hub: &Arc<waddle_core::mcp::McpHub>, settings: &Settings, secrets: &Secrets) {
+    let env = secrets.mcp_env();
+    let launches: Vec<waddle_core::mcp::Launch> = settings
+        .mcp_servers
+        .iter()
+        .filter(|s| s.enabled)
+        .map(|s| waddle_core::mcp::Launch {
+            name: s.name.clone(),
+            command: s.command.clone(),
+            args: s.args.clone(),
+            env: s.env_keys.iter().filter_map(|k| Some((k.clone(), env.get(&s.name)?.get(k)?.clone()))).collect(),
+            trusted: s.trusted,
+        })
+        .collect();
+    let hub = hub.clone();
+    tauri::async_runtime::spawn(async move {
+        hub.configure(launches).await;
+        hub.refresh_unlisted().await;
+    });
+}
+
+/// Stops MCP servers nobody has used for a while.
+fn spawn_mcp_idle_stop(hub: Arc<waddle_core::mcp::McpHub>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            hub.stop_idle(waddle_core::mcp::IDLE_STOP).await;
+        }
+    });
 }
 
 /// Whether a second launch can find the first: always on Windows and macOS; on
@@ -582,6 +623,8 @@ pub fn run() {
             commands::clear_memory,
             commands::history_list,
             commands::speech_voices,
+            commands::mcp_status,
+            commands::mcp_test,
             commands::speech_test,
             commands::open_link,
             commands::skills_list,

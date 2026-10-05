@@ -45,7 +45,7 @@ fn fixture() -> Fixture {
 }
 
 async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
-    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None };
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None, mcp: None };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -155,6 +155,7 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
         selection: None,
         google: None,
         style: None,
+        mcp: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
@@ -396,7 +397,7 @@ async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
-    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None }
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None, mcp: None }
 }
 
 async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {

@@ -97,6 +97,19 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
     }
 }
 
+/// Tiers for MCP tools, by fixed rules. A server's own "read-only" hint only
+/// lowers the tier for servers the user marked trusted; an untrusted server
+/// could say anything about its tools.
+pub fn classify_mcp(server: &str, trusted: bool, read_only: bool, destructive: bool) -> Assessment {
+    match (trusted, read_only, destructive) {
+        (true, true, _) => assess(Tier::NonDestructive, format!("reads through {server} (a trusted MCP server; the tool says it only reads)")),
+        (true, false, true) => assess(Tier::Destructive, format!("may change or delete things through {server} (MCP)")),
+        (true, false, false) => assess(Tier::ScopedMutation, format!("changes something through {server} (a trusted MCP server)")),
+        (false, true, _) => assess(Tier::ScopedMutation, format!("uses {server} (MCP; the tool says it only reads, but the server isn't marked trusted)")),
+        (false, false, _) => assess(Tier::Destructive, format!("uses {server}, an MCP server not marked trusted")),
+    }
+}
+
 /// Paths under `self/` refer to Waddle's own source folder.
 pub fn is_self_path(path: &str) -> bool {
     let p = path.trim_start_matches("./");
@@ -213,6 +226,16 @@ pub fn classify_command(command: &str) -> Assessment {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mcp_tiers_follow_trust_not_the_servers_word() {
+        let t = |trusted, ro, de| classify_mcp("x", trusted, ro, de).tier;
+        assert_eq!(t(true, true, false), Tier::NonDestructive);
+        assert_eq!(t(true, false, false), Tier::ScopedMutation);
+        assert_eq!(t(true, false, true), Tier::Destructive);
+        assert_eq!(t(false, true, false), Tier::ScopedMutation, "an untrusted server's read-only hint only gets a countdown");
+        assert_eq!(t(false, false, false), Tier::Destructive);
+    }
+
     use super::*;
     use serde_json::json;
 

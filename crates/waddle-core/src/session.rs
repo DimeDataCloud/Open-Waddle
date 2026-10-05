@@ -117,6 +117,8 @@ pub struct Session {
     answers: Mutex<Vec<Answer>>,
     /// The conversation as the user saw it, for the history drawer.
     history: Mutex<Option<Arc<crate::history::History>>>,
+    /// Tools from the user's MCP servers.
+    mcp: Mutex<Option<Arc<crate::mcp::McpHub>>>,
 }
 
 /// True when the whole utterance is a request to stop ("stop", "wait!", "please cancel", "stop stop").
@@ -155,6 +157,7 @@ impl Session {
             deciding: Mutex::default(),
             answers: Mutex::default(),
             history: Mutex::default(),
+            mcp: Mutex::default(),
         })
     }
 
@@ -188,6 +191,11 @@ impl Session {
         if let Some(path) = self.memory_file.lock().unwrap().as_ref() {
             let _ = std::fs::remove_file(path);
         }
+    }
+
+    /// Offers the tools of the user's MCP servers to every task.
+    pub fn keep_mcp(&self, hub: Arc<crate::mcp::McpHub>) {
+        *self.mcp.lock().unwrap() = Some(hub);
     }
 
     /// Research answers are also kept in `history`, so their button works after a restart.
@@ -273,6 +281,7 @@ impl Session {
             selection: None,
             google: config.google,
             style: config.style,
+            mcp: self.mcp.lock().unwrap().clone(),
         }
     }
 

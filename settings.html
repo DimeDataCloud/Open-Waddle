@@ -130,6 +130,23 @@
         </fieldset>
 
         <fieldset>
+          <legend>Tools (MCP)</legend>
+          <p class="muted">Connect apps and services that offer an MCP server (GitHub, Notion, a database, your notes…) and Waddle can use their tools. Each server is a program Waddle starts on this computer when a task needs it. Tools from a server you haven't marked <b>trusted</b> always wait for your click; a trusted server's read-only tools run straight away and its others after a countdown. What tools return is treated like a web page: never as your instructions.</p>
+          <ul id="mcp-list" class="skills"></ul>
+          <details id="mcp-add">
+            <summary>Add a server</summary>
+            <label>Name <input id="mcp_name" placeholder="github" maxlength="24" /></label>
+            <label>Command <input id="mcp_command" placeholder="npx -y @modelcontextprotocol/server-github" spellcheck="false" /></label>
+            <label>Environment: one per line as NAME=value (values go to the keychain) <textarea id="mcp_env" rows="2" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=…" spellcheck="false"></textarea></label>
+            <label class="check"><input id="mcp_trusted" type="checkbox" /> Trusted</label>
+            <p><button type="button" id="mcp-test" class="link">Test</button> <button type="button" id="mcp-add-btn" class="link">Add</button> <span id="mcp-status" class="muted"></span></p>
+            <label>Or paste a server's JSON config (the "mcpServers" block its instructions show) <textarea id="mcp_json" rows="3" spellcheck="false"></textarea></label>
+            <button type="button" id="mcp-import" class="link">Import</button>
+          </details>
+          <p class="muted">Changes take effect when you press Save.</p>
+        </fieldset>
+
+        <fieldset>
           <legend>Nudges</legend>
           <p class="muted">With Google connected, Waddle taps you on the shoulder. In full screen it shows a small "!" first and waits until you're back (or five minutes); meetings always arrive before they start.</p>
           <label class="check"><input id="meeting_nudges" type="checkbox" /> Five minutes before a meeting, with a Join button</label>

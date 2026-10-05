@@ -22,6 +22,7 @@ pub mod facts;
 pub mod google;
 pub mod history;
 pub mod ledger;
+pub mod mcp;
 pub mod nudges;
 pub mod reminders;
 pub mod traces;

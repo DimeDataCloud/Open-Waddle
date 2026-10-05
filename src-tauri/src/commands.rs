@@ -93,6 +93,48 @@ pub fn speech_test(state: State<'_, AppState>, voice: String, rate: f64) -> CmdR
     Ok(())
 }
 
+#[derive(Serialize)]
+pub struct McpStatus {
+    pub name: String,
+    pub tools: Vec<String>,
+    pub problem: Option<String>,
+    /// Variables that have a saved value.
+    pub saved_env: Vec<String>,
+}
+
+/// Each MCP server's tools (as last listed) and any problem starting it.
+#[tauri::command]
+pub fn mcp_status(state: State<'_, AppState>) -> Vec<McpStatus> {
+    let settings = state.settings.read().unwrap().clone();
+    let env = state.secrets.mcp_env();
+    settings
+        .mcp_servers
+        .iter()
+        .map(|s| McpStatus {
+            name: s.name.clone(),
+            tools: state.mcp.tools_of(&s.name).into_iter().map(|t| t.name).collect(),
+            problem: state.mcp.problem(&s.name),
+            saved_env: env.get(&s.name).map(|m| m.keys().cloned().collect()).unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// Starts a server once and lists its tools (Settings → Test). Values typed but
+/// not saved yet are used along with saved ones.
+#[tauri::command]
+pub async fn mcp_test(state: State<'_, AppState>, server: waddle_core::config::McpServerSettings, env: std::collections::BTreeMap<String, String>) -> CmdResult<Vec<String>> {
+    waddle_core::config::check_mcp_servers(std::slice::from_ref(&server)).map_err(err)?;
+    let saved = state.secrets.mcp_env().remove(&server.name).unwrap_or_default();
+    let values: Vec<(String, String)> = server
+        .env_keys
+        .iter()
+        .filter_map(|k| env.get(k).filter(|v| !v.is_empty()).or_else(|| saved.get(k)).map(|v| (k.clone(), v.clone())))
+        .collect();
+    let launch = waddle_core::mcp::Launch { name: server.name, command: server.command, args: server.args, env: values, trusted: server.trusted };
+    let tools = waddle_core::mcp::probe(&launch).await.map_err(|e| format!("{e:#}"))?;
+    Ok(tools.into_iter().map(|t| if t.read_only { format!("{} (reads only)", t.name) } else { t.name }).collect())
+}
+
 /// The conversation so far, for the history drawer.
 #[tauri::command]
 pub fn history_list(state: State<'_, AppState>) -> Vec<waddle_core::history::Entry> {
@@ -375,13 +417,35 @@ pub async fn save_settings(
     settings: Settings,
     api_key: Option<String>,
     stt_key: Option<String>,
+    mcp_env: Option<crate::secrets::McpEnv>,
 ) -> CmdResult<SettingsView> {
+    waddle_core::config::check_mcp_servers(&settings.mcp_servers).map_err(err)?;
     let mut storage = None;
     if let Some(k) = api_key {
         storage = Some(state.secrets.set(Secret::LlmKey, &k).map_err(err)?);
     }
     if let Some(k) = stt_key {
         state.secrets.set(Secret::SttKey, &k).map_err(err)?;
+    }
+    // New MCP values replace old ones; values of servers or variables that are gone are dropped.
+    let mut env = state.secrets.mcp_env();
+    for (server, values) in mcp_env.unwrap_or_default() {
+        let slot = env.entry(server).or_default();
+        for (k, v) in values {
+            if !v.is_empty() {
+                slot.insert(k, v);
+            }
+        }
+    }
+    env.retain(|server, values| match settings.mcp_servers.iter().find(|s| &s.name == server) {
+        Some(s) => {
+            values.retain(|k, _| s.env_keys.contains(k));
+            !values.is_empty()
+        }
+        None => false,
+    });
+    if env != state.secrets.mcp_env() {
+        state.secrets.set_mcp_env(&env).map_err(err)?;
     }
     state.apply_settings(settings).map_err(err)?;
     let s = state.settings.read().unwrap().clone();

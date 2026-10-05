@@ -172,6 +172,26 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
         .await,
     );
 
+    let servers: Vec<String> = settings.mcp_servers.iter().filter(|s| s.enabled).map(|s| s.name.clone()).collect();
+    let hub = state.mcp.clone();
+    checks.push(
+        run_check("Tools (MCP)", || async move {
+            if servers.is_empty() {
+                return Ok((Status::Skip, "no MCP servers added".into()));
+            }
+            let mut ok = vec![];
+            let mut bad = vec![];
+            for name in &servers {
+                match hub.refresh(name, &tokio_util::sync::CancellationToken::new()).await {
+                    Ok(tools) => ok.push(format!("{name}: {} tools", tools.len())),
+                    Err(e) => bad.push(format!("{name}: {e:#}")),
+                }
+            }
+            Ok(if bad.is_empty() { (Status::Pass, ok.join("; ")) } else { (Status::Warn, [bad, ok].concat().join("; ")) })
+        })
+        .await,
+    );
+
     let speak = settings.voice_out.enabled;
     checks.push(
         run_check("Spoken replies", || async move {
