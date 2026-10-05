@@ -481,6 +481,84 @@ async function loadSkills(): Promise<void> {
   );
 }
 
+interface RoutineView {
+  id: string;
+  goal: string;
+  schedule: string;
+  next: string;
+  paused: boolean;
+  last_result: string | null;
+}
+
+function renderRoutines(list: RoutineView[]): void {
+  const ul = $("routines");
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "No routines yet.";
+    ul.replaceChildren(li);
+    return;
+  }
+  ul.replaceChildren(
+    ...list.map((r) => {
+      const li = document.createElement("li");
+      const text = document.createElement("div");
+      text.className = "mcp-server";
+      const goal = document.createElement("strong");
+      goal.textContent = r.goal;
+      const when = document.createElement("div");
+      when.className = "tools";
+      when.textContent = `${r.schedule}${r.paused ? " (paused)" : r.next === "finished" ? " (finished)" : `, next ${r.next}`}`;
+      text.append(goal, when);
+      if (r.last_result) {
+        const last = document.createElement("div");
+        last.className = r.last_result.startsWith("Done") ? "tools" : "problem";
+        last.textContent = `Last time: ${r.last_result}`;
+        text.append(last);
+      }
+      const actions = document.createElement("div");
+      actions.className = "mcp-actions";
+      const pause = document.createElement("button");
+      pause.type = "button";
+      pause.className = "link";
+      pause.textContent = r.paused ? "Resume" : "Pause";
+      pause.onclick = async () => renderRoutines(await invoke<RoutineView[]>("routine_pause", { id: r.id, paused: !r.paused }));
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "link";
+      del.textContent = "Delete";
+      del.onclick = async () => renderRoutines(await invoke<RoutineView[]>("routine_delete", { id: r.id }));
+      actions.append(pause, del);
+      li.append(text, actions);
+      return li;
+    }),
+  );
+}
+
+async function loadRoutines(): Promise<void> {
+  try {
+    renderRoutines(await invoke<RoutineView[]>("routines_list"));
+  } catch {
+    // Shown empty.
+  }
+}
+
+$("routine-add").addEventListener("click", async () => {
+  const status = $("routine-status");
+  const goal = $("routine_goal").value.trim();
+  if (!goal) {
+    status.textContent = "Say what the routine should do.";
+    return;
+  }
+  try {
+    renderRoutines(await invoke<RoutineView[]>("routine_add", { goal, time: $("routine_time").value, days: [$<HTMLSelectElement>("routine_days").value] }));
+    $("routine_goal").value = "";
+    status.textContent = "Added.";
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
+
 async function loadFacts(): Promise<void> {
   const facts = await invoke<{ id: string; text: string }[]>("facts_list");
   const list = $("facts");
@@ -776,6 +854,7 @@ void loadGoogle();
 void loadStyle();
 void loadBrowser();
 void loadVoices();
+void loadRoutines();
 setInterval(() => {
   void loadSpending();
   void loadBrowser();

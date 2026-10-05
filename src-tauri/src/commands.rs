@@ -94,6 +94,64 @@ pub fn speech_test(state: State<'_, AppState>, voice: String, rate: f64) -> CmdR
 }
 
 #[derive(Serialize)]
+pub struct RoutineView {
+    pub id: String,
+    pub goal: String,
+    pub schedule: String,
+    /// "Tue 6 Oct 08:45", "paused" or "finished".
+    pub next: String,
+    pub paused: bool,
+    pub last_result: Option<String>,
+}
+
+fn routine_views(state: &AppState) -> Vec<RoutineView> {
+    use chrono::TimeZone;
+    state
+        .reminders
+        .routines
+        .list()
+        .into_iter()
+        .map(|r| RoutineView {
+            next: match (r.paused, r.next_ms) {
+                (true, _) => "paused".into(),
+                (false, Some(ms)) => chrono::Local.timestamp_millis_opt(ms).single().map(|t| t.format("%a %-d %b %H:%M").to_string()).unwrap_or_default(),
+                (false, None) => "finished".into(),
+            },
+            schedule: r.schedule(),
+            id: r.id,
+            goal: r.goal,
+            paused: r.paused,
+            last_result: r.last_result,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn routines_list(state: State<'_, AppState>) -> Vec<RoutineView> {
+    routine_views(&state)
+}
+
+/// Adds a routine from Settings (the user's own, so no approval card).
+#[tauri::command]
+pub fn routine_add(state: State<'_, AppState>, goal: String, time: String, days: Vec<String>) -> CmdResult<Vec<RoutineView>> {
+    let mask = waddle_core::routines::parse_days(&serde_json::json!(days)).map_err(err)?;
+    state.reminders.routines.add(&goal, &time, mask, None, &chrono::Local::now()).map_err(err)?;
+    Ok(routine_views(&state))
+}
+
+#[tauri::command]
+pub fn routine_pause(state: State<'_, AppState>, id: String, paused: bool) -> CmdResult<Vec<RoutineView>> {
+    state.reminders.routines.set_paused(&id, paused, &chrono::Local::now()).map_err(err)?;
+    Ok(routine_views(&state))
+}
+
+#[tauri::command]
+pub fn routine_delete(state: State<'_, AppState>, id: String) -> CmdResult<Vec<RoutineView>> {
+    state.reminders.routines.delete(&id).map_err(err)?;
+    Ok(routine_views(&state))
+}
+
+#[derive(Serialize)]
 pub struct McpStatus {
     pub name: String,
     pub tools: Vec<String>,

@@ -437,8 +437,8 @@ async fn delegation_stops_at_the_depth_limit() {
     let deps = deps_with(&f, host, provider.clone(), None, None);
     run_with(&deps).await;
     let requests = provider.requests.lock().unwrap().clone();
-    // Depth-2 agent is not offered `delegate`; its attempt is refused.
-    let refused = requests.iter().flatten().any(|m| m.text.contains("delegation depth limit (2) reached"));
+    // Depth-2 agent is not offered `delegate`; its attempt is refused without running.
+    let refused = requests.iter().flatten().any(|m| m.text.contains("`delegate` isn't one of your tools"));
     assert!(refused);
 }
 
@@ -967,4 +967,70 @@ async fn the_conversation_survives_a_restart_until_it_goes_stale() {
     third.user_message("hello".into());
     wait_until(|| provider.request_count() == 3).await;
     assert!(!saw(2, "ancient"));
+}
+
+#[tokio::test]
+async fn a_routine_runs_without_the_screen_and_asks_before_changes() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::reminders::ReminderStore::new(f.workspace.root().join("reminders.json")));
+    let now = chrono::Local::now();
+    let routine = store.routines.add("Write today's notes file", "23:59", waddle_core::routines::EVERY_DAY, None, &now).unwrap();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("write_file", json!({"path": "notes.txt", "content": "notes"}))]),
+        reply("Wrote notes.txt.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let config = SessionConfig { reminders: Some(store.clone()), ..session_config(&f, provider.clone()) };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+
+    assert!(session.run_routine(&routine));
+    assert!(!session.run_routine(&routine), "one task at a time");
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+
+    let offered = provider.tools.lock().unwrap()[0].clone();
+    for gone in ["list_windows", "click", "type_text", "look_at_screen", "routine"] {
+        assert!(!offered.contains(&gone.to_string()), "{gone} offered to a routine: {offered:?}");
+    }
+    assert!(offered.contains(&"write_file".to_string()));
+    let system = provider.requests.lock().unwrap()[0][0].text.clone();
+    assert!(system.contains("routine the user scheduled (every day at 23:59)"), "{system}");
+    // Even a tier-2 change waits for a click (no countdown) when nobody may be watching.
+    let asked = host.approvals.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1);
+    assert_eq!((asked[0].tool.as_str(), asked[0].countdown_ms), ("write_file", None));
+    assert_eq!(store.routines.list()[0].last_result.as_deref(), Some("Done"));
+}
+
+#[tokio::test]
+async fn tools_that_were_not_offered_are_not_run() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("", vec![call("click", json!({"x": 10, "y": 10}))]), reply("Okay.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    *host.gui.lock().unwrap() = false;
+    let (outcome, _) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    assert_eq!(outcome, Outcome::Done);
+    assert!(host.gui_calls.lock().unwrap().is_empty(), "no click without the screen tools");
+    let after = provider.requests.lock().unwrap()[1].clone();
+    assert!(after.last().unwrap().text.contains("`click` isn't one of your tools"));
+}
+
+#[tokio::test]
+async fn setting_up_a_routine_needs_a_click() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::reminders::ReminderStore::new(f.workspace.root().join("reminders.json")));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("routine", json!({"action": "add", "goal": "Summarise my unread email", "time": "08:45", "days": ["weekdays"]}))]),
+        reply("", vec![call("routine", json!({"action": "list"}))]),
+        reply("Set.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = AgentDeps { reminders: Some(store.clone()), ..deps_with(&f, host.clone(), provider.clone(), None, None) };
+    let env = host.env();
+    let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    assert_eq!(agent.run("every weekday at 8:45 summarise my email", &[], &mut rx).await.outcome, Outcome::Done);
+    let asked = host.approvals.lock().unwrap().clone();
+    assert_eq!(asked.iter().map(|a| (a.tool.as_str(), a.tier, a.countdown_ms)).collect::<Vec<_>>(), vec![("routine", 3, None)], "only the add asks");
+    assert!(asked[0].summary.contains("weekdays at 08:45"), "{}", asked[0].summary);
+    assert_eq!(store.routines.list().len(), 1);
 }

@@ -25,6 +25,7 @@ pub mod ledger;
 pub mod mcp;
 pub mod nudges;
 pub mod reminders;
+pub mod routines;
 pub mod traces;
 pub mod untrusted;
 

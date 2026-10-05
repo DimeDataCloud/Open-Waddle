@@ -147,7 +147,7 @@
         </fieldset>
 
         <fieldset>
-          <legend>Nudges</legend>
+          <legend>Nudges &amp; routines</legend>
           <p class="muted">With Google connected, Waddle taps you on the shoulder. In full screen it shows a small "!" first and waits until you're back (or five minutes); meetings always arrive before they start.</p>
           <label class="check"><input id="meeting_nudges" type="checkbox" /> Five minutes before a meeting, with a Join button</label>
           <label class="check"><input id="mail_nudges" type="checkbox" /> When important email arrives (judged from the sender, subject and first line only)</label>
@@ -156,6 +156,29 @@
             <textarea id="muted_senders" rows="2" placeholder="news@shop.example&#10;@marketing.example"></textarea>
           </label>
           <label class="check"><input id="autostart" type="checkbox" /> Start Waddle when I sign in to Windows (nudges need it running)</label>
+          <h4>Routines</h4>
+          <p class="muted">Tasks Waddle does on its own on a schedule, like "summarise my unread email" every weekday at 8:45. A routine works without the screen (email, calendar, files, connected tools) and asks before changing anything. If Waddle isn't running at the time, it skips that one. You can also just ask Waddle: "every Friday at 4pm, list what I did this week".</p>
+          <ul id="routines" class="skills"></ul>
+          <div class="routine-add">
+            <input id="routine_goal" placeholder="What to do, e.g. Summarise my unread email" />
+            <div class="add-row">
+              <input id="routine_time" type="time" value="08:45" />
+              <select id="routine_days">
+                <option value="weekdays">Weekdays</option>
+                <option value="daily">Every day</option>
+                <option value="weekends">Weekends</option>
+                <option value="mon">Mondays</option>
+                <option value="tue">Tuesdays</option>
+                <option value="wed">Wednesdays</option>
+                <option value="thu">Thursdays</option>
+                <option value="fri">Fridays</option>
+                <option value="sat">Saturdays</option>
+                <option value="sun">Sundays</option>
+              </select>
+              <button type="button" id="routine-add" class="link">Add</button>
+            </div>
+            <span id="routine-status" class="muted"></span>
+          </div>
         </fieldset>
 
         <fieldset>

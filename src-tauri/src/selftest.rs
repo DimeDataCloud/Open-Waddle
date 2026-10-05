@@ -192,6 +192,20 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
         .await,
     );
 
+    let routines = state.reminders.routines.list();
+    checks.push(
+        run_check("Routines", || async move {
+            if routines.is_empty() {
+                return Ok((Status::Skip, "none set up".into()));
+            }
+            let paused = routines.iter().filter(|r| r.paused).count();
+            let missed = routines.iter().filter(|r| r.last_result.as_deref().is_some_and(|l| !l.starts_with("Done"))).count();
+            let detail = format!("{} set up, {paused} paused; {missed} didn't finish last time", routines.len());
+            Ok((if missed > 0 { Status::Warn } else { Status::Pass }, detail))
+        })
+        .await,
+    );
+
     let speak = settings.voice_out.enabled;
     checks.push(
         run_check("Spoken replies", || async move {

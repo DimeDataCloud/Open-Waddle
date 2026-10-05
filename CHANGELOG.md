@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.7: routines
+
+- **Routines: tasks Waddle does on a schedule.** "Every weekday at 8:45, summarise my unread email." "Every Friday at 4pm, list the files I changed this week." "Today at 6pm, draft my weekly report."
+  - Ask in chat (it needs your click to set up), or add them in Settings → **Nudges & routines**. Pause, resume or delete them there too, or ask.
+  - When one is due, the duck says so ("🔁 Routine…") and does it. The result shows in the bubble and the conversation history, and is read aloud if spoken replies are on.
+- **Safe while you're busy or away.**
+  - A routine never touches the screen, mouse or keyboard. It uses email, calendar, files and connected tools.
+  - Every step that would change something waits for your click; there are no countdowns.
+  - A routine can't set up more routines.
+- **Never late.** If Waddle wasn't running at the time (the computer was off), the routine is marked missed and runs next time. Waddle says so; it doesn't do a morning's routine at midday. If a task is running when one comes due, the routine waits for it.
+- **Safer tool calls everywhere.** Waddle now refuses any tool it wasn't offered for the current task (for example a made-up tool name), instead of trying to run it.
+
 ## 0.2.6: MCP tools
 
 - **Waddle can use MCP servers.** Add the MCP servers of apps and services you use (GitHub, Notion, a folder of notes, a database…) in the new Settings → **Tools (MCP)** section, and their tools are offered to every task. See [docs/MCP.md](docs/MCP.md).

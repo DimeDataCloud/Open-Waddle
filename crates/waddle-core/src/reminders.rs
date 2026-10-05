@@ -22,13 +22,16 @@ pub struct Reminder {
 pub struct ReminderStore {
     path: PathBuf,
     items: Mutex<Vec<Reminder>>,
+    /// Scheduled tasks, kept beside the reminders (`routines.json`).
+    pub routines: crate::routines::RoutineStore,
 }
 
 impl ReminderStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let items = crate::store::load_json(&path);
-        Self { path, items: Mutex::new(items) }
+        let routines = crate::routines::RoutineStore::new(path.with_file_name("routines.json"));
+        Self { path, items: Mutex::new(items), routines }
     }
 
     fn save(&self, items: &[Reminder]) -> anyhow::Result<()> {

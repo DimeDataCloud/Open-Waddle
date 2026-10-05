@@ -326,7 +326,7 @@ impl Host for TauriHost {
             "Linux"
         };
         let caps = Capabilities { gui: true, accessibility: cfg!(windows), browser: self.browser.connected(), ..Default::default() };
-        EnvInfo { os: os.into(), screen_w: w, screen_h: h, caps }
+        EnvInfo { os: os.into(), screen_w: w, screen_h: h, caps, background: None }
     }
 
     async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
@@ -584,6 +584,31 @@ impl Host for TauriHost {
     }
 }
 
+/// Starts a routine that's due when Waddle is free, and says which ones were missed.
+fn run_due_routines(host: &Arc<TauriHost>, store: &waddle_core::reminders::ReminderStore) {
+    use waddle_core::routines::Due;
+    let Some(state) = host.app.try_state::<crate::AppState>() else { return };
+    let free = !state.session.is_busy();
+    for due in store.routines.take_due(&chrono::Local::now(), free) {
+        match due {
+            Due::Run(r) => {
+                log::info!("routine {} due: starting", r.id);
+                let text = format!("🔁 Routine ({}): {}", r.schedule(), r.goal);
+                host.emit(AgentEvent::Notice { text: text.clone() });
+                host.record(Who::Nudge, &text);
+                if !state.session.run_routine(&r) {
+                    store.routines.record(&r.id, "Skipped: something else was running");
+                }
+            }
+            Due::Missed(r) => {
+                let text = format!("I missed your routine \"{}\" ({}) because I wasn't running. It'll run next time.", r.goal, r.schedule());
+                host.emit(AgentEvent::Notice { text: text.clone() });
+                host.record(Who::Nudge, &text);
+            }
+        }
+    }
+}
+
 /// Pops up reminders when they're due, including ones that came due while Waddle was closed.
 pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::reminders::ReminderStore>) {
     std::thread::Builder::new()
@@ -599,6 +624,7 @@ pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::remind
                     host.record(Who::Reminder, &r.text);
                     host.speech.announce(&format!("Reminder: {}", r.text), host.front_window().is_some_and(|w| w.2));
                 }
+                run_due_routines(&host, &store);
                 std::thread::sleep(Duration::from_secs(5));
             }
         })

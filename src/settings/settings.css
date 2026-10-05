@@ -319,3 +319,20 @@ textarea {
 #mcp-add {
   margin-top: 8px;
 }
+
+.routine-add {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.routine-add .add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.routine-add .add-row input[type="time"] {
+  flex: 0 0 auto;
+}

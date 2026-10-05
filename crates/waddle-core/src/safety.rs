@@ -51,6 +51,10 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "scroll" => assess(Tier::NonDestructive, "scrolls"),
         "read_clipboard" => assess(Tier::NonDestructive, "reads the clipboard"),
         "reminder" => assess(Tier::NonDestructive, "manages reminders"),
+        "routine" if matches!(arg("action"), "add" | "") => {
+            assess(Tier::Destructive, "sets up a task that runs on its own on a schedule (it acts for you later, asking before changes)")
+        }
+        "routine" => assess(Tier::NonDestructive, "looks at, pauses or removes routines"),
         "remember" | "forget" => assess(Tier::NonDestructive, "updates the facts Waddle keeps about you (listed in Settings)"),
         "replace_selection" => assess(Tier::ScopedMutation, "replaces the text you selected"),
         "mail_search" | "mail_read" | "contacts_find" | "calendar_events" | "calendar_free" => assess(Tier::NonDestructive, "reads your Google account"),
