@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3: multiple monitors
+
+- **Waddle follows you across monitors.** When you've been working in a window on another monitor for a couple of seconds, the duck moves there and drops in from the side you came from. During a task it stays put. Settings → Character → "Follow me across monitors" (on by default); off keeps it on the main monitor.
+- **Everything follows the duck's monitor:** screenshots, window positions, clicks and scaling, including a 200% Surface screen next to a 100% external one.
+- **Clicks on other monitors land correctly on Windows.** The input library only scaled pointer moves to the main monitor; points elsewhere now use the whole virtual desktop.
+- **The model knows what it can't see.** Windows on another monitor are listed as "on another screen" instead of with coordinates off the screenshot.
+- On a monitor other than the main one, clicks on web pages happen inside the page, because Chrome's screen coordinates are only reliable on the main monitor.
+- If the duck's monitor is unplugged, it returns to the main one.
+
 ## 0.2.2: leaner, faster, cheaper
 
 - **Spending meter and monthly budget.**

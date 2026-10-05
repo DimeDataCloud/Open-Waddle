@@ -82,9 +82,10 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
     );
 
     let (lw, lh) = g.screen_logical();
+    let origin = (g.screen_x, g.screen_y);
     checks.push(
         run_check("Screenshot", || async move {
-            let (image, w, h) = blocking(move || actuate::screenshot(lw.round() as u32, lh.round() as u32)).await?;
+            let (image, w, h) = blocking(move || actuate::screenshot(lw.round() as u32, lh.round() as u32, origin)).await?;
             Ok((Status::Pass, format!("{w}x{h}, {} KB", image.base64.len() * 3 / 4 / 1024)))
         })
         .await,

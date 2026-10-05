@@ -25,6 +25,7 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
   - Windows: native EnumWindows (z-order), DWM extended frame bounds, cloaked-window filter, process names
   - macOS/Linux: the `x-win` crate
   - an event goes out only when something changed
+- **Monitors:** the overlay covers one monitor's work area at a time. A thread checks every 2 s: display changes (rotation, docking, scale, taskbar) re-place it at once, and with "follow me" on it moves to the monitor of the focused window after two sightings, never mid-task. Screenshots, window and element coordinates and clicks all use that monitor's geometry. On Windows, pointer moves off the primary monitor use `SendInput` with `MOUSEEVENTF_VIRTUALDESK`, because enigo scales absolute moves to the primary only.
 - **Platforms:** the visible parts of each window's top edge (windows in front hide parts of the edges behind them), plus the floor.
 - **Physics:** gravity; landing on the first edge crossed; riding a window that moves (tracked by window id); falling when its edge disappears.
 - **Pathfinding:**

@@ -13,6 +13,7 @@ interface Settings {
   command_timeout_secs: number;
   workspace_dir: string | null;
   wander: boolean;
+  follow_monitors: boolean;
   record_traces: boolean;
   no_training: boolean;
   google_client_id: string;
@@ -113,6 +114,7 @@ function fill(view: SettingsView): void {
   $("max_delegation_depth").value = String(s.max_delegation_depth);
   $("color").value = s.character.color;
   $("wander").checked = s.wander;
+  $("follow_monitors").checked = s.follow_monitors;
   $("record_traces").checked = s.record_traces;
   $("no_training").checked = s.no_training;
   $("google_client_id").value = s.google_client_id;
@@ -159,6 +161,7 @@ function collect(): Settings {
     command_timeout_secs: num("command_timeout_secs", 60),
     workspace_dir: $("workspace_dir").value.trim() || null,
     wander: $("wander").checked,
+    follow_monitors: $("follow_monitors").checked,
     record_traces: $("record_traces").checked,
     no_training: $("no_training").checked,
     google_client_id: $("google_client_id").value.trim(),

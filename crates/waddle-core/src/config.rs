@@ -177,6 +177,8 @@ pub struct Settings {
     /// None = Documents/Waddle.
     pub workspace_dir: Option<PathBuf>,
     pub wander: bool,
+    /// The duck moves to the monitor the user is working on.
+    pub follow_monitors: bool,
     /// Folder holding Waddle's own source code. When set, Waddle can read it
     /// (as `self/...`) and edit it with approval. None = self-editing off.
     pub self_source_dir: Option<PathBuf>,
@@ -235,6 +237,7 @@ impl Default for Settings {
             command_timeout_secs: 60,
             workspace_dir: None,
             wander: true,
+            follow_monitors: true,
             self_source_dir: None,
             max_delegation_depth: 2,
             character: CharacterSettings::default(),

@@ -121,6 +121,7 @@ export interface Events {
   "nudge:chime": null;
   "undo:done": { id: string; undone: boolean };
   "power:battery": boolean;
+  "monitor:moved": { from: "left" | "right" };
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {

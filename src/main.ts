@@ -276,6 +276,13 @@ canvas.addEventListener("contextmenu", (e) => {
 
 void on("desktop:windows", setWindows);
 void on("power:battery", (b) => (idleTick = b ? 250 : IDLE_TICK_MS));
+void on("monitor:moved", ({ from }) => {
+  // The window may not have its new size yet; enter once it has.
+  window.setTimeout(() => {
+    duck.enterFrom(from, screen);
+    touch();
+  }, 150);
+});
 
 void on("duck:move", ({ id, x, y, purpose }) => {
   touch();

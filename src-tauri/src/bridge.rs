@@ -160,6 +160,14 @@ impl TauriHost {
         self.emit_overlay("desktop:windows", platforms);
     }
 
+    /// The middle of the window the user is working in, in physical desktop pixels.
+    pub fn focused_center_physical(&self) -> Option<(f64, f64)> {
+        let list = self.windows.read().unwrap();
+        let w = list.iter().find(|w| w.focused)?;
+        let scale = if desktop::BOUNDS_ARE_LOGICAL { self.geometry().scale } else { 1.0 };
+        Some(((w.x as f64 + w.w as f64 / 2.0) * scale, (w.y as f64 + w.h as f64 / 2.0) * scale))
+    }
+
     /// Sends the platforms again after the display changed (same windows, new conversion).
     pub fn refresh_platforms(&self) {
         let platforms = self.platforms();
@@ -300,8 +308,11 @@ impl Host for TauriHost {
         let mut r = self.browser.request(cmd, args).await?;
         if cmd == "locate" {
             anyhow::ensure!(!r.is_null(), "that element isn't on the page any more");
-            // Page coordinates → logical screen pixels, for a real click.
-            if let Some((x, y)) = waddle_core::tools::browser::screen_point(&r, self.geometry().scale) {
+            // Page coordinates → logical screen pixels, for a real click. Chrome's screen
+            // coordinates are only reliable on the primary monitor; elsewhere the click
+            // happens inside the page instead.
+            let g = self.geometry();
+            if let Some((x, y)) = waddle_core::tools::browser::screen_point(&r, g.scale).filter(|_| g.primary) {
                 r["screen_x"] = json!(x);
                 r["screen_y"] = json!(y);
             }
@@ -372,7 +383,8 @@ impl Host for TauriHost {
             GuiAction::LookAtScreen => {
                 self.act("look");
                 let (w, h) = g.screen_logical();
-                let (image, width, height) = Self::blocking(move || actuate::screenshot(w.round() as u32, h.round() as u32)).await?;
+                let origin = (g.screen_x, g.screen_y);
+                let (image, width, height) = Self::blocking(move || actuate::screenshot(w.round() as u32, h.round() as u32, origin)).await?;
                 Ok(GuiResult::Screenshot { image, width, height })
             }
             GuiAction::FindElements { window } => {

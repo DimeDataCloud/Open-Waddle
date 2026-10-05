@@ -254,15 +254,23 @@ pub fn open_settings_soon(app: &AppHandle) {
     });
 }
 
-/// Where the overlay belongs: the primary monitor's work area (not the full
-/// screen, so Windows doesn't treat it as a full-screen app).
-fn monitor_geometry(window: &tauri::WebviewWindow) -> anyhow::Result<Geometry> {
-    let monitor = window
-        .primary_monitor()?
-        .or(window.current_monitor()?)
-        .ok_or_else(|| anyhow::anyhow!("no monitor"))?;
+/// The overlay's place on a monitor: its work area (not the full screen, so
+/// Windows doesn't treat it as a full-screen app). `at` picks the monitor that
+/// contains that physical point; otherwise, or if none does, the primary one.
+fn monitor_geometry(window: &tauri::WebviewWindow, at: Option<(f64, f64)>) -> anyhow::Result<Geometry> {
+    let primary = window.primary_monitor()?;
+    let containing = match at {
+        Some((x, y)) => window.available_monitors()?.into_iter().find(|m| {
+            let (p, s) = (m.position(), m.size());
+            x >= p.x as f64 && y >= p.y as f64 && x < p.x as f64 + s.width as f64 && y < p.y as f64 + s.height as f64
+        }),
+        None => None,
+    };
+    let monitor = containing.or_else(|| primary.clone()).or(window.current_monitor()?).ok_or_else(|| anyhow::anyhow!("no monitor"))?;
+    let is_primary = primary.as_ref().is_none_or(|p| p.position() == monitor.position() && p.size() == monitor.size());
     let work = monitor.work_area();
     Ok(Geometry {
+        primary: is_primary,
         origin_x: work.position.x,
         origin_y: work.position.y,
         width: work.size.width,
@@ -285,30 +293,62 @@ fn apply_geometry(window: &tauri::WebviewWindow, g: &Geometry) -> anyhow::Result
 /// Places the overlay over the primary monitor's work area.
 fn place_overlay(app: &AppHandle) -> anyhow::Result<Geometry> {
     let window = app.get_webview_window("overlay").ok_or_else(|| anyhow::anyhow!("overlay window missing"))?;
-    let geometry = monitor_geometry(&window)?;
+    let geometry = monitor_geometry(&window, None)?;
     apply_geometry(&window, &geometry)?;
     Ok(geometry)
 }
 
-/// Follows display changes: rotating the Surface, docking, a new resolution or
-/// scale, or the taskbar moving. Checked every 2 s; the overlay and every
-/// coordinate conversion move to the new layout.
+/// Keeps the overlay on the right monitor, checked every 2 s:
+/// - display changes (rotating the Surface, docking, a new resolution or scale,
+///   the taskbar moving) re-place it at once;
+/// - with "follow me" on, it moves to the monitor of the window the user is
+///   working in once they've been there for two checks, but never mid-task;
+/// - with it off, or if its monitor is unplugged, it goes back to the primary one.
 fn spawn_display_watch(app: AppHandle, overlay: Arc<OverlayState>, host: Arc<TauriHost>) {
     let spawned = std::thread::Builder::new().name("waddle-display".into()).spawn(move || {
         let Some(window) = app.get_webview_window("overlay") else { return };
+        let mut pending: Option<(i32, i32)> = None;
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            let Ok(now) = monitor_geometry(&window) else { continue };
-            if now == overlay.geometry() {
+            let follow = app.try_state::<AppState>().is_some_and(|s| s.settings.read().unwrap().follow_monitors);
+            let current = overlay.geometry();
+            let here = ((current.screen_x as f64) + current.screen_w as f64 / 2.0, (current.screen_y as f64) + current.screen_h as f64 / 2.0);
+            let point = match (follow, host.is_busy()) {
+                (true, false) => host.focused_center_physical().or(Some(here)),
+                (true, true) => Some(here),
+                (false, _) => None,
+            };
+            let Ok(next) = monitor_geometry(&window, point) else { continue };
+            if next == current {
+                pending = None;
                 continue;
             }
-            log::info!("display changed: {}x{} at {}% → re-placing the overlay", now.width, now.height, (now.scale * 100.0).round());
-            if let Err(e) = apply_geometry(&window, &now) {
+            let moving = (next.screen_x, next.screen_y) != (current.screen_x, current.screen_y);
+            // Our monitor is still there: wait for a second sighting before hopping across.
+            let still_here = monitor_geometry(&window, Some(here)).is_ok_and(|g| (g.screen_x, g.screen_y) == (current.screen_x, current.screen_y));
+            if moving && still_here && follow && pending != Some((next.screen_x, next.screen_y)) {
+                pending = Some((next.screen_x, next.screen_y));
+                continue;
+            }
+            pending = None;
+            log::info!(
+                "{}: {}x{} at {}%",
+                if moving { "moving to another monitor" } else { "display changed" },
+                next.width,
+                next.height,
+                (next.scale * 100.0).round()
+            );
+            if let Err(e) = apply_geometry(&window, &next) {
                 log::warn!("re-placing the overlay: {e:#}");
                 continue;
             }
-            *overlay.geometry.write().unwrap() = now;
+            *overlay.geometry.write().unwrap() = next;
             host.refresh_platforms();
+            if moving {
+                // The duck flies in from the side the user came from.
+                let from = if next.screen_x >= current.screen_x { "left" } else { "right" };
+                host.emit_overlay("monitor:moved", serde_json::json!({ "from": from }));
+            }
         }
     });
     if let Err(e) = spawned {

@@ -497,6 +497,11 @@ pub fn format_gui_result(result: GuiResult, coords: &Coords) -> ToolOutcome {
                 .iter()
                 .enumerate()
                 .map(|(i, w)| {
+                    // Windows on another monitor aren't on this screenshot and can't be clicked from here.
+                    let on_screen = w.x < coords.screen_w && w.x + w.w > 0.0 && w.y < coords.screen_h && w.y + w.h > 0.0;
+                    if !on_screen {
+                        return format!("{}. \"{}\" [{}] on another screen{}", i + 1, w.title, w.app, if w.focused { " (focused)" } else { "" });
+                    }
                     let (x, y) = coords.from_screen(w.x, w.y);
                     let (x2, y2) = coords.from_screen(w.x + w.w, w.y + w.h);
                     format!(
@@ -676,5 +681,15 @@ mod tests {
         );
         assert_eq!(out.untrusted_source, Some("screen_elements"));
         assert!(out.text.contains("[3] button \"Save\" at (500,500)"), "{}", out.text);
+    }
+
+    #[test]
+    fn windows_on_another_screen_are_named_without_coordinates() {
+        let c = coords(CoordMode::Pixels);
+        let win = |title: &str, x: f64| WindowInfo { title: title.into(), app: "app".into(), x, y: 10.0, w: 400.0, h: 300.0, focused: false };
+        let out = format_gui_result(GuiResult::Windows(vec![win("Here", 100.0), win("Over there", c.screen_w + 50.0), win("Left", -900.0)]), &c);
+        assert!(out.text.contains("1. \"Here\" [app] from (100,10)"), "{}", out.text);
+        assert!(out.text.contains("2. \"Over there\" [app] on another screen"), "{}", out.text);
+        assert!(out.text.contains("3. \"Left\" [app] on another screen"), "{}", out.text);
     }
 }
