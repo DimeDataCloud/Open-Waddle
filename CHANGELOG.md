@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.4: conversation panel
+
+- **Conversation history.** 🕘 in the chat box (or **Ctrl+Alt+H**) opens the last 50 messages beside the duck: what you said, Waddle's replies, research summaries (with their **Full answer** button), nudges, reminders and the morning brief. It stays put while you read and survives restarts.
+  - Replies are formatted: lists, bold, code and links. Links open in your browser (web links only).
+  - Each message has a **Copy** button.
+  - **Forget** (two clicks) clears it along with Waddle's memory of the conversation, as does Settings → Memory & privacy → **Forget conversation**.
+- **Long replies fold.** The bubble shows the newest words while a long reply streams, then its start and a **More…** button that opens the history.
+- **A better chat box.**
+  - ↑ and ↓ bring back what you said before, including from earlier runs.
+  - It grows as you type. Enter sends; Shift+Enter starts a new line.
+- Lists in the bubble show as • bullets instead of Markdown asterisks.
+- Waddle never presses Ctrl+Alt+H itself (like your other Waddle shortcuts).
+
 ## 0.2.3: multiple monitors
 
 - **Waddle follows you across monitors.** When you've been working in a window on another monitor for a couple of seconds, the duck moves there and drops in from the side you came from. During a task it stays put. Settings → Character → "Follow me across monitors" (on by default); off keeps it on the main monitor.

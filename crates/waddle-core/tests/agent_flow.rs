@@ -737,7 +737,11 @@ async fn current_facts_and_research_search_the_web() {
     ]));
     let decider = Arc::new(SequenceDecider(Mutex::new(vec![routed(Route::Research, 0.95, 0.9), routed(Route::Chat, 0.97, 0.98)])));
     let config = SessionConfig { decider: Some(decider), ..session_config(&f, provider.clone()) };
-    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config.clone());
+    let history_file = f.workspace.root().join("history.json");
+    let history = Arc::new(waddle_core::history::History::new(Some(history_file.clone())));
+    *host.history.lock().unwrap() = Some(history.clone());
+    session.keep_history(history.clone());
 
     session.user_message("what's the weather in london".into());
     wait_until(|| provider.request_count() == 1).await;
@@ -769,8 +773,20 @@ async fn current_facts_and_research_search_the_web() {
     assert!(std::fs::read_to_string(&path).unwrap().contains("## Running costs"));
     assert_eq!(std::fs::read_to_string(&older).unwrap(), "yesterday's answer");
     assert_eq!(session.open_answer(&id).unwrap(), path);
-    assert_eq!(*host.opened.lock().unwrap(), vec![path.clone(), path]);
+    assert_eq!(*host.opened.lock().unwrap(), vec![path.clone(), path.clone()]);
     assert!(host.busy.lock().unwrap().is_empty(), "neither started a task");
+
+    // The history has both replies, and the research one keeps its button after a restart.
+    let list = history.list();
+    let replies: Vec<_> = list.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(replies, vec!["Sunny and 21°C.", "Heat pumps cost less to run [1]. They need a well-insulated home [2]."]);
+    assert_eq!(list[1].answer.as_deref(), Some(id.as_str()));
+    std::fs::remove_file(&path).unwrap();
+    let restarted = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    restarted.keep_history(Arc::new(waddle_core::history::History::new(Some(history_file))));
+    let again = restarted.open_answer(&id).unwrap();
+    assert!(std::fs::read_to_string(&again).unwrap().starts_with("# heat pumps or gas boilers?\n"), "{}", again.display());
+    assert!(restarted.open_answer("answer_unknown").is_err());
 }
 
 /// A router that answers from a list, last first.
@@ -792,6 +808,7 @@ async fn typing_text_and_then_copying_it_is_refused() {
         reply("", vec![call("press_keys", json!({"keys": "ctrl+a"}))]),
         reply("", vec![call("press_keys", json!({"keys": "Ctrl + C"}))]),
         reply("", vec![call("press_keys", json!({"keys": "ctrl+alt+a"}))]),
+        reply("", vec![call("press_keys", json!({"keys": "Alt+Ctrl+H"}))]),
         reply("", vec![call("copy_to_clipboard", json!({"text": "Offsite agenda"}))]),
         reply("Copied.", vec![]),
     ]));
@@ -803,7 +820,7 @@ async fn typing_text_and_then_copying_it_is_refused() {
     assert!(calls.contains(&GuiAction::WriteClipboard { text: "Offsite agenda".into() }));
     let after = provider.requests.lock().unwrap()[4].clone();
     assert!(after.last().unwrap().text.contains("copy_to_clipboard"), "the refusal says what to do instead");
-    assert!(!calls.iter().any(|c| matches!(c, GuiAction::PressKeys { keys } if keys == "ctrl+alt+a")), "never presses Waddle's own hotkeys");
+    assert!(!calls.iter().any(|c| matches!(c, GuiAction::PressKeys { keys } if keys.to_lowercase().contains("ctrl+alt") || keys.contains("Alt+Ctrl"))), "never presses Waddle's own hotkeys: {calls:?}");
 }
 
 #[tokio::test]

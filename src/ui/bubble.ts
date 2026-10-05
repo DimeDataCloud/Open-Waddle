@@ -13,6 +13,7 @@ export function plain(text: string): string {
     .replace(/__(.+?)__/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^(\s*)[*+-]\s+/gm, "$1• ")
     .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, "$1");
 }
 const LINGER_MS = 9000;
@@ -24,6 +25,8 @@ export class Bubble {
   private streaming = new Map<string, HTMLElement>();
   private hideTimer = 0;
   busy = false;
+  /** The "More…" button under a long reply: opens the conversation history. */
+  onMore: (() => void) | null = null;
 
   constructor(readonly el: HTMLElement, onStop: () => void) {
     this.lines = el.querySelector(".lines")!;
@@ -80,7 +83,27 @@ export class Bubble {
   }
 
   say(kind: LineKind, text: string): void {
-    if (text.trim()) this.add(kind, plain(text));
+    if (!text.trim()) return;
+    const el = this.add(kind, plain(text));
+    if (kind === "planner" || kind === "quick") this.fold(el);
+  }
+
+  /** A reply too long for the bubble shows its start and a "More…" button. */
+  private fold(el: HTMLElement): void {
+    if (el.scrollHeight <= el.clientHeight + 2 || !this.onMore) return;
+    el.scrollTop = 0;
+    const row = document.createElement("div");
+    row.className = "more-row";
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rate more";
+    b.textContent = "More…";
+    b.title = "Show the whole reply (Ctrl+Alt+H)";
+    b.addEventListener("click", () => this.onMore?.());
+    row.appendChild(b);
+    el.after(row);
+    while (this.lines.children.length > MAX_LINES + 1) this.lines.firstElementChild!.remove();
+    this.show(REMINDER_LINGER_MS);
   }
 
   /** A button under the latest reply (e.g. "Full answer"). */
@@ -143,6 +166,8 @@ export class Bubble {
     }
     el.dataset.raw += text;
     el.textContent = plain(el.dataset.raw ?? "");
+    // A long reply keeps its newest words in view while it streams.
+    el.scrollTop = el.scrollHeight;
     this.show();
   }
 
@@ -151,6 +176,7 @@ export class Bubble {
     if (el) {
       el.classList.remove("typing");
       if (!el.textContent?.trim()) el.remove();
+      else this.fold(el);
     }
     this.streaming.delete(lane);
   }

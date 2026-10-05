@@ -115,6 +115,8 @@ pub struct Session {
     /// Some while the router runs; messages arriving meanwhile wait here.
     deciding: Mutex<Option<Deciding>>,
     answers: Mutex<Vec<Answer>>,
+    /// The conversation as the user saw it, for the history drawer.
+    history: Mutex<Option<Arc<crate::history::History>>>,
 }
 
 /// True when the whole utterance is a request to stop ("stop", "wait!", "please cancel", "stop stop").
@@ -152,6 +154,7 @@ impl Session {
             active: Mutex::default(),
             deciding: Mutex::default(),
             answers: Mutex::default(),
+            history: Mutex::default(),
         })
     }
 
@@ -185,6 +188,11 @@ impl Session {
         if let Some(path) = self.memory_file.lock().unwrap().as_ref() {
             let _ = std::fs::remove_file(path);
         }
+    }
+
+    /// Research answers are also kept in `history`, so their button works after a restart.
+    pub fn keep_history(&self, history: Arc<crate::history::History>) {
+        *self.history.lock().unwrap() = Some(history);
     }
 
     /// Keeps the conversation in `path` so it survives a restart. What's there
@@ -295,11 +303,20 @@ impl Session {
 
     /// Saves a research answer as Markdown in the workspace and opens it.
     pub fn open_answer(&self, id: &str) -> anyhow::Result<PathBuf> {
-        let (question, markdown, saved) = {
+        let kept = {
             let answers = self.answers.lock().unwrap();
-            let a = answers.iter().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("that answer is no longer available"))?;
-            (a.question.clone(), a.markdown.clone(), a.saved.clone())
+            answers.iter().find(|a| a.id == id).map(|a| (a.question.clone(), a.markdown.clone(), a.saved.clone()))
         };
+        let from_history = || {
+            let markdown = self.history.lock().unwrap().as_ref()?.answer(id)?;
+            // The question is the Markdown's first heading.
+            let question = markdown.lines().next().unwrap_or("answer").trim_start_matches('#').trim().to_string();
+            Some((question, markdown, None))
+        };
+        let (question, markdown, saved) = kept.or_else(from_history).ok_or_else(|| anyhow::anyhow!("that answer is no longer available"))?;
+        if !self.answers.lock().unwrap().iter().any(|a| a.id == id) {
+            self.answers.lock().unwrap().push(Answer { id: id.to_string(), question: question.clone(), markdown: markdown.clone(), saved: None });
+        }
         if let Some(path) = saved.filter(|p| p.exists()) {
             self.host.open_path(&path);
             return Ok(path);
@@ -522,9 +539,12 @@ Don't write a source list; it's added for you.{facts}",
         let id = format!("answer_{}", &new_task_id()[5..]);
         {
             let mut answers = self.answers.lock().unwrap();
-            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown, saved: None });
+            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown: markdown.clone(), saved: None });
             let excess = answers.len().saturating_sub(KEEP_ANSWERS);
             answers.drain(..excess);
+        }
+        if let Some(history) = self.history.lock().unwrap().as_ref() {
+            history.attach_answer(&id, &markdown);
         }
         self.host.emit(AgentEvent::Offer { id, label: "Full answer".into() });
         let _ = self.audit.append(AuditEntry { task_id: "research".into(), kind: "research".into(), detail: Some(format!("{text} → {} sources", resp.citations.len())), ..Default::default() });

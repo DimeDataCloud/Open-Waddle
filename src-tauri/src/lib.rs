@@ -426,7 +426,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         }
         Err(e) => log::warn!("couldn't register the Chrome link: {e:#}"),
     }
-    let host = TauriHost::new(handle.clone(), overlay.clone(), link);
+    let history = Arc::new(waddle_core::history::History::new(Some(data_dir.join("history.json"))));
+    let host = TauriHost::new(handle.clone(), overlay.clone(), link, history.clone());
     let ledger = Arc::new(Ledger::new(Some(data_dir.join("spending.json"))));
     ledger.set_budget(settings.monthly_budget);
     {
@@ -469,6 +470,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     );
 
     session.keep_memory_in(data_dir.join("memory.json"));
+    session.keep_history(history);
 
     app.manage(AppState {
         app: handle.clone(),
@@ -510,6 +512,9 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         }
         if let Err(e) = handle.global_shortcut().register(shortcuts::selection_key()) {
             log::warn!("could not register Ctrl+Alt+A: {e}");
+        }
+        if let Err(e) = handle.global_shortcut().register(shortcuts::history_key()) {
+            log::warn!("could not register Ctrl+Alt+H: {e}");
         }
     }
     Ok(())
@@ -572,6 +577,8 @@ pub fn run() {
             commands::open_settings,
             commands::open_workspace,
             commands::clear_memory,
+            commands::history_list,
+            commands::open_link,
             commands::skills_list,
             commands::skill_forget,
             commands::facts_list,

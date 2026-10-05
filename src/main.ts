@@ -11,6 +11,7 @@ import { api, on, type HitRect, type NudgePayload, type Platform } from "./ipc";
 import { ApprovalCard } from "./ui/approval";
 import { Bubble } from "./ui/bubble";
 import { Chat } from "./ui/chat";
+import { HistoryDrawer } from "./ui/history";
 import { chime, Pointer } from "./ui/pointer";
 
 const SCALE = 4; // sprite pixels → logical pixels (16x14 → 64x56)
@@ -49,6 +50,14 @@ const approval = new ApprovalCard(
   (id, ok, draft) => void api.answerApproval(id, ok, draft ?? null),
   (id) => void api.undoSend(id),
 );
+const drawer = new HistoryDrawer(document.getElementById("history")!, {
+  list: () => api.historyList(),
+  openLink: (url) => api.openLink(url),
+  openAnswer: (id) => api.openAnswer(id),
+  clear: () => api.clearMemory(),
+  error: (m) => bubble.say("error", m),
+});
+bubble.onMore = () => void drawer.open();
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
   send: (text, selection) => {
     bubble.say("user", selection ? `${text || "Help with this"} 📎` : text);
@@ -60,6 +69,7 @@ const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
   voiceStart: () => api.voiceStart(),
   voiceStop: () => api.voiceStop(),
   error: (m) => bubble.say("error", m),
+  history: () => drawer.toggle(),
 });
 
 function resize(): void {
@@ -126,7 +136,7 @@ function schedule(now: number): void {
 
 function think(now: number): void {
   // Stay put while the bubble is up: its buttons are hard to hit on a moving duck.
-  if (duck.mode !== "idle" || busy || approval.visible || chat.visible || bubble.visible) {
+  if (duck.mode !== "idle" || busy || approval.visible || chat.visible || bubble.visible || drawer.visible) {
     nextWander = Math.max(nextWander, now + 3000);
     return;
   }
@@ -206,14 +216,21 @@ function layoutUi(): void {
   const chatBox = chat.visible ? chat.el.getBoundingClientRect() : null;
   // When the chat box sits above the duck, the bubble goes above both.
   bubble.place(chatBox && chatBox.top < r.y ? union(r, chatBox) : r, screen);
-  const avoid = [bubble.visible ? bubble.el.getBoundingClientRect() : null, chatBox].filter((b): b is DOMRect => b !== null);
+  const bubbleBox = bubble.visible ? bubble.el.getBoundingClientRect() : null;
+  // The history drawer goes beside the whole group.
+  let group: HitRect = r;
+  for (const b of [bubbleBox, chatBox]) if (b) group = union(group, b);
+  const near = [r, ...[bubbleBox, chatBox].filter((b): b is DOMRect => b !== null).map((b) => ({ x: b.left, y: b.top, w: b.width, h: b.height }))];
+  drawer.place(group, screen, near);
+  const drawerBox = drawer.visible ? drawer.el.getBoundingClientRect() : null;
+  const avoid = [bubbleBox, chatBox, drawerBox].filter((b): b is DOMRect => b !== null);
   approval.place(r, screen, avoid);
   // Tell the backend which areas should catch the mouse.
   const rects: HitRect[] = [r];
   if (!badge.classList.contains("hidden")) {
     badge.style.transform = `translate(${Math.round(r.x + r.w - 6)}px, ${Math.round(r.y - 22)}px)`;
   }
-  for (const el of [bubble.el, chat.el, approval.el, badge]) {
+  for (const el of [bubble.el, chat.el, approval.el, badge, drawer.el]) {
     if (el.classList.contains("hidden")) continue;
     const b = el.getBoundingClientRect();
     rects.push({ x: b.left, y: b.top, w: b.width, h: b.height });
@@ -458,6 +475,12 @@ void on("chat:open", ({ voice, selection }) => {
   if (voice) void chat.toggleVoice();
 });
 
+void on("history:changed", () => void drawer.refresh());
+void on("history:toggle", () => {
+  touch();
+  drawer.toggle();
+});
+
 void on("wander:toggle", () => {
   wander = !wander;
   bubble.say("notice", wander ? "Back to exploring!" : "I'll stay put.");
@@ -481,6 +504,9 @@ async function start(): Promise<void> {
       bubble.say("planner", "Hi! Click me (or press Ctrl+Alt+Space) and tell me what to do.");
     }
     for (const n of boot.notices) bubble.say("error", n);
+    // ↑ in the chat box reaches back past this run.
+    const said = (await api.historyList()).filter((e) => e.who === "you").map((e) => e.text.replace(/ 📎$/, ""));
+    chat.recall.load(said);
   } catch (e) {
     bubble.say("error", `Couldn't reach the backend: ${e}`);
   }

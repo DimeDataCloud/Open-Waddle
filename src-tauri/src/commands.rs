@@ -6,6 +6,7 @@ use waddle_core::audit::{AuditRecord, VerifyReport};
 use waddle_core::config::{ProviderKind, VoiceBackend};
 use waddle_core::google::gmail::MailDraft;
 use waddle_core::google::{auth, OAuthClient, SCOPES};
+use waddle_core::history::Who;
 use waddle_core::Settings;
 
 use crate::bridge::Platform;
@@ -57,8 +58,30 @@ pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<
     // Focus stays in the chat box for follow-ups; the bridge hands focus back
     // to the user's app right before Waddle types anything.
     match selection.filter(|s| *s).and_then(|_| state.host.take_selection()) {
-        Some(sel) => state.session.user_message_with_selection(text, sel),
-        None => state.session.user_message(text),
+        Some(sel) => {
+            let said = if text.trim().is_empty() { "Help with this".to_string() } else { text.clone() };
+            state.host.record(Who::You, &format!("{said} 📎"));
+            state.session.user_message_with_selection(text, sel)
+        }
+        None => {
+            state.host.record(Who::You, &text);
+            state.session.user_message(text)
+        }
+    }
+}
+
+/// The conversation so far, for the history drawer.
+#[tauri::command]
+pub fn history_list(state: State<'_, AppState>) -> Vec<waddle_core::history::Entry> {
+    state.host.history.list()
+}
+
+/// A link in a reply. Only web links open; anything else in a reply is just text.
+#[tauri::command]
+pub fn open_link(url: String) -> CmdResult<()> {
+    match tauri::Url::parse(url.trim()) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") => crate::desktop::open_url(u.as_str()).map_err(err),
+        _ => Err("Only web links (http or https) open from a reply.".into()),
     }
 }
 
@@ -233,6 +256,7 @@ pub async fn nudge_action(state: State<'_, AppState>, id: String, action: String
             let (provider, model) = state.session.fast();
             let decider = state.decider.read().unwrap().clone();
             let text = nudges::compose_brief(&google, provider.as_ref(), &model, decider.as_deref(), chrono::Local::now()).await.map_err(|e| format!("{e:#}"))?;
+            state.host.record(Who::Waddle, &text);
             Ok(Some(text))
         }
         _ => Err(format!("`{action}` doesn't apply to that nudge")),
@@ -366,6 +390,8 @@ pub async fn open_workspace(state: State<'_, AppState>) -> CmdResult<()> {
 #[tauri::command]
 pub fn clear_memory(state: State<'_, AppState>) {
     state.session.clear_memory();
+    state.host.history.clear();
+    state.host.emit_overlay("history:changed", ());
 }
 
 #[derive(Serialize)]

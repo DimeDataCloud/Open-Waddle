@@ -5,6 +5,7 @@
 // - "recording": Waddle records; the second press transcribes and sends.
 
 import type { SelectionPreview } from "../ipc";
+import { Recall } from "./recall";
 
 export interface ChatHandlers {
   /** `selection`: the text grabbed with Ctrl+Alt+A goes along with this message. */
@@ -15,13 +16,19 @@ export interface ChatHandlers {
   voiceStart(): Promise<"system" | "recording">;
   voiceStop(): Promise<string | null>;
   error(message: string): void;
+  /** The 🕘 button: open or close the conversation history. */
+  history(): void;
 }
 
 const DICTATION_QUIET_MS = 1600;
 const AUTO_CLOSE_MS = 30000;
+/** The box grows with what's typed, up to about six lines. */
+const MAX_INPUT_PX = 120;
 
 export class Chat {
-  private input: HTMLInputElement;
+  private input: HTMLTextAreaElement;
+  /** ↑/↓ through what was said before. */
+  readonly recall = new Recall();
   private mic: HTMLButtonElement;
   private voice: "off" | "system" | "recording" = "off";
   private quietTimer = 0;
@@ -30,7 +37,7 @@ export class Chat {
   private selection: SelectionPreview | null = null;
 
   constructor(readonly el: HTMLFormElement, private h: ChatHandlers) {
-    this.input = el.querySelector("input")!;
+    this.input = el.querySelector("textarea")!;
     this.mic = el.querySelector("#mic")!;
     this.chip = el.querySelector(".chip")!;
     this.chip.querySelector("button")!.addEventListener("click", () => {
@@ -43,16 +50,17 @@ export class Chat {
       this.submit();
     });
     this.mic.addEventListener("click", () => void this.toggleVoice());
+    el.querySelector("#history-btn")!.addEventListener("click", () => this.h.history());
     this.input.addEventListener("input", () => {
+      this.recall.reset();
+      this.fit();
       this.bumpClose();
       if (this.voice === "system" && this.input.value.trim()) {
         window.clearTimeout(this.quietTimer);
         this.quietTimer = window.setTimeout(() => this.finishDictation(), DICTATION_QUIET_MS);
       }
     });
-    this.input.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this.close();
-    });
+    this.input.addEventListener("keydown", (e) => this.key(e));
   }
 
   get visible(): boolean {
@@ -103,10 +111,45 @@ export class Chat {
     }, AUTO_CLOSE_MS);
   }
 
+  private key(e: KeyboardEvent): void {
+    if (e.isComposing) return;
+    if (e.key === "Escape") {
+      this.close();
+    } else if (e.key === "Enter" && !e.shiftKey) {
+      // Enter sends; Shift+Enter starts a new line.
+      e.preventDefault();
+      this.submit();
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      // Only from the first (or last) line, so moving between lines still works.
+      const v = this.input.value;
+      const caret = this.input.selectionStart ?? 0;
+      const up = e.key === "ArrowUp";
+      if (up ? v.lastIndexOf("\n", caret - 1) !== -1 : v.indexOf("\n", caret) !== -1) return;
+      const text = up ? this.recall.up(v) : this.recall.down();
+      if (text === null) return;
+      e.preventDefault();
+      this.setText(text);
+    }
+  }
+
+  private setText(text: string): void {
+    this.input.value = text;
+    this.fit();
+    const end = text.length;
+    this.input.setSelectionRange(end, end);
+  }
+
+  /** Grows (or shrinks) the box to fit its text. */
+  private fit(): void {
+    this.input.style.height = "auto";
+    this.input.style.height = `${Math.min(MAX_INPUT_PX, this.input.scrollHeight)}px`;
+  }
+
   private submit(): void {
     const text = this.input.value.trim();
     if (!text && !this.selection) return;
-    this.input.value = "";
+    this.recall.push(text);
+    this.setText("");
     this.h.send(text, !!this.selection);
     this.setSelection(null);
     this.bumpClose();
@@ -141,7 +184,7 @@ export class Chat {
     this.setLive(false);
     try {
       const text = await this.h.voiceStop();
-      if (mode === "recording" && text) this.input.value = text;
+      if (mode === "recording" && text) this.setText(text);
     } catch (e) {
       this.h.error(String(e));
     }

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{AgentEvent, ApprovalRequest, Decision, EnvInfo, Host};
+use waddle_core::history::{History, Who};
 use waddle_core::session::Selection;
 use waddle_core::google::gmail::MailDraft;
 
@@ -44,6 +45,8 @@ pub struct TauriHost {
     overlay: Arc<OverlayState>,
     /// Waddle's Chrome extension, when it's connected.
     pub browser: Arc<crate::browser::BrowserLink>,
+    /// The conversation as the user saw it (the history drawer).
+    pub history: Arc<History>,
     approvals: Mutex<HashMap<String, oneshot::Sender<Answer>>>,
     /// Undo buttons showing after Send, by approval id.
     undos: Mutex<HashMap<String, oneshot::Sender<()>>>,
@@ -65,11 +68,12 @@ fn now_ms() -> u64 {
 }
 
 impl TauriHost {
-    pub fn new(app: AppHandle, overlay: Arc<OverlayState>, browser: Arc<crate::browser::BrowserLink>) -> Arc<Self> {
+    pub fn new(app: AppHandle, overlay: Arc<OverlayState>, browser: Arc<crate::browser::BrowserLink>, history: Arc<History>) -> Arc<Self> {
         Arc::new(Self {
             app,
             overlay,
             browser,
+            history,
             approvals: Mutex::default(),
             undos: Mutex::default(),
             moves: Mutex::default(),
@@ -130,6 +134,13 @@ impl TauriHost {
 
     pub fn emit_overlay<S: Serialize + Clone>(&self, event: &str, payload: S) {
         let _ = self.app.emit_to(OVERLAY, event, payload);
+    }
+
+    /// Adds to the conversation history and tells an open drawer.
+    pub fn record(&self, who: Who, text: &str) {
+        if self.history.add(who, text) {
+            self.emit_overlay("history:changed", ());
+        }
     }
 
     /// Window bounds → logical screen coordinates (relative to the primary monitor).
@@ -288,7 +299,11 @@ impl TauriHost {
 #[async_trait]
 impl Host for TauriHost {
     fn emit(&self, event: AgentEvent) {
+        let recorded = self.history.observe(&event);
         self.emit_overlay("agent", event);
+        if recorded {
+            self.emit_overlay("history:changed", ());
+        }
     }
 
     fn env(&self) -> EnvInfo {
@@ -571,6 +586,7 @@ pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::remind
                 for r in store.take_due(now) {
                     let late = now - r.due_ms > 120_000;
                     host.emit_overlay("reminder", json!({ "text": r.text, "late": late }));
+                    host.record(Who::Reminder, &r.text);
                 }
                 std::thread::sleep(Duration::from_secs(5));
             }

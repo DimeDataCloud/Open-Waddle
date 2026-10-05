@@ -37,6 +37,7 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - Replies stream into the bubble as they're generated.
   - Messages you send *during* a task get an instant quick reply, and they change the running task at its next step.
   - Saying or typing "stop", "wait" or "cancel" halts at once.
+  - **Conversation history:** 🕘 in the chat box (or **Ctrl+Alt+H**) opens the last 50 messages beside the duck, with formatting, working links and a copy button on each. Long replies show their start in the bubble and a **More…** button. ↑ in the chat box brings back what you said before; Shift+Enter starts a new line.
 - **Voice.**
   - Press **Ctrl+Alt+Space** (or the 🎙 button) to talk.
   - On Windows this uses the built-in voice typing: free and live.

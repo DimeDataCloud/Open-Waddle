@@ -319,7 +319,7 @@ fn is_copy(keys: &str) -> bool {
 
 /// Waddle's own global shortcuts (talk, attach the selection). Pressing them from a task only loops back into Waddle.
 fn is_own_hotkey(keys: &str) -> bool {
-    matches!(safety::canonical_keys(keys).as_str(), "ctrl+alt+a" | "ctrl+alt+space")
+    matches!(safety::canonical_keys(keys).as_str(), "ctrl+alt+a" | "ctrl+alt+space" | "ctrl+alt+h")
 }
 
 /// Keys that only move or select, so a copy right after them still copies what was just typed.

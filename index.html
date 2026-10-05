@@ -13,12 +13,21 @@
       <button class="stop hidden" title="Stop (Esc)">■ Stop</button>
     </div>
     <div id="approval" class="card hidden" role="dialog" aria-label="Approval needed"></div>
+    <section id="history" class="drawer hidden" role="dialog" aria-label="Conversation" tabindex="-1">
+      <header>
+        <strong>Conversation</strong>
+        <button type="button" class="clear" title="Forget the conversation (Waddle's memory of it too)">Forget</button>
+        <button type="button" class="close" title="Close (Esc)" aria-label="Close">✕</button>
+      </header>
+      <div class="entries" tabindex="0" aria-live="polite"></div>
+    </section>
     <button id="badge" class="badge hidden" type="button" title="Waddle has something for you">!</button>
     <form id="chat" class="chat hidden" autocomplete="off">
       <div class="chip hidden"><span></span><button type="button" title="Don't send the selection">✕</button></div>
-      <input id="chat-input" type="text" placeholder="Ask Waddle…" spellcheck="true" />
-      <button type="button" id="mic" title="Talk (Ctrl+Alt+Space)">🎙</button>
-      <button type="submit" id="send" title="Send">➤</button>
+      <textarea id="chat-input" rows="1" placeholder="Ask Waddle…" spellcheck="true" aria-label="Message to Waddle (Enter sends, Shift+Enter for a new line, ↑ for earlier messages)"></textarea>
+      <button type="button" id="history-btn" title="Conversation (Ctrl+Alt+H)" aria-label="Conversation history">🕘</button>
+      <button type="button" id="mic" title="Talk (Ctrl+Alt+Space)" aria-label="Talk">🎙</button>
+      <button type="submit" id="send" title="Send (Enter)" aria-label="Send">➤</button>
     </form>
     <script type="module" src="/src/main.ts"></script>
   </body>
