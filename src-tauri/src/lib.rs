@@ -13,6 +13,7 @@ mod presence;
 mod secrets;
 mod selftest;
 mod shortcuts;
+mod speech;
 #[cfg(windows)]
 mod uia;
 mod voice;
@@ -190,6 +191,7 @@ impl AppState {
             style: Some(self.style.clone()),
         });
         *self.google.write().unwrap() = google;
+        self.host.speech.set_settings(settings.voice_out.clone());
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
         *self.demo.write().unwrap() = demo;
@@ -428,6 +430,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     }
     let history = Arc::new(waddle_core::history::History::new(Some(data_dir.join("history.json"))));
     let host = TauriHost::new(handle.clone(), overlay.clone(), link, history.clone());
+    host.speech.set_settings(settings.voice_out.clone());
     let ledger = Arc::new(Ledger::new(Some(data_dir.join("spending.json"))));
     ledger.set_budget(settings.monthly_budget);
     {
@@ -578,6 +581,8 @@ pub fn run() {
             commands::open_workspace,
             commands::clear_memory,
             commands::history_list,
+            commands::speech_voices,
+            commands::speech_test,
             commands::open_link,
             commands::skills_list,
             commands::skill_forget,

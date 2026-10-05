@@ -47,6 +47,8 @@ pub struct TauriHost {
     pub browser: Arc<crate::browser::BrowserLink>,
     /// The conversation as the user saw it (the history drawer).
     pub history: Arc<History>,
+    /// Reads replies aloud when that's on.
+    pub speech: Arc<crate::speech::Speech>,
     approvals: Mutex<HashMap<String, oneshot::Sender<Answer>>>,
     /// Undo buttons showing after Send, by approval id.
     undos: Mutex<HashMap<String, oneshot::Sender<()>>>,
@@ -74,6 +76,7 @@ impl TauriHost {
             overlay,
             browser,
             history,
+            speech: crate::speech::Speech::new(),
             approvals: Mutex::default(),
             undos: Mutex::default(),
             moves: Mutex::default(),
@@ -300,6 +303,13 @@ impl TauriHost {
 impl Host for TauriHost {
     fn emit(&self, event: AgentEvent) {
         let recorded = self.history.observe(&event);
+        let app = self.app.clone();
+        // Talk mode: after answering something said aloud, listen again.
+        let listen_again = move || {
+            crate::focus_overlay(&app);
+            let _ = app.emit_to(OVERLAY, "talk:listen", ());
+        };
+        self.speech.observe(&event, || self.front_window().is_some_and(|w| w.2), listen_again);
         self.emit_overlay("agent", event);
         if recorded {
             self.emit_overlay("history:changed", ());
@@ -587,6 +597,7 @@ pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::remind
                     let late = now - r.due_ms > 120_000;
                     host.emit_overlay("reminder", json!({ "text": r.text, "late": late }));
                     host.record(Who::Reminder, &r.text);
+                    host.speech.announce(&format!("Reminder: {}", r.text), host.front_window().is_some_and(|w| w.2));
                 }
                 std::thread::sleep(Duration::from_secs(5));
             }

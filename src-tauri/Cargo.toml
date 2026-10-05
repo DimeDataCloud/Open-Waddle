@@ -52,4 +52,11 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_System_Registry",
+  "Win32_System_WinRT",
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Core",
+  "Media_Playback",
+  "Media_SpeechSynthesis",
+  "Storage_Streams",
 ] }

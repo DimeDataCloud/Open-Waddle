@@ -33,6 +33,7 @@ interface Settings {
   character: { id: string; color: string };
   ollama: { num_thread: number | null; keep_alive: string; num_ctx: number };
   voice: { backend: "system" | "whisper_api" | "off"; base_url: string; model: string; language: string | null };
+  voice_out: { enabled: boolean; replies: boolean; nudges: boolean; voice: string; rate: number; talk_mode: boolean };
 }
 
 interface SettingsView {
@@ -84,6 +85,27 @@ function syncVisibility(): void {
   $("model").required = !demo;
   $("ollama-opts").classList.toggle("hidden", preset !== "ollama");
   $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
+  $("vo-opts").classList.toggle("hidden", !$("vo_enabled").checked);
+  $("vo_rate_label").textContent = `${Number($("vo_rate").value).toFixed(1)}×`;
+}
+
+/** Makes sure the saved voice is in the list, even before (or without) the system's list. */
+function pickVoice(name: string): void {
+  const select = $<HTMLSelectElement>("vo_voice");
+  if (name && ![...select.options].some((o) => o.value === name)) select.add(new Option(name, name));
+  select.value = name;
+}
+
+async function loadVoices(): Promise<void> {
+  try {
+    const names = await invoke<string[]>("speech_voices");
+    const select = $<HTMLSelectElement>("vo_voice");
+    const keep = select.value;
+    for (const n of names) if (![...select.options].some((o) => o.value === n)) select.add(new Option(n, n));
+    select.value = keep;
+  } catch {
+    // The default voice still works.
+  }
 }
 
 function fill(view: SettingsView): void {
@@ -108,6 +130,12 @@ function fill(view: SettingsView): void {
   $("voice_base_url").value = s.voice.base_url;
   $("voice_model").value = s.voice.model;
   $("voice_language").value = s.voice.language ?? "";
+  $("vo_enabled").checked = s.voice_out.enabled;
+  $("vo_replies").checked = s.voice_out.replies;
+  $("vo_nudges").checked = s.voice_out.nudges;
+  pickVoice(s.voice_out.voice);
+  $("vo_rate").value = String(s.voice_out.rate);
+  $("vo_talk").checked = s.voice_out.talk_mode;
   $("stt_key").value = "";
   $("stt_key").placeholder = view.has_stt_key ? "saved (leave blank to keep)" : "e.g. a free Groq key";
   $("self_source_dir").value = s.self_source_dir ?? "";
@@ -188,6 +216,14 @@ function collect(): Settings {
       base_url: $("voice_base_url").value.trim(),
       model: $("voice_model").value.trim(),
       language: $("voice_language").value.trim() || null,
+    },
+    voice_out: {
+      enabled: $("vo_enabled").checked,
+      replies: $("vo_replies").checked,
+      nudges: $("vo_nudges").checked,
+      voice: $<HTMLSelectElement>("vo_voice").value,
+      rate: num("vo_rate", 1),
+      talk_mode: $("vo_talk").checked,
     },
   };
 }
@@ -458,6 +494,18 @@ $<HTMLSelectElement>("preset").addEventListener("change", () => {
   syncVisibility();
 });
 $<HTMLSelectElement>("voice_backend").addEventListener("change", syncVisibility);
+$("vo_enabled").addEventListener("change", syncVisibility);
+$("vo_rate").addEventListener("input", syncVisibility);
+$("vo-test").addEventListener("click", async () => {
+  const status = $("vo-status");
+  status.textContent = "";
+  try {
+    await invoke("speech_test", { voice: $<HTMLSelectElement>("vo_voice").value, rate: Number($("vo_rate").value) });
+    status.textContent = "Listen…";
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
 $("open-ws").addEventListener("click", () => void invoke("open_workspace"));
 $("verify").addEventListener("click", async () => {
   const r = await invoke<{ ok: boolean; entries: number; first_bad_id: number | null }>("audit_verify");
@@ -557,6 +605,7 @@ void loadFacts();
 void loadGoogle();
 void loadStyle();
 void loadBrowser();
+void loadVoices();
 setInterval(() => {
   void loadSpending();
   void loadBrowser();

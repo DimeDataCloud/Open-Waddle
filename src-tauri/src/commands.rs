@@ -54,7 +54,10 @@ fn view(state: &AppState, key_storage: Option<&'static str>) -> SettingsView {
 }
 
 #[tauri::command]
-pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<bool>) {
+pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<bool>, voice: Option<bool>) {
+    // A new message cuts off whatever Waddle was saying.
+    state.host.speech.stop();
+    state.host.speech.set_by_voice(voice.unwrap_or(false));
     // Focus stays in the chat box for follow-ups; the bridge hands focus back
     // to the user's app right before Waddle types anything.
     match selection.filter(|s| *s).and_then(|_| state.host.take_selection()) {
@@ -68,6 +71,26 @@ pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<
             state.session.user_message(text)
         }
     }
+}
+
+/// The voices that can read replies aloud (empty: only the system's default).
+#[tauri::command]
+pub async fn speech_voices() -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(crate::speech::voices).await.map_err(err)
+}
+
+/// Reads a sample sentence in this voice and speed.
+#[tauri::command]
+pub fn speech_test(state: State<'_, AppState>, voice: String, rate: f64) -> CmdResult<()> {
+    if !crate::speech::available() {
+        return Err(if cfg!(windows) {
+            "Windows has no voices installed. Add one in Settings → Time & language → Speech.".into()
+        } else {
+            "No speech program found. Install speech-dispatcher or espeak-ng.".into()
+        });
+    }
+    state.host.speech.test(voice, rate);
+    Ok(())
 }
 
 /// The conversation so far, for the history drawer.
@@ -114,11 +137,14 @@ pub async fn fact_forget(state: State<'_, AppState>, id: String) -> CmdResult<St
 
 #[tauri::command]
 pub fn warm_up(state: State<'_, AppState>) {
+    // The chat box opened: the user is about to speak, so Waddle stops.
+    state.host.speech.stop();
     state.session.warm();
 }
 
 #[tauri::command]
 pub fn halt(state: State<'_, AppState>) -> bool {
+    state.host.speech.stop();
     state.session.halt()
 }
 
@@ -413,6 +439,7 @@ pub async fn skill_forget(state: State<'_, AppState>, name: String) -> CmdResult
 /// Starts listening. Returns "system" (OS dictation types into the focused chat box) or "recording".
 #[tauri::command]
 pub async fn voice_start(state: State<'_, AppState>) -> CmdResult<&'static str> {
+    state.host.speech.stop();
     let backend = state.settings.read().unwrap().voice.backend;
     match backend {
         VoiceBackend::Off => Err("Voice input is off. Turn it on in Settings.".into()),

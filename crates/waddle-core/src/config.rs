@@ -97,6 +97,29 @@ impl Default for VoiceSettings {
     }
 }
 
+/// Spoken replies: Waddle reads its answers (and nudges) aloud.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceOutSettings {
+    pub enabled: bool,
+    /// Answers: chat replies, research summaries, a task's last words.
+    pub replies: bool,
+    /// Nudges and reminders.
+    pub nudges: bool,
+    /// The voice's name as the system lists it. Empty = the system's default voice.
+    pub voice: String,
+    /// 0.5 (slow) to 2.0 (fast); 1.0 is normal.
+    pub rate: f64,
+    /// After reading out the answer to something said aloud, listen again for a few seconds.
+    pub talk_mode: bool,
+}
+
+impl Default for VoiceOutSettings {
+    fn default() -> Self {
+        Self { enabled: false, replies: true, nudges: true, voice: String::new(), rate: 1.0, talk_mode: false }
+    }
+}
+
 /// How much hidden thinking a hosted model may do before answering (OpenRouter's
 /// `reasoning.effort`). Thinking makes each step slower and dearer; Waddle's steps
 /// are small, so most models do best with it off or low.
@@ -187,6 +210,8 @@ pub struct Settings {
     pub character: CharacterSettings,
     pub ollama: OllamaSettings,
     pub voice: VoiceSettings,
+    /// Reading replies aloud.
+    pub voice_out: VoiceOutSettings,
     /// OAuth client ID of the user's Google Cloud project (Desktop app type). Empty = Google off.
     pub google_client_id: String,
     /// Hours (local, 24h) that `calendar_free` proposes meetings in, on weekdays.
@@ -243,6 +268,7 @@ impl Default for Settings {
             character: CharacterSettings::default(),
             ollama: OllamaSettings::default(),
             voice: VoiceSettings::default(),
+            voice_out: VoiceOutSettings::default(),
             google_client_id: String::new(),
             working_hours: (9, 17),
             send_undo_secs: 10,
@@ -313,6 +339,7 @@ pub const SELF_EDITABLE: &[&str] = &[
     "max_steps",
     "command_timeout_secs",
     "voice_backend",
+    "spoken_replies",
 ];
 
 fn parse_enum<T: serde::de::DeserializeOwned>(key: &str, v: &serde_json::Value) -> anyhow::Result<T> {
@@ -353,6 +380,7 @@ pub fn apply_patch(base: &Settings, patch: &serde_json::Value) -> anyhow::Result
             "max_steps" => next.max_steps = num(1, 50)? as u32,
             "command_timeout_secs" => next.command_timeout_secs = num(5, 600)?,
             "voice_backend" => next.voice.backend = parse_enum(k, v)?,
+            "spoken_replies" => next.voice_out.enabled = v.as_bool().ok_or_else(|| anyhow::anyhow!("`spoken_replies` must be true or false"))?,
             _ => unreachable!(),
         }
         changed.push(k.clone());

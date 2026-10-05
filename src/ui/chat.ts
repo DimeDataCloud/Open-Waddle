@@ -8,8 +8,11 @@ import type { SelectionPreview } from "../ipc";
 import { Recall } from "./recall";
 
 export interface ChatHandlers {
-  /** `selection`: the text grabbed with Ctrl+Alt+A goes along with this message. */
-  send(text: string, selection: boolean): void;
+  /**
+   * `selection`: the text grabbed with Ctrl+Alt+A goes along with this message.
+   * `voice`: it was said aloud (talk mode answers those).
+   */
+  send(text: string, selection: boolean, voice: boolean): void;
   dropSelection(): void;
   /** The box opened: the user is about to say something. */
   opened(): void;
@@ -22,6 +25,10 @@ export interface ChatHandlers {
 
 const DICTATION_QUIET_MS = 1600;
 const AUTO_CLOSE_MS = 30000;
+/** Talk mode: how long the mic stays open for an answer before giving up. */
+const LISTEN_MS = 6000;
+/** With recorded voice (no live text), how long the answer may be. */
+const LISTEN_RECORD_MS = 8000;
 /** The box grows with what's typed, up to about six lines. */
 const MAX_INPUT_PX = 120;
 
@@ -33,6 +40,7 @@ export class Chat {
   private voice: "off" | "system" | "recording" = "off";
   private quietTimer = 0;
   private closeTimer = 0;
+  private listenTimer = 0;
   private chip: HTMLElement;
   private selection: SelectionPreview | null = null;
 
@@ -145,12 +153,12 @@ export class Chat {
     this.input.style.height = `${Math.min(MAX_INPUT_PX, this.input.scrollHeight)}px`;
   }
 
-  private submit(): void {
+  private submit(voice = false): void {
     const text = this.input.value.trim();
     if (!text && !this.selection) return;
     this.recall.push(text);
     this.setText("");
-    this.h.send(text, !!this.selection);
+    this.h.send(text, !!this.selection, voice);
     this.setSelection(null);
     this.bumpClose();
   }
@@ -158,6 +166,24 @@ export class Chat {
   private setLive(on: boolean): void {
     this.mic.classList.toggle("live", on);
     this.input.placeholder = on ? "Listening…" : "Ask Waddle…";
+  }
+
+  /** Talk mode: listens for an answer for a few seconds, then gives up quietly. */
+  async listen(): Promise<void> {
+    if (this.voice !== "off") return;
+    await this.toggleVoice();
+    if (this.voice === "off") return;
+    window.clearTimeout(this.listenTimer);
+    const recording = this.voice === "recording";
+    this.listenTimer = window.setTimeout(
+      () => {
+        if (this.voice === "off") return;
+        // Live dictation: nothing typed means nothing said. A recording is sent (an empty one sends nothing).
+        if (recording) void this.stopVoice(true);
+        else if (!this.input.value.trim()) void this.stopVoice(false);
+      },
+      recording ? LISTEN_RECORD_MS : LISTEN_MS,
+    );
   }
 
   async toggleVoice(): Promise<void> {
@@ -181,6 +207,7 @@ export class Chat {
     const mode = this.voice;
     this.voice = "off";
     window.clearTimeout(this.quietTimer);
+    window.clearTimeout(this.listenTimer);
     this.setLive(false);
     try {
       const text = await this.h.voiceStop();
@@ -188,7 +215,7 @@ export class Chat {
     } catch (e) {
       this.h.error(String(e));
     }
-    if (send) this.submit();
+    if (send) this.submit(true);
     this.input.focus();
   }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.5: spoken replies
+
+- **Waddle can read its answers aloud.** Settings → Voice → **Spoken replies** (off by default).
+  - It reads answers: chat replies, research summaries, quick replies during a task, and a task's last words. It doesn't read every step.
+  - Optionally it reads nudges and reminders too.
+  - Pick any installed Windows voice and a speed, and press **Test voice**.
+  - Formatting, emoji, web addresses and citations are left out, and long answers stop after a few sentences (the rest stays on screen).
+- **It knows when to be quiet.** No speaking in full screen or during a meeting on your calendar (with Google connected and meeting nudges on). Opening the chat box, talking, sending a message or Stop cuts it off.
+- **Talk mode.** After answering something you said aloud, Waddle listens again for 6 seconds, so a conversation can go back and forth hands-free. If you say nothing, the mic closes quietly.
+- You can also ask Waddle to "read your answers aloud"; it changes the setting with your OK.
+- The self-test lists the voices it found.
+
 ## 0.2.4: conversation panel
 
 - **Conversation history.** 🕘 in the chat box (or **Ctrl+Alt+H**) opens the last 50 messages beside the duck: what you said, Waddle's replies, research summaries (with their **Full answer** button), nudges, reminders and the morning brief. It stays put while you read and survives restarts.

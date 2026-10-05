@@ -172,6 +172,23 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
         .await,
     );
 
+    let speak = settings.voice_out.enabled;
+    checks.push(
+        run_check("Spoken replies", || async move {
+            let voices = blocking(|| Ok(crate::speech::voices())).await?;
+            let can = !voices.is_empty() || blocking(|| Ok(crate::speech::available())).await?;
+            Ok(match (can, speak) {
+                (true, on) => {
+                    let which = if voices.is_empty() { "the default voice".to_string() } else { format!("{} voices ({})", voices.len(), voices.iter().take(3).cloned().collect::<Vec<_>>().join(", ")) };
+                    (Status::Pass, format!("{which}{}", if on { "" } else { "; reading aloud is off" }))
+                }
+                (false, true) => (Status::Warn, "no voice to read with; answers stay on screen".into()),
+                (false, false) => (Status::Skip, "no voice installed; reading aloud is off".into()),
+            })
+        })
+        .await,
+    );
+
     let (provider, demo) = crate::provider_for(&settings, &state.secrets, &state.ledger);
     let model = settings.model.clone();
     checks.push(

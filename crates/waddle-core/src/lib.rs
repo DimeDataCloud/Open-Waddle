@@ -13,6 +13,7 @@ pub mod llm;
 pub mod safety;
 pub mod session;
 pub mod skills;
+pub mod speech;
 pub mod store;
 pub mod stt;
 pub mod tools;

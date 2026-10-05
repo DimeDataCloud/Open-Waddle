@@ -42,6 +42,7 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - Press **Ctrl+Alt+Space** (or the 🎙 button) to talk.
   - On Windows this uses the built-in voice typing: free and live.
   - A Whisper-compatible backend is also available: Groq's free tier, OpenAI, or a local whisper server.
+  - **Spoken replies** (Settings → Voice, off by default): Waddle reads its answers aloud in a Windows voice of your choice, and optionally nudges and reminders. Only answers are read, not every step. It keeps quiet in full screen and during meetings on your calendar, and stops when you open the chat box, talk or press Stop. **Talk mode** listens again for 6 seconds after answering something you said aloud, so you can have a back-and-forth without touching anything.
 - **Act.**
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
   - Open apps, click, type, press shortcuts, scroll and drag. Waddle walks to the target and stands beside it before each action.

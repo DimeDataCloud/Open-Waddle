@@ -59,9 +59,9 @@ const drawer = new HistoryDrawer(document.getElementById("history")!, {
 });
 bubble.onMore = () => void drawer.open();
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
-  send: (text, selection) => {
+  send: (text, selection, voice) => {
     bubble.say("user", selection ? `${text || "Help with this"} 📎` : text);
-    void api.sendMessage(text, selection);
+    void api.sendMessage(text, selection, voice);
   },
   dropSelection: () => void api.dropSelection(),
   // A local model loads while the user types.
@@ -476,6 +476,12 @@ void on("chat:open", ({ voice, selection }) => {
 });
 
 void on("history:changed", () => void drawer.refresh());
+// Talk mode: Waddle just read out an answer to something said aloud.
+void on("talk:listen", () => {
+  touch();
+  chat.open();
+  void chat.listen();
+});
 void on("history:toggle", () => {
   touch();
   drawer.toggle();

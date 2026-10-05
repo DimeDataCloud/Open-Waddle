@@ -96,7 +96,7 @@ export interface HitRect {
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
-  sendMessage: (text: string, selection = false) => invoke<void>("send_message", { text, selection }),
+  sendMessage: (text: string, selection = false, voice = false) => invoke<void>("send_message", { text, selection, voice }),
   dropSelection: () => invoke<void>("drop_selection"),
   openAnswer: (id: string) => invoke<string>("open_answer", { id }),
   historyList: () => invoke<HistoryEntry[]>("history_list"),
@@ -137,6 +137,7 @@ export interface Events {
   "monitor:moved": { from: "left" | "right" };
   "history:changed": null;
   "history:toggle": null;
+  "talk:listen": null;
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {
