@@ -38,6 +38,11 @@ Designed from three batches of the first weeks' task traces, research on desktop
   - All 12 assistant jobs pass with the default model and with Gemini 3.5 Flash-Lite and 3.8 Flash.
   - The screen tasks were run with the default model and Gemini 3.5 Flash-Lite.
   - The training export was run on the real traces: nothing personal was left in the masked fields.
+  - A live run of the app with the real model on a virtual screen:
+    - "Left Page on the left half, Right Page on the right half" was done exactly, in 3 steps (7 s of model time, $0.0009). In the traces, a real split-screen task took 20 steps.
+    - "Fly around the screen" flew the loop and landed.
+    - Esc with the chat box open closed only the chat box, and the task finished. A second Esc stopped it with "Stopped (you pressed Esc)", and **Try again** ran it again.
+    - A similar request got the saved recipe. One loose match ("maximize" offered a split-screen recipe) led to a stricter match.
   - Not checked here: Google's own endpoint (no key in the test environment) and Windows window placement on a real screen (it's compiled and its geometry tested). Both are in the on-device checklist.
 
 The rest of this release:

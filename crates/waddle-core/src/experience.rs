@@ -15,6 +15,8 @@ use crate::llm::{Message, Role, ToolCall};
 
 const KEEP: usize = 200;
 const MAX_STEPS: usize = 12;
+/// How alike two requests must be (Dice coefficient of their content words) to share a recipe.
+const MATCH_AT: f64 = 0.6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Experience {
@@ -45,7 +47,7 @@ const STOP: &[&str] = &[
     "a", "an", "the", "to", "and", "or", "of", "on", "in", "at", "for", "with", "from", "by", "it", "its", "this", "that", "these", "those",
     "my", "our", "me", "us", "you", "your", "i", "we", "please", "can", "could", "would", "will", "go", "ahead", "just", "up", "some", "one",
     "uh", "um", "umm", "hey", "waddle", "now", "then", "also", "so", "ok", "okay", "is", "are", "be", "do", "for", "want", "like", "there",
-    "what", "which", "any", "all", "get", "let", "lets", "let's", "need",
+    "what", "which", "any", "all", "get", "let", "lets", "let's", "need", "window", "screen", "half", "side",
 ];
 
 /// The content words of a request, lower case, plurals folded ("playlists" → "playlist").
@@ -223,7 +225,7 @@ impl ExperienceStore {
                 let (score, shared) = likeness(&want, &e.words);
                 (if e.confirmed { score * 1.15 } else { score }, shared, e)
             })
-            .filter(|(score, shared, _)| *score >= 0.5 && *shared >= 2)
+            .filter(|(score, shared, _)| *score >= MATCH_AT && *shared >= 2)
             .max_by(|a, b| a.0.total_cmp(&b.0).then(a.2.ts_ms.cmp(&b.2.ts_ms)))
             .map(|(_, _, e)| e.clone())
     }
@@ -332,6 +334,16 @@ mod tests {
         assert!(again.recall("open youtube music playlist").unwrap().confirmed);
         again.rate("t1", false);
         assert!(again.is_empty());
+    }
+
+    #[test]
+    fn requests_that_only_share_generic_words_get_no_recipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExperienceStore::open(dir.path().join("experience.json"));
+        // From the live test: a split-screen recipe was offered for "maximize" on "window", "page" and "left".
+        store.learn("split", "Put the Left Page window on the left half of the screen and the Right Page window on the right half.", &task());
+        assert!(store.recall("Maximize the Left Page window.").is_none());
+        assert!(store.recall("Now put the Right Page window on the left half and the Left Page window on the right half of the screen.").is_some());
     }
 
     #[test]
