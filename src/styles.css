@@ -209,6 +209,10 @@ body {
   font-size: 14px;
 }
 
+.card button:focus-visible,
+.card summary:focus-visible,
+.bubble button:focus-visible,
+.badge:focus-visible,
 .chat button:focus-visible,
 .drawer button:focus-visible,
 .drawer .entries:focus-visible,

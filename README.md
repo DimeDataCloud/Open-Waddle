@@ -33,6 +33,7 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - Waddle walks on the top edges of your windows and the bottom of the screen, rides windows you drag, and falls when its window disappears.
   - It wanders when idle and falls asleep after two quiet minutes.
   - Drag the duck to carry it. Click it to chat. Right-click it for Settings.
+  - Little effects say how things went: a sparkle when a task is done, a sweat drop when one fails, a "?" when it asks you something, a heart when you say thanks (still symbols only with reduce motion on).
 - **Real-time conversation.**
   - Replies stream into the bubble as they're generated.
   - Messages you send *during* a task get an instant quick reply, and they change the running task at its next step.
@@ -109,9 +110,9 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
 
 ### Option A: install a build
 
-1. Download `Waddle_0.2.0_arm64-setup.exe` from the latest CI run's artifacts (or the file shared with you).
+1. Download `Waddle_<version>_arm64-setup.exe` from the latest CI run's artifacts (or the file shared with you).
 2. It isn't code-signed yet, so Windows SmartScreen will warn you. Click **More info → Run anyway**.
-3. Waddle appears at the bottom of your screen in **demo mode** (no AI). Click the duck and type anything to see the full flow.
+3. Waddle appears at the bottom of your screen with a short **welcome**: paste an OpenRouter key (and press Test), let it find Ollama, or just look around in demo mode.
 
 ### Option B: build from source
 

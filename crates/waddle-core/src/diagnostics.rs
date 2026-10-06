@@ -50,6 +50,21 @@ where
     Check { name: name.to_string(), status, detail, millis: started.elapsed().as_millis() as u64 }
 }
 
+/// The models an Ollama server has pulled, or an error if it isn't running.
+pub async fn ollama_models(base_url: &str) -> anyhow::Result<Vec<String>> {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let resp = reqwest::Client::builder().timeout(std::time::Duration::from_secs(3)).build()?.get(&url).send().await?;
+    anyhow::ensure!(resp.status().is_success(), "Ollama answered {}", resp.status());
+    let v: serde_json::Value = resp.json().await?;
+    Ok(v["models"].as_array().into_iter().flatten().filter_map(|m| m["name"].as_str().map(str::to_string)).collect())
+}
+
+/// The model to suggest from what Ollama has: Waddle's tested default if pulled, else the first.
+pub fn pick_ollama_model(models: &[String]) -> Option<String> {
+    const PREFERRED: [&str; 3] = ["qwen3.5:4b", "qwen3.5:9b", "qwen3:4b"];
+    PREFERRED.iter().find(|p| models.iter().any(|m| m == *p)).map(|p| p.to_string()).or_else(|| models.first().cloned())
+}
+
 /// One small model call with one tool: does the model answer, and can it call tools?
 pub async fn probe_model(provider: &dyn Provider, model: &str) -> anyhow::Result<(Status, String)> {
     let tools = [ToolSpec {
@@ -200,6 +215,14 @@ pub fn render_report(r: &ReportInput<'_>) -> String {
 mod tests {
     use super::*;
     use crate::llm::mock::{call, reply, MockProvider};
+
+    #[test]
+    fn picks_the_tested_ollama_model() {
+        let m = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(pick_ollama_model(&m(&["llama3:8b", "qwen3.5:4b"])).as_deref(), Some("qwen3.5:4b"));
+        assert_eq!(pick_ollama_model(&m(&["llama3:8b"])).as_deref(), Some("llama3:8b"));
+        assert_eq!(pick_ollama_model(&[]), None);
+    }
 
     #[tokio::test]
     async fn probe_reports_whether_tools_work() {

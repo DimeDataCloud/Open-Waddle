@@ -21,7 +21,23 @@ export class ApprovalCard {
     readonly el: HTMLElement,
     private answer: (id: string, approved: boolean, draft?: MailDraft) => void,
     private undo: (id: string) => void = () => {},
-  ) {}
+  ) {
+    // Esc says no. Yes takes the Approve button itself: the card never takes focus
+    // on its own, so Enter typed into the chat box can't approve a card that just appeared.
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.current) {
+        e.stopPropagation();
+        this.respond(false);
+      }
+    });
+  }
+
+  /** Tells screen readers what's being asked. */
+  private announce(urgent: boolean, label: string): void {
+    this.el.setAttribute("role", urgent ? "alertdialog" : "status");
+    this.el.setAttribute("aria-live", urgent ? "assertive" : "polite");
+    this.el.setAttribute("aria-label", label);
+  }
 
   get visible(): boolean {
     return this.current !== null || this.undoId !== null;
@@ -38,6 +54,7 @@ export class ApprovalCard {
     const tier3 = countdown === null;
     this.el.className = `card ${tier3 ? "tier3" : "tier2"}`;
     this.el.replaceChildren();
+    this.announce(tier3, `${tier3 ? "Needs your OK" : "Going ahead unless you cancel"}: ${req.summary}. ${req.reason}`);
 
     const h = document.createElement("h3");
     h.textContent = tier3 ? `Tier ${req.tier} · needs your OK` : `Tier ${req.tier} · going ahead`;
@@ -70,9 +87,12 @@ export class ApprovalCard {
     const actions = document.createElement("div");
     actions.className = "actions";
     const deny = document.createElement("button");
+    deny.type = "button";
     deny.textContent = tier3 ? "Deny" : "Cancel";
+    deny.title = "Esc";
     deny.onclick = () => this.respond(false);
     const approve = document.createElement("button");
+    approve.type = "button";
     approve.className = "approve";
     approve.textContent = tier3 ? "Approve" : "Go now";
     approve.onclick = () => this.respond(true);
@@ -91,6 +111,7 @@ export class ApprovalCard {
     window.clearTimeout(this.timer);
     this.el.className = "card tier3 mail";
     this.el.replaceChildren();
+    this.announce(true, `Send this email to ${draft.to}? Subject: ${draft.subject}`);
     const h = document.createElement("h3");
     h.textContent = "Send this email?";
     const form = document.createElement("div");

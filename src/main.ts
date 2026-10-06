@@ -2,6 +2,7 @@
 // duck, its UI, and the backend's events.
 
 import { Duck, pickWanderTarget, usesLaptop } from "./body/behavior";
+import { asks, Fx, isThanks } from "./body/fx";
 import { alarmPalette, buildPalette } from "./body/palette";
 import { planIntent, type Plan } from "./body/intent";
 import { standBeside } from "./body/pathfind";
@@ -42,6 +43,18 @@ let plan: Plan | null = null;
 let planStop = 0;
 
 const duck = new Duck({ w: renderer.width, h: renderer.height }, screen.w * 0.7, screen.h * 0.4);
+const fx = new Fx(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+/** For dust on landing: where the current fall started. */
+let fallFrom: number | null = null;
+/** The reply being written, to see whether it ends with a question. */
+let reply = "";
+
+/** Where head effects go: beside the duck's head, clear of the bubble and chat box above it. */
+function headOf(): { x: number; y: number } {
+  const r = duck.rect;
+  const right = duck.facing > 0 ? r.x + r.w + 6 : r.x - 6;
+  return { x: right, y: r.y + 14 };
+}
 
 const pointer = new Pointer();
 const bubble = new Bubble(document.getElementById("bubble")!, () => void api.halt());
@@ -61,6 +74,10 @@ bubble.onMore = () => void drawer.open();
 const chat = new Chat(document.getElementById("chat") as HTMLFormElement, {
   send: (text, selection, voice) => {
     bubble.say("user", selection ? `${text || "Help with this"} 📎` : text);
+    if (isThanks(text)) {
+      const h = headOf();
+      fx.emit("heart", h.x, h.y, performance.now());
+    }
     void api.sendMessage(text, selection, voice);
   },
   dropSelection: () => void api.dropSelection(),
@@ -118,8 +135,16 @@ function loop(now: number): void {
   scheduled = false;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  const wasFalling = duck.mode === "falling";
   duck.update(dt, segments, moved);
   moved.clear();
+  if (duck.mode === "falling" && fallFrom === null) fallFrom = duck.body.y;
+  if (wasFalling && duck.mode === "idle") {
+    // A puff of dust after a real drop, not a little hop.
+    if (fallFrom !== null && duck.body.y - fallFrom > 40) fx.emit("dust", duck.body.x, duck.body.y, now);
+    fallFrom = null;
+  }
+  if (duck.mode !== "falling") fallFrom = null;
   think(now);
   draw(now);
   layoutUi();
@@ -130,7 +155,7 @@ function schedule(now: number): void {
   if (scheduled) return;
   scheduled = true;
   // Full frame rate while anything moves; a slow tick when idle keeps CPU near zero.
-  if (duck.isAnimating(now) || bubble.visible || approval.visible) requestAnimationFrame(loop);
+  if (duck.isAnimating(now) || bubble.visible || approval.visible || fx.active) requestAnimationFrame(loop);
   else window.setTimeout(() => requestAnimationFrame(loop), idleTick);
 }
 
@@ -172,6 +197,8 @@ function draw(now: number): void {
   const r = duck.rect;
   const frame = duck.frame(now);
   if (lastRect) ctx.clearRect(lastRect.x - 2, lastRect.y - 2, lastRect.w + 4, lastRect.h + 4);
+  const old = fx.dirty();
+  if (old) ctx.clearRect(old.x, old.y, old.w, old.h);
   renderer.draw(frame, r.x, r.y, duck.facing < 0);
   if (duck.laptop && duck.mode === "idle") drawLaptop(r);
   if (duck.sleeping) {
@@ -182,6 +209,7 @@ function draw(now: number): void {
   // The laptop sits just outside the sprite, so clear a little wider.
   const pad = renderer.scale * LAPTOP[0].length;
   lastRect = { x: r.x - pad, y: r.y - 16, w: r.w + pad * 2, h: r.h + 16 };
+  fx.draw(ctx, now);
 }
 
 // A tiny open laptop, 7x5 sprite pixels: lid (L), glowing screen (S), base (B).
@@ -418,9 +446,16 @@ void on("agent", (ev) => {
   switch (ev.type) {
     case "text_delta":
       bubble.stream(ev.lane, ev.text);
+      if (ev.lane === "planner") reply += ev.text;
       break;
     case "text_done":
       bubble.endStream(ev.lane);
+      // A chat answer that asks something back.
+      if (ev.lane === "planner" && (ev.task_id === "chat" || ev.task_id === "research") && asks(reply)) {
+        const h = headOf();
+        fx.emit("question", h.x, h.y, performance.now());
+      }
+      if (ev.lane === "planner" && (ev.task_id === "chat" || ev.task_id === "research")) reply = "";
       break;
     case "tool_started":
       bubble.tool(ev.summary);
@@ -439,11 +474,17 @@ void on("agent", (ev) => {
       alarm = false;
       applyPalette();
       break;
-    case "task_finished":
+    case "task_finished": {
       duck.laptop = false;
+      const h = headOf();
+      const t = performance.now();
+      if (ev.outcome === "done") fx.emit(asks(reply) ? "question" : "sparkle", h.x, h.y, t);
+      else if (ev.outcome === "failed" || ev.outcome === "timed_out") fx.emit("sweat", h.x, h.y, t);
+      reply = "";
       // The planner's final words already streamed; show the message only if it didn't.
       if (ev.outcome !== "done") bubble.say(ev.outcome === "failed" ? "error" : "notice", ev.message);
       break;
+    }
     case "notice":
       bubble.say("notice", ev.text);
       break;
@@ -454,7 +495,11 @@ void on("agent", (ev) => {
       bubble.offer(ev.label, () => api.openAnswer(ev.id));
       break;
     case "task_started":
+      reply = "";
+      break;
     case "thinking":
+      // Only the last step's words count as the reply.
+      reply = "";
       break;
   }
 });

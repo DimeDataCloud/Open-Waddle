@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.8: polish
+
+- **A welcome on first run.** With no brain set up yet, Waddle opens a short welcome.
+  - Paste an OpenRouter key and press **Test** (one tiny call), let Waddle find Ollama on this computer, or just look around in demo mode.
+  - Pick a colour, and you're done. It never appears again once finished or skipped.
+- **Settings in tabs, with search.** Brain, Assistant, Nudges & routines, Voice, Memory & privacy, Character and Diagnostics. Type in the search box to find any setting across tabs (field hints and options count). Save stays in view at the bottom, and a required field on another tab opens that tab instead of silently blocking Save. The last tab is remembered.
+- **Little effects.** A puff of dust when the duck lands, a sparkle when a task is done, a sweat drop when one fails, a "?" when Waddle asks you something, and a heart when you say thanks. With Windows' reduce-motion setting on, only still symbols show.
+- **Keyboard and screen readers.**
+  - Esc denies an approval card. There's no Enter shortcut to approve, and the card never takes focus by itself, so Enter typed in the chat box can't approve an action.
+  - Cards are announced: "needs your OK" urgently, countdowns politely.
+  - Visible focus rings across the overlay and Settings; ← and → move between Settings tabs.
+- **Clearer microphone errors.** "I can't find a microphone" or "I couldn't start the microphone", with where to fix it in Windows, instead of "microphone config".
+
 ## 0.2.7: routines
 
 - **Routines: tasks Waddle does on a schedule.** "Every weekday at 8:45, summarise my unread email." "Every Friday at 4pm, list the files I changed this week." "Today at 6pm, draft my weekly report."

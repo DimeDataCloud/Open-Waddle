@@ -39,6 +39,8 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
   - every colour derives from one base colour: dark = base × 0.62, darkest = base × 0.36
   - red variant while a Tier 3 approval waits
   - full frame rate only while something animates; an 8 fps tick otherwise
+- **Effects** (`src/body/fx.ts`): plain canvas shapes drawn after the duck: dust on landing after a real drop, a sparkle when a task is done, a sweat drop when one fails, a "?" when a reply ends with a question, a heart when thanked. Each frame clears only the area the last one drew. With `prefers-reduced-motion`, dust is skipped and the rest stay still.
+- **Approval card:** announced to screen readers (an `alertdialog` when it needs a click, a polite `status` during a countdown). Esc denies; there is deliberately no Enter shortcut to approve, and the card never takes keyboard focus on its own, so typing elsewhere can't approve anything.
 
 ### Eyes
 
@@ -126,6 +128,11 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 - **Untrusted content:** tool output from the screen, files and commands is wrapped as `<untrusted source=… id=RANDOM>`, and look-alike tags inside it are defanged. Screenshots are labelled as untrusted.
 - **Audit log:** SQLite, append-only (triggers reject UPDATE/DELETE), each row a SHA-256 hash covering the previous row; `verify()` locates the first altered row.
 - **API keys:** stored in the OS keychain (`keyring` 4); environment variables override for development; a file readable only by the user is the fallback on headless Linux.
+
+### Settings and first run
+
+- **Welcome:** on first start in demo mode (no brain set up, `first_run_done` unset) Settings opens on a short welcome: paste an OpenRouter key and **Test** it (`test_key`: one tiny call, metered like any other), find a local Ollama (`detect_ollama`: `GET /api/tags`, picks the tested Qwen model if it's there), or stay in the demo; then pick a colour. Saving or skipping sets `first_run_done`, so it shows once.
+- **Tabs and search:** each fieldset says which tab it's on (`data-tab`); the search box shows every section whose words, placeholders or options match, across tabs. The last tab is remembered per browser profile. A field that fails validation opens its tab before the browser points at it.
 
 ## Decisions on the blueprint's models
 

@@ -73,6 +73,31 @@ pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<
     }
 }
 
+/// The welcome's "Test" button: one tiny model call with these settings and key
+/// (or the saved key). Returns what happened, in plain words.
+#[tauri::command]
+pub async fn test_key(state: State<'_, AppState>, settings: Settings, key: Option<String>) -> CmdResult<String> {
+    let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| state.secrets.get(Secret::LlmKey));
+    if needs_key(&settings) && key.is_none() {
+        return Err("Paste your key first.".into());
+    }
+    let provider = waddle_core::llm::build_provider(&settings, key);
+    let provider: std::sync::Arc<dyn waddle_core::llm::Provider> = if settings.is_local() { provider } else { std::sync::Arc::new(waddle_core::ledger::Metered::new(provider, state.ledger.clone())) };
+    match waddle_core::diagnostics::probe_model(provider.as_ref(), &settings.model).await {
+        Ok((_, detail)) => Ok(format!("It works: {detail}.")),
+        Err(e) => Err(format!("{e:#}")),
+    }
+}
+
+/// The models of an Ollama server on this computer.
+#[tauri::command]
+pub async fn detect_ollama(base_url: Option<String>) -> CmdResult<(Vec<String>, Option<String>)> {
+    let base = base_url.unwrap_or_else(|| "http://localhost:11434".into());
+    let models = waddle_core::diagnostics::ollama_models(&base).await.map_err(|_| "Ollama isn't running on this computer. Install it from ollama.com, start it, then run: ollama pull qwen3.5:4b".to_string())?;
+    let pick = waddle_core::diagnostics::pick_ollama_model(&models);
+    Ok((models, pick))
+}
+
 /// The voices that can read replies aloud (empty: only the system's default).
 #[tauri::command]
 pub async fn speech_voices() -> CmdResult<Vec<String>> {
@@ -578,7 +603,7 @@ pub async fn voice_start(state: State<'_, AppState>) -> CmdResult<&'static str> 
             Ok("system")
         }
         VoiceBackend::WhisperApi => {
-            let rec = tokio::task::spawn_blocking(voice::start).await.map_err(err)?.map_err(err)?;
+            let rec = tokio::task::spawn_blocking(voice::start).await.map_err(err)?.map_err(|e| voice::plain(&e))?;
             *state.recording.lock().unwrap() = Some(rec);
             Ok("recording")
         }

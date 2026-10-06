@@ -18,6 +18,16 @@ pub struct Recording {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+/// A microphone problem in words the user can act on.
+pub fn plain(e: &anyhow::Error) -> String {
+    let full = format!("{e:#}");
+    if full.contains("no microphone found") {
+        return "I can't find a microphone. Plug one in or turn it on, then try again (typing works too).".into();
+    }
+    let fix = if cfg!(windows) { " Check Settings → Privacy & security → Microphone, and let desktop apps use it." } else { "" };
+    format!("I couldn't start the microphone.{fix} ({full})")
+}
+
 /// Self-test: the default microphone's name, without recording anything.
 pub fn probe() -> anyhow::Result<String> {
     let device = cpal::default_host().default_input_device().ok_or_else(|| anyhow!("no microphone found"))?;

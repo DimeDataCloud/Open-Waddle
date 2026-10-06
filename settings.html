@@ -7,14 +7,49 @@
     <link rel="stylesheet" href="/src/settings/settings.css" />
   </head>
   <body>
+    <section id="welcome" class="welcome hidden" aria-labelledby="welcome-title">
+      <h1 id="welcome-title">Hi, I'm Waddle 🦆</h1>
+      <p>I live on your desktop and do things for you: answer questions, look after your email and calendar, find files and use your apps. I always ask before anything risky. First, pick how I think:</p>
+      <div class="choices" role="radiogroup" aria-label="Waddle's brain">
+        <label class="choice"><input type="radio" name="brain" value="openrouter" checked /> <span><b>OpenRouter</b>: cloud models, about $0.001 a task (recommended)</span></label>
+        <div id="w-openrouter" class="choice-body">
+          <ol class="muted">
+            <li>Create a key at <b>openrouter.ai/keys</b> and add $5 of credit (that lasts months).</li>
+            <li>Paste it here. It's kept in Windows Credential Manager.</li>
+          </ol>
+          <div class="add-row">
+            <input id="w_key" type="password" autocomplete="off" placeholder="sk-or-…" aria-label="OpenRouter key" />
+            <button type="button" id="w-test" class="link">Test</button>
+          </div>
+          <p id="w-test-status" class="muted" aria-live="polite"></p>
+        </div>
+        <label class="choice"><input type="radio" name="brain" value="ollama" /> <span><b>Ollama</b> on this computer: free and private, but slower</span></label>
+        <div id="w-ollama" class="choice-body hidden">
+          <button type="button" id="w-detect" class="link">Look for Ollama</button>
+          <p id="w-ollama-status" class="muted" aria-live="polite"></p>
+        </div>
+        <label class="choice"><input type="radio" name="brain" value="demo" /> <span><b>Just look around</b>: demo mode, nothing real happens</span></label>
+      </div>
+      <label class="color-row">My colour <input id="w_color" type="color" value="#FFD23F" /></label>
+      <p class="muted">Later, in Settings: connect Google (mail, calendar, Drive), set up the Chrome extension, add tools from other apps (MCP), routines, and spoken replies.</p>
+      <div class="welcome-actions">
+        <button type="button" id="w-skip" class="link">Skip for now</button>
+        <button type="button" id="w-done" class="primary">Let's go</button>
+      </div>
+      <p id="w-status" class="muted" aria-live="polite"></p>
+    </section>
+
     <main>
       <header>
         <h1>Waddle Settings</h1>
         <p id="mode" class="muted"></p>
+        <input id="search" type="search" placeholder="Search settings…" aria-label="Search settings" />
+        <nav id="tabs" role="tablist" aria-label="Settings sections"></nav>
       </header>
+      <p id="no-match" class="muted hidden">Nothing matches. Try another word.</p>
 
       <form id="form">
-        <fieldset id="spending-box">
+        <fieldset id="spending-box" data-tab="brain">
           <legend>Spending</legend>
           <p id="spend-summary">Nothing spent yet.</p>
           <div id="spend-bars" class="bars" aria-hidden="true"></div>
@@ -23,7 +58,7 @@
           <p class="muted">Waddle warns at 80% and pauses paid model calls at 100% until the 1st. Stop, reminders and the screen keep working. Local models are free and never paused.</p>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="brain">
           <legend>Brain</legend>
           <label>Preset
             <select id="preset">
@@ -55,7 +90,7 @@
           </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="brain">
           <legend>Safety</legend>
           <label>Tier 2 actions (clicks, typing, new files, read-only commands)
             <select id="tier2_mode">
@@ -72,7 +107,7 @@
           <button type="button" id="open-ws" class="link">Open workspace folder</button>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="brain">
           <legend>Self-improvement</legend>
           <p class="muted">Waddle can save skills to its memory, tune its own settings, split big jobs into sub-tasks, and (if you point it at its source folder) edit its own code. Every change to itself needs your approval.</p>
           <div class="grid2">
@@ -83,7 +118,7 @@
           <ul id="skills" class="skills"></ul>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="assistant">
           <legend>Google account</legend>
           <p class="muted">Lets Waddle read and tidy your Gmail, check and book your Google Calendar, and look up your contacts. Sending, binning and deleting always wait for your click. Setup takes about 5 minutes: see <code>docs/GOOGLE_SETUP.md</code>.</p>
           <label>OAuth client ID <input id="google_client_id" placeholder="….apps.googleusercontent.com" autocomplete="off" /></label>
@@ -104,7 +139,7 @@
           <button type="button" id="style-save" class="link">Save note</button>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="assistant">
           <legend>Files</legend>
           <p class="muted">Waddle always works freely in its own workspace folder. Here you choose what else it may reach. Deleting always sends files to the Recycle Bin and waits for your OK. App data, keys, passwords and browser profiles stay off limits.</p>
           <label class="check"><input id="read_user_folders" type="checkbox" /> Let Waddle read my Documents, Downloads, Desktop, Pictures, Music, Videos and Google Drive folders</label>
@@ -116,7 +151,7 @@
           </label>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="assistant">
           <legend>Chrome</legend>
           <p class="muted">With Waddle's extension, Waddle reads web pages and clicks links and buttons by name instead of guessing from screenshots: faster and more reliable. It only acts when you've asked it to do something.</p>
           <p id="browser-status" class="muted"></p>
@@ -129,7 +164,7 @@
           </ol>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="assistant">
           <legend>Tools (MCP)</legend>
           <p class="muted">Connect apps and services that offer an MCP server (GitHub, Notion, a database, your notes…) and Waddle can use their tools. Each server is a program Waddle starts on this computer when a task needs it. Tools from a server you haven't marked <b>trusted</b> always wait for your click; a trusted server's read-only tools run straight away and its others after a countdown. What tools return is treated like a web page: never as your instructions.</p>
           <ul id="mcp-list" class="skills"></ul>
@@ -146,7 +181,7 @@
           <p class="muted">Changes take effect when you press Save.</p>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="nudges">
           <legend>Nudges &amp; routines</legend>
           <p class="muted">With Google connected, Waddle taps you on the shoulder. In full screen it shows a small "!" first and waits until you're back (or five minutes); meetings always arrive before they start.</p>
           <label class="check"><input id="meeting_nudges" type="checkbox" /> Five minutes before a meeting, with a Join button</label>
@@ -181,7 +216,7 @@
           </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="memory">
           <legend>Memory &amp; privacy</legend>
           <label class="check"><input id="no_training" type="checkbox" /> Only use AI providers that don't keep or train on what I send (OpenRouter)</label>
           <h4>What Waddle remembers about you</h4>
@@ -197,7 +232,7 @@
           <span id="forgot" class="muted"></span>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="memory">
           <legend>Training data</legend>
           <p class="muted">Save each task (what you asked, what Waddle saw and did) on this computer, rate results with 👍/👎 in the bubble, and export the good ones to fine-tune a model on your own work. Screenshots never leave this computer unless you share the files.</p>
           <label class="check"><input id="record_traces" type="checkbox" /> Save my tasks for training</label>
@@ -205,7 +240,7 @@
           <button type="button" id="export-traces" class="link">Export training file</button>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="voice">
           <legend>Voice</legend>
           <label>Talk input
             <select id="voice_backend">
@@ -239,7 +274,7 @@
           </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-tab="character">
           <legend>Character</legend>
           <div class="grid2">
             <label>Colour <input id="color" type="color" /></label>
@@ -254,14 +289,14 @@
         </div>
       </form>
 
-      <section>
+      <section data-tab="diagnostics">
         <h2>Diagnostics <button type="button" id="selftest" class="link">Run self-test</button></h2>
         <p class="muted">Checks each part of Waddle on this computer (including one small model call) and saves a report to your workspace folder. If something isn't working, send that file. It leaves out keys, file contents, window titles and what you've typed.</p>
         <ul id="checks" class="checks"></ul>
         <p id="selftest-result" class="muted"></p>
       </section>
 
-      <section>
+      <section data-tab="diagnostics">
         <h2>Activity log <button type="button" id="verify" class="link">Verify integrity</button></h2>
         <p id="verify-result" class="muted"></p>
         <table>
