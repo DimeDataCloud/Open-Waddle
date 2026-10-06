@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanName, importJson, joinCommand, parseEnv, splitCommand, type McpEnv, type McpServer } from "./mcp";
+import { fastDefaults, fastServiceFor, GOOGLE_PLANNER, GOOGLE_QUICK, GOOGLE_URL, usesGoogle, type FastService } from "./services";
 import { Tabs } from "./tabs";
 
 interface Settings {
@@ -7,6 +8,7 @@ interface Settings {
   base_url: string;
   model: string;
   fast_model: string;
+  fast_base_url: string;
   coord_mode: "auto" | "pixels" | "norm1000";
   tier2_mode: "countdown" | "ask";
   tier2_countdown_ms: number;
@@ -43,6 +45,7 @@ interface Settings {
 interface SettingsView {
   settings: Settings;
   has_api_key: boolean;
+  has_fast_key: boolean;
   has_stt_key: boolean;
   workspace: string;
   demo: boolean;
@@ -61,11 +64,12 @@ interface AuditRecord {
 }
 
 const PRESETS: Record<string, Partial<Settings>> = {
-  openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna", fast_model: "google/gemini-2.5-flash-lite" },
-  ollama: { provider: "ollama", base_url: "http://localhost:11434", model: "qwen3.5:4b", fast_model: "" },
-  lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "qwen3.5-4b", fast_model: "" },
-  foundry: { provider: "openai_compat", base_url: "http://localhost:5273/v1", model: "phi-4-mini", fast_model: "" },
-  mock: { provider: "mock", base_url: "", model: "demo", fast_model: "" },
+  openrouter: { provider: "openai_compat", base_url: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna", fast_model: "google/gemini-2.5-flash-lite", fast_base_url: "" },
+  google: { provider: "openai_compat", base_url: GOOGLE_URL, model: GOOGLE_PLANNER, fast_model: GOOGLE_QUICK, fast_base_url: "" },
+  ollama: { provider: "ollama", base_url: "http://localhost:11434", model: "qwen3.5:4b", fast_model: "", fast_base_url: "" },
+  lmstudio: { provider: "openai_compat", base_url: "http://localhost:1234/v1", model: "qwen3.5-4b", fast_model: "", fast_base_url: "" },
+  foundry: { provider: "openai_compat", base_url: "http://localhost:5273/v1", model: "phi-4-mini", fast_model: "", fast_base_url: "" },
+  mock: { provider: "mock", base_url: "", model: "demo", fast_model: "", fast_base_url: "" },
 };
 
 const $ = <T extends HTMLElement = HTMLInputElement>(id: string) => document.getElementById(id) as T;
@@ -75,6 +79,7 @@ function presetFor(s: Settings): string {
   if (s.provider === "mock") return "mock";
   if (s.provider === "ollama") return "ollama";
   if (s.base_url.includes("openrouter.ai")) return "openrouter";
+  if (s.base_url.includes("generativelanguage.googleapis.com")) return "google";
   if (s.base_url.includes(":1234")) return "lmstudio";
   if (s.base_url.includes(":5273")) return "foundry";
   return "custom";
@@ -88,6 +93,10 @@ function syncVisibility(): void {
   $("base_url").required = !demo;
   $("model").required = !demo;
   $("ollama-opts").classList.toggle("hidden", preset !== "ollama");
+  const fast = $<HTMLSelectElement>("fast_service").value as FastService;
+  $("fast-opts").classList.toggle("hidden", fast === "same");
+  $("fast_base_url").required = !demo && fast !== "same";
+  $("google-note").classList.toggle("hidden", demo || !usesGoogle($("base_url").value, fast === "same" ? "" : $("fast_base_url").value));
   $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
   $("vo-opts").classList.toggle("hidden", !$("vo_enabled").checked);
   $("vo_rate_label").textContent = `${Number($("vo_rate").value).toFixed(1)}×`;
@@ -286,6 +295,11 @@ function fill(view: SettingsView): void {
   $("fast_model").value = s.fast_model;
   $("api_key").value = "";
   $("api_key").placeholder = view.has_api_key ? "saved (leave blank to keep)" : "paste your key";
+  $<HTMLSelectElement>("fast_service").value = fastServiceFor(s.fast_base_url);
+  $("fast_base_url").value = s.fast_base_url;
+  $("fast_key").value = "";
+  $("fast_key").placeholder = view.has_fast_key ? "saved (leave blank to keep)" : "paste the key for this service";
+  $("fast-status").textContent = "";
   $<HTMLSelectElement>("coord_mode").value = s.coord_mode;
   $("num_thread").value = s.ollama.num_thread?.toString() ?? "";
   $("keep_alive").value = s.ollama.keep_alive;
@@ -352,6 +366,7 @@ function collect(): Settings {
     base_url: $("base_url").value.trim(),
     model: $("model").value.trim(),
     fast_model: $("fast_model").value.trim(),
+    fast_base_url: $<HTMLSelectElement>("fast_service").value === "same" ? "" : $("fast_base_url").value.trim(),
     coord_mode: $<HTMLSelectElement>("coord_mode").value as Settings["coord_mode"],
     tier2_mode: $<HTMLSelectElement>("tier2_mode").value as Settings["tier2_mode"],
     tier2_countdown_ms: num("tier2_countdown_ms", 2000),
@@ -749,8 +764,32 @@ $<HTMLSelectElement>("preset").addEventListener("change", () => {
     $("base_url").value = p.base_url ?? "";
     $("model").value = p.model ?? "";
     $("fast_model").value = p.fast_model ?? "";
+    // A new planner service starts with quick replies on the same one.
+    $("fast_base_url").value = "";
+    $<HTMLSelectElement>("fast_service").value = "same";
   }
   syncVisibility();
+});
+
+$<HTMLSelectElement>("fast_service").addEventListener("change", () => {
+  const service = $<HTMLSelectElement>("fast_service").value as FastService;
+  const planner = PRESETS[$<HTMLSelectElement>("preset").value];
+  const next = fastDefaults(service, planner?.fast_model ?? "", $("fast_base_url").value, $("fast_model").value);
+  $("fast_base_url").value = next.url;
+  $("fast_model").value = next.model;
+  syncVisibility();
+});
+$("base_url").addEventListener("input", syncVisibility);
+$("fast_base_url").addEventListener("input", syncVisibility);
+
+$("fast-test").addEventListener("click", async () => {
+  const status = $("fast-status");
+  status.textContent = "Asking the model…";
+  try {
+    status.textContent = await invoke<string>("test_fast_service", { settings: collect(), key: $("fast_key").value.trim() || null });
+  } catch (err) {
+    status.textContent = String(err);
+  }
 });
 $<HTMLSelectElement>("voice_backend").addEventListener("change", syncVisibility);
 $("vo_enabled").addEventListener("change", syncVisibility);
@@ -867,9 +906,11 @@ $<HTMLFormElement>("form").addEventListener("submit", async (e) => {
   try {
     const apiKey = $("api_key").value.trim();
     const sttKey = $("stt_key").value.trim();
+    const fastKey = $("fast_key").value.trim();
     const view = await invoke<SettingsView>("save_settings", {
       settings: collect(),
       apiKey: apiKey ? apiKey : null,
+      fastKey: fastKey ? fastKey : null,
       sttKey: sttKey ? sttKey : null,
       mcpEnv,
     });

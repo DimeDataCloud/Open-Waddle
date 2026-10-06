@@ -68,6 +68,7 @@
           <label>Preset
             <select id="preset">
               <option value="openrouter">OpenRouter (cloud, cheap: recommended)</option>
+              <option value="google">Google Gemini API (free key, see the note below)</option>
               <option value="ollama">Ollama (local, free, slower)</option>
               <option value="lmstudio">LM Studio (local)</option>
               <option value="foundry">Foundry Local (local, NPU)</option>
@@ -79,7 +80,20 @@
             <label>Endpoint URL <input id="base_url" type="url" required /></label>
             <label>Planner model <input id="model" required /></label>
             <label>Quick-reply model <input id="fast_model" placeholder="blank = same as planner" /></label>
-            <label>API key <input id="api_key" type="password" autocomplete="off" /></label>
+            <label>API key for the service above <input id="api_key" type="password" autocomplete="off" /></label>
+            <label>Quick replies run on
+              <select id="fast_service">
+                <option value="same">The same service as the planner</option>
+                <option value="google">Google Gemini API (free key)</option>
+                <option value="custom">Another OpenAI-compatible service</option>
+              </select>
+            </label>
+            <div id="fast-opts" class="hidden">
+              <label>Quick-reply service URL <input id="fast_base_url" type="url" /></label>
+              <label>API key for the quick-reply service <input id="fast_key" type="password" autocomplete="off" /></label>
+              <p><button type="button" id="fast-test" class="link">Test</button> <span id="fast-status" class="muted" aria-live="polite"></span></p>
+            </div>
+            <p id="google-note" class="muted hidden">Get a free Google key at <b>aistudio.google.com/apikey</b>. On Google's free tier, Google may use what you send to improve its products, and Waddle sends screen text, files and email text. Use it to try things, or turn on billing in Google for private use. Web searches (research, "who won last night?") still go through the planner's service, because Google's endpoint can't run them for Waddle.</p>
             <label>Coordinates
               <select id="coord_mode">
                 <option value="auto">Auto (from model name)</option>

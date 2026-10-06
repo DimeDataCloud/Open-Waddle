@@ -172,6 +172,7 @@ pub fn render_report(r: &ReportInput<'_>) -> String {
         ("Endpoint", endpoint_host(&s.base_url)),
         ("Planner model", s.model.clone()),
         ("Quick-reply model", s.fast_model().to_string()),
+        ("Quick-reply service", if s.has_fast_endpoint() { endpoint_host(&s.fast_base_url) } else { "same as the planner".to_string() }),
         ("API key saved", if r.has_api_key { "yes" } else { "no" }.to_string()),
         ("Coordinates", format!("{:?} (resolved {:?})", s.coord_mode, s.coord_mode())),
         ("Tier 2", format!("{:?}, {} ms countdown", s.tier2_mode, s.tier2_countdown_ms)),

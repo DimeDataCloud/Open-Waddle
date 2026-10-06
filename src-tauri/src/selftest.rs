@@ -249,6 +249,7 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
 
     let (provider, demo) = crate::provider_for(&settings, &state.secrets, &state.ledger);
     let model = settings.model.clone();
+    let fast_check = (!demo && settings.has_fast_endpoint()).then(|| (provider.clone(), settings.fast_model().to_string(), state.secrets.get(Secret::FastKey).is_some() || settings.fast_is_local()));
     checks.push(
         run_check("Model", || async move {
             if demo {
@@ -259,6 +260,17 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
         })
         .await,
     );
+    if let Some((provider, fast_model, has_key)) = fast_check {
+        checks.push(
+            run_check("Quick-reply service", || async move {
+                if !has_key {
+                    return Ok((Status::Warn, "no key saved for it, so the planner's service answers quick replies".into()));
+                }
+                diagnostics::probe_model(provider.as_ref(), &fast_model).await
+            })
+            .await,
+        );
+    }
 
     for c in &checks {
         match c.status {

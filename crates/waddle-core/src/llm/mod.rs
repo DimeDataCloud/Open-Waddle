@@ -165,6 +165,60 @@ pub trait Provider: Send + Sync {
     }
 }
 
+/// Two services behind one `Provider`: the planner's, and an optional second one for the
+/// quick-reply model (say OpenRouter for the planner and Google's free Gemini API for chat).
+/// A request goes by its model name, so no caller has to know there are two.
+pub struct Routed {
+    main: Arc<dyn Provider>,
+    fast: Option<Arc<dyn Provider>>,
+    main_model: String,
+    fast_model: String,
+    /// The second service can search the web for a request (only OpenRouter's plugin can).
+    fast_has_web: bool,
+}
+
+impl Routed {
+    pub fn new(main: Arc<dyn Provider>, fast: Option<Arc<dyn Provider>>, main_model: &str, fast_model: &str, fast_has_web: bool) -> Self {
+        Self { main, fast, main_model: main_model.to_string(), fast_model: fast_model.to_string(), fast_has_web }
+    }
+
+    /// Where `req` goes, and the request to send there.
+    fn pick<'a>(&'a self, req: ChatRequest<'a>) -> (&'a Arc<dyn Provider>, ChatRequest<'a>) {
+        if req.model != self.fast_model || self.fast_model == self.main_model {
+            return (&self.main, req);
+        }
+        match &self.fast {
+            Some(fast) if req.web.is_none() || self.fast_has_web => (fast, req),
+            // No key for the second service yet, or a web search it can't do: the planner's
+            // service and model answer instead.
+            _ => (&self.main, ChatRequest { model: &self.main_model, ..req }),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for Routed {
+    async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+        let (provider, req) = self.pick(req);
+        provider.chat(req, on_event).await
+    }
+
+    async fn warm(&self, req: ChatRequest<'_>) {
+        let (provider, req) = self.pick(req);
+        provider.warm(req).await
+    }
+}
+
+/// The quick-reply service when `settings` names one of its own (`fast_base_url`).
+pub fn build_fast_provider(settings: &Settings, api_key: Option<String>) -> Option<Arc<dyn Provider>> {
+    settings.has_fast_endpoint().then(|| {
+        Arc::new(
+            openai_compat::OpenAiCompat::new(settings.fast_base_url.trim().to_string(), api_key)
+                .with_stall_timeout(std::time::Duration::from_secs(if settings.fast_is_local() { 300 } else { 60 })),
+        ) as Arc<dyn Provider>
+    })
+}
+
 /// Builds the provider described by `settings`.
 pub fn build_provider(settings: &Settings, api_key: Option<String>) -> Arc<dyn Provider> {
     match settings.provider {
@@ -194,4 +248,73 @@ pub(crate) fn new_call_id() -> String {
     let mut bytes = [0u8; 6];
     let _ = getrandom::fill(&mut bytes);
     format!("call_{}", hex::encode(bytes))
+}
+
+#[cfg(test)]
+mod routed_tests {
+    use super::mock::{reply, MockProvider};
+    use super::*;
+
+    fn pair() -> (Arc<MockProvider>, Arc<MockProvider>) {
+        let script = || (0..4).map(|_| reply("ok", vec![])).collect::<Vec<_>>();
+        (Arc::new(MockProvider::scripted(script())), Arc::new(MockProvider::scripted(script())))
+    }
+
+    async fn ask(p: &Routed, model: &str, web: Option<u8>) {
+        let msgs = [Message::user("hi")];
+        let req = ChatRequest { model, messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web };
+        p.chat(req, &mut |_| {}).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_quick_reply_model_goes_to_its_own_service_and_the_planner_to_the_main_one() {
+        let (main, fast) = pair();
+        let r = Routed::new(main.clone(), Some(fast.clone()), "openai/gpt-6-luna", "gemini-3.5-flash-lite", false);
+        ask(&r, "openai/gpt-6-luna", None).await;
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*main.models.lock().unwrap(), ["openai/gpt-6-luna"]);
+        assert_eq!(*fast.models.lock().unwrap(), ["gemini-3.5-flash-lite"]);
+    }
+
+    #[tokio::test]
+    async fn a_web_search_the_second_service_cant_do_goes_to_the_planners_service() {
+        let (main, fast) = pair();
+        let r = Routed::new(main.clone(), Some(fast.clone()), "openai/gpt-6-luna", "gemini-3.5-flash-lite", false);
+        ask(&r, "gemini-3.5-flash-lite", Some(5)).await;
+        assert_eq!(*main.models.lock().unwrap(), ["openai/gpt-6-luna"], "the planner's model answers there");
+        assert_eq!(*main.webs.lock().unwrap(), [Some(5)]);
+        assert!(fast.models.lock().unwrap().is_empty());
+        // A second service that can search (another OpenRouter, say) keeps its own searches.
+        let (main, fast) = pair();
+        let r = Routed::new(main.clone(), Some(fast.clone()), "a", "b", true);
+        ask(&r, "b", Some(5)).await;
+        assert_eq!(*fast.webs.lock().unwrap(), [Some(5)]);
+    }
+
+    #[tokio::test]
+    async fn without_a_key_for_the_second_service_the_planner_covers_quick_replies() {
+        let (main, _) = pair();
+        let r = Routed::new(main.clone(), None, "openai/gpt-6-luna", "gemini-3.5-flash-lite", false);
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*main.models.lock().unwrap(), ["openai/gpt-6-luna"]);
+    }
+
+    #[tokio::test]
+    async fn one_model_name_for_both_stays_on_the_main_service() {
+        let (main, fast) = pair();
+        let r = Routed::new(main.clone(), Some(fast.clone()), "same", "same", false);
+        ask(&r, "same", None).await;
+        assert_eq!(main.models.lock().unwrap().len(), 1);
+        assert!(fast.models.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_fast_service_is_built_only_when_one_is_named() {
+        let s = Settings::default();
+        assert!(build_fast_provider(&s, Some("k".into())).is_none());
+        let s = Settings { fast_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".into(), ..Settings::default() };
+        assert!(build_fast_provider(&s, Some("k".into())).is_some());
+        let ollama = Settings { provider: ProviderKind::Ollama, fast_base_url: "http://x".into(), ..Settings::default() };
+        assert!(!ollama.has_fast_endpoint(), "a second service is for OpenAI-compatible endpoints");
+    }
 }

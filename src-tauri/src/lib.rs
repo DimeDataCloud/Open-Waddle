@@ -26,7 +26,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
-use waddle_core::llm::{build_provider, mock::MockProvider, Provider};
+use waddle_core::llm::{build_fast_provider, build_provider, mock::MockProvider, Provider, Routed};
 use waddle_core::decide::{Decider, Jev};
 use waddle_core::facts::FactStore;
 use waddle_core::google::style::StyleNote;
@@ -92,11 +92,18 @@ pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets, ledger: &Arc<
     if forced_mock || settings.provider == ProviderKind::Mock || (key.is_none() && commands::needs_key(settings)) {
         return (Arc::new(MockProvider::demo()), true);
     }
-    let provider = build_provider(settings, key);
-    if settings.is_local() {
-        return (provider, false);
+    let main = build_provider(settings, key);
+    let main: Arc<dyn Provider> = if settings.is_local() { main } else { Arc::new(Metered::new(main, ledger.clone())) };
+    if !settings.has_fast_endpoint() {
+        return (main, false);
     }
-    (Arc::new(Metered::new(provider, ledger.clone())), false)
+    // Quick replies on their own service (Google's Gemini API next to OpenRouter, say). Without
+    // its key the planner's service answers them instead, so nothing breaks while it's missing.
+    let fast_key = secrets.get(Secret::FastKey);
+    let fast = (fast_key.is_some() || settings.fast_is_local()).then(|| build_fast_provider(settings, fast_key)).flatten();
+    let fast = fast.map(|f| if settings.fast_is_local() { f } else { Arc::new(Metered::new(f, ledger.clone())) as Arc<dyn Provider> });
+    let routed = Routed::new(main, fast, &settings.model, settings.fast_model(), settings.fast_base_url.contains("openrouter.ai"));
+    (Arc::new(routed), false)
 }
 
 /// Quick decisions (Jev) need an OpenRouter key; the demo and other endpoints get none.
@@ -630,6 +637,7 @@ pub fn run() {
             commands::history_list,
             commands::speech_voices,
             commands::test_key,
+            commands::test_fast_service,
             commands::detect_ollama,
             commands::update_check,
             commands::update_install,

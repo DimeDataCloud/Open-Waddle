@@ -129,6 +129,10 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 - **Audit log:** SQLite, append-only (triggers reject UPDATE/DELETE), each row a SHA-256 hash covering the previous row; `verify()` locates the first altered row.
 - **API keys:** stored in the OS keychain (`keyring` 4); environment variables override for development; a file readable only by the user is the fallback on headless Linux.
 
+### Two AI services
+
+One endpoint and key serve the planner; the quick-reply model (chat, research summaries, the morning brief, mail-style learning) can have its own (`fast_base_url`, a separate key in the keychain). `llm::Routed` sits behind the one `Provider` the rest of the code sees and sends each request by its model name, so no caller knows there are two. Without a key for the second service, or for a web search it can't run (only OpenRouter's plugin can), the planner's service and model answer. `fast_base_url` is user-only: a task can change the quick-reply model's name but never where requests go.
+
 ### Updates
 
 `tauri-plugin-updater` with a minisign public key in `tauri.conf.json`. Two commands, `update_check` and `update_install`, are called only from Settings buttons; no model tool reaches them, and installing is refused while a task runs. The endpoint is `releases/latest/download/latest.json`, which the release workflow builds (`scripts/make-latest-json.mjs`) from the signed installers. Local and CI test builds don't make update files: `createUpdaterArtifacts` is switched on only by `src-tauri/tauri.release.conf.json`, which the release workflow passes.

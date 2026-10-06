@@ -25,15 +25,17 @@ pub struct MockProvider {
     pub webs: Mutex<Vec<Option<u8>>>,
     /// The tool names offered with each request.
     pub tools: Mutex<Vec<Vec<String>>>,
+    /// The model each request asked for.
+    pub models: Mutex<Vec<String>>,
 }
 
 impl MockProvider {
     pub fn scripted(responses: Vec<ChatResponse>) -> Self {
-        Self { mode: Mode::Scripted(Mutex::new(responses.into())), delay: Duration::ZERO, requests: Mutex::default(), warmups: Mutex::default(), webs: Mutex::default(), tools: Mutex::default() }
+        Self { mode: Mode::Scripted(Mutex::new(responses.into())), delay: Duration::ZERO, requests: Mutex::default(), warmups: Mutex::default(), webs: Mutex::default(), tools: Mutex::default(), models: Mutex::default() }
     }
 
     pub fn demo() -> Self {
-        Self { mode: Mode::Demo, delay: Duration::from_millis(35), requests: Mutex::default(), warmups: Mutex::default(), webs: Mutex::default(), tools: Mutex::default() }
+        Self { mode: Mode::Demo, delay: Duration::from_millis(35), requests: Mutex::default(), warmups: Mutex::default(), webs: Mutex::default(), tools: Mutex::default(), models: Mutex::default() }
     }
 
     /// Adds a pause before each response, to exercise cancellation.
@@ -82,6 +84,7 @@ impl Provider for MockProvider {
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
         self.requests.lock().unwrap().push(req.messages.to_vec());
         self.webs.lock().unwrap().push(req.web);
+        self.models.lock().unwrap().push(req.model.to_string());
         self.tools.lock().unwrap().push(req.tools.iter().map(|t| t.name.clone()).collect());
         let resp = match &self.mode {
             Mode::Scripted(q) => q
