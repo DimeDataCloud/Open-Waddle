@@ -65,6 +65,62 @@ pub fn focus_window(id: Option<u64>) {
     let _ = id;
 }
 
+/// How a window is shown once it's placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowState {
+    /// As it is (un-minimized if it was minimized).
+    Keep,
+    Maximize,
+    Minimize,
+    Restore,
+}
+
+/// Moves a window so its visible frame fills `rect` (physical pixels), if given,
+/// then shows it as asked and, unless it's being minimized, brings it to the front.
+pub fn arrange_window(id: u64, rect: Option<(i32, i32, i32, i32)>, state: WindowState) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    return windows::arrange(id, rect, state);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::process::Command;
+        let wid = id.to_string();
+        let run = |args: &[&str]| Command::new("xdotool").args(args).status().map(|s| s.success()).unwrap_or(false);
+        anyhow::ensure!(run(&["getwindowname", &wid]), "that window is gone (or xdotool isn't installed)");
+        if state == WindowState::Minimize {
+            anyhow::ensure!(run(&["windowminimize", &wid]), "couldn't minimize the window");
+            return Ok(());
+        }
+        let _ = run(&["windowactivate", "--sync", &wid]);
+        if let Some((x, y, w, h)) = rect {
+            let _ = run(&["windowsize", "--sync", &wid, &w.to_string(), &h.to_string()]);
+            anyhow::ensure!(run(&["windowmove", "--sync", &wid, &x.to_string(), &y.to_string()]), "couldn't move the window");
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (id, rect, state);
+        anyhow::bail!("arranging windows isn't available on macOS yet; use press_keys")
+    }
+}
+
+/// A minimized window whose title or app contains `query` (they aren't in `list_windows`).
+pub fn find_minimized(query: &str) -> Option<DesktopWindow> {
+    #[cfg(windows)]
+    return windows::list_minimized(std::process::id()).into_iter().find(|w| matches_window(w, query));
+    #[cfg(not(windows))]
+    {
+        let _ = query;
+        None
+    }
+}
+
+/// Whether a window's title or app name contains `query`, ignoring case.
+pub fn matches_window(w: &DesktopWindow, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    !q.is_empty() && (w.title.to_lowercase().contains(&q) || w.app.to_lowercase().trim_end_matches(".exe").contains(&q))
+}
+
 /// Opens a file or folder in its default app.
 pub fn open_path(path: &std::path::Path) -> anyhow::Result<()> {
     #[cfg(windows)]

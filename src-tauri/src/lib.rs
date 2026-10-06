@@ -484,6 +484,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     );
 
     session.keep_memory_in(data_dir.join("memory.json"));
+    session.keep_experience(Arc::new(waddle_core::experience::ExperienceStore::open(data_dir.join("experience.json"))));
     session.keep_history(history);
     let mcp = waddle_core::mcp::McpHub::new(Some(data_dir.join("mcp_tools.json")));
     session.keep_mcp(mcp.clone());
@@ -622,6 +623,7 @@ pub fn run() {
             commands::warm_up,
             commands::run_self_test,
             commands::halt,
+            commands::panels_open,
             commands::answer_approval,
             commands::duck_arrived,
             commands::set_hit_rects,

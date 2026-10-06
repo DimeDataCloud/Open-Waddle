@@ -156,6 +156,7 @@ async fn fixture(script: Vec<waddle_core::llm::ChatResponse>, policy: common::Po
         google: Some(fg.google()),
         style: Some(Arc::new(StyleNote::new(dir.path().join("style.md")))),
         mcp: None,
+        recalled: None,
     };
     Fixture { _dir: dir, fg, host, provider, deps }
 }

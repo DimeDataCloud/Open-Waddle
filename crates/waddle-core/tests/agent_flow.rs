@@ -45,7 +45,7 @@ fn fixture() -> Fixture {
 }
 
 async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
-    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None, mcp: None };
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None, mcp: None, recalled: None };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -133,6 +133,43 @@ async fn denial_skips_remaining_calls_in_the_same_turn() {
 }
 
 #[tokio::test]
+async fn a_failed_call_skips_the_rest_of_the_batch() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply(
+            "",
+            vec![call("read_file", json!({"path":"missing.txt"})), call("write_file", json!({"path":"b.txt","content":"b"}))],
+        ),
+        reply("It isn't there.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    assert!(!f.workspace.root().join("b.txt").exists(), "planned on top of a failure, so it didn't run");
+    let req = provider.requests.lock().unwrap().last().unwrap().clone();
+    let results: Vec<_> = req.iter().filter(|m| m.role == Role::Tool).collect();
+    assert_eq!(results.len(), 2, "every tool call is answered");
+    assert!(results[0].text.starts_with("Error:"), "{}", results[0].text);
+    assert!(results[1].text.starts_with("Skipped because an earlier action in this reply failed"), "{}", results[1].text);
+}
+
+#[tokio::test]
+async fn calls_in_one_reply_run_in_order_when_they_work() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply(
+            "",
+            vec![call("write_file", json!({"path":"a.txt","content":"a"})), call("write_file", json!({"path":"b.txt","content":"b"}))],
+        ),
+        reply("Both saved.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let (outcome, _) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    assert_eq!(outcome, Outcome::Done);
+    assert!(f.workspace.root().join("a.txt").exists() && f.workspace.root().join("b.txt").exists());
+    assert_eq!(provider.requests.lock().unwrap().len(), 2, "two actions, one model step");
+}
+
+#[tokio::test]
 async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages() {
     let f = fixture();
     let provider = Arc::new(MockProvider::scripted(vec![
@@ -156,6 +193,7 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
         google: None,
         style: None,
         mcp: None,
+        recalled: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
@@ -459,7 +497,7 @@ async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
-    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None, mcp: None }
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None, mcp: None, recalled: None }
 }
 
 async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {
@@ -578,6 +616,36 @@ async fn recorded_tasks_are_saved_for_training_and_offered_for_rating() {
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].goal, "say hi again");
     assert_eq!(saved[0].outcome, Outcome::Done);
+}
+
+#[tokio::test]
+async fn a_task_that_worked_is_offered_as_a_recipe_for_a_similar_request() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::experience::ExperienceStore::open(f._dir.path().join("experience.json")));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("open_app", json!({"name": "notepad"}))]),
+        reply("Notepad is open.", vec![]),
+        reply("", vec![call("open_app", json!({"name": "notepad"}))]),
+        reply("Open again.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+    session.keep_experience(store.clone());
+    session.user_message("open notepad for my shopping list".into());
+    wait_until(|| !session.is_busy() && host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    assert_eq!(store.len(), 1, "the steps were kept");
+    assert!(host.events().iter().any(|e| matches!(e, AgentEvent::TraceSaved { .. })), "and offered for a 👍/👎");
+    let first = provider.requests.lock().unwrap()[0].clone();
+    assert!(!first.last().unwrap().text.contains("worked before"), "nothing to recall the first time");
+
+    session.user_message("please open notepad for a shopping list".into());
+    wait_until(|| host.events().iter().filter(|e| matches!(e, AgentEvent::TaskFinished { .. })).count() == 2).await;
+    let third = provider.requests.lock().unwrap()[2].clone();
+    let asked = &third.iter().rev().find(|m| m.role == Role::User).unwrap().text;
+    assert!(asked.contains("A way that worked before") && asked.contains("1. open_app notepad"), "{asked}");
+    let task_id = store.recall("open notepad shopping list").unwrap().task_id;
+    session.rate_task(&task_id, false);
+    assert!(store.is_empty(), "👎 forgets it");
 }
 
 #[tokio::test]

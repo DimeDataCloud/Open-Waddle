@@ -121,6 +121,8 @@ pub struct Session {
     mcp: Mutex<Option<Arc<crate::mcp::McpHub>>>,
     /// How the user stopped the running task, for the message that says so.
     halted_by: Mutex<Option<HaltBy>>,
+    /// Steps of tasks that went well, offered for similar requests.
+    experience: Mutex<Option<Arc<crate::experience::ExperienceStore>>>,
 }
 
 /// How the user stopped a task. The stop message names it, so an accidental
@@ -220,6 +222,10 @@ pub fn asks_for_action(text: &str) -> bool {
             Some("find" | "read") => OWNED.contains(&next),
             Some("search") => words.iter().any(|w| PLACES.contains(w) || *w == "on" || *w == "in"),
             Some("show") => !(next == "me" && words.get(2) == Some(&"how")),
+            // The duck itself: "fly around the screen", "come here", "make a mess".
+            Some("fly" | "dance" | "hide") => true,
+            Some("come") => matches!(next, "here" | "over" | "back"),
+            Some("make") => next == "a" && words.get(2) == Some(&"mess"),
             Some(w) => VERBS.contains(&w),
             None => false,
         }
@@ -247,6 +253,7 @@ impl Session {
             history: Mutex::default(),
             mcp: Mutex::default(),
             halted_by: Mutex::default(),
+            experience: Mutex::default(),
         })
     }
 
@@ -285,6 +292,21 @@ impl Session {
         self.memory.lock().unwrap().clear();
         if let Some(path) = self.memory_file.lock().unwrap().as_ref() {
             let _ = std::fs::remove_file(path);
+        }
+        if let Some(store) = self.experience.lock().unwrap().as_ref() {
+            store.clear();
+        }
+    }
+
+    /// Learns from tasks that go well and offers what worked for similar requests.
+    pub fn keep_experience(&self, store: Arc<crate::experience::ExperienceStore>) {
+        *self.experience.lock().unwrap() = Some(store);
+    }
+
+    /// The user's 👍/👎 on a task: 👍 confirms its recipe, 👎 forgets it.
+    pub fn rate_task(&self, task_id: &str, good: bool) {
+        if let Some(store) = self.experience.lock().unwrap().as_ref() {
+            store.rate(task_id, good);
         }
     }
 
@@ -377,6 +399,7 @@ impl Session {
             google: config.google,
             style: config.style,
             mcp: self.mcp.lock().unwrap().clone(),
+            recalled: None,
         }
     }
 
@@ -722,6 +745,13 @@ Don't write a source list; it's added for you.{facts}",
                 deps.selection = selection;
             }
             let memory = this.memory.lock().unwrap().clone();
+            let experience = this.experience.lock().unwrap().clone();
+            if routine.is_none() {
+                if let Some(e) = experience.as_ref().and_then(|store| store.recall(&goal)) {
+                    log::info!("workflow memory: offering the recipe from {}", e.task_id);
+                    deps.recalled = Some(crate::experience::hint(&e));
+                }
+            }
             let mut env = host.env();
             if let Some(r) = &routine {
                 // The user may be working (or away): hands off the screen, and every change asks.
@@ -783,6 +813,15 @@ Don't write a source list; it's added for you.{facts}",
                 };
                 store.routines.record(&r.id, &how);
             }
+            // A task that finished without asking anything back is a recipe worth keeping.
+            let learnable = result.outcome == Outcome::Done && routine.is_none() && !result.message.trim_end().ends_with('?');
+            let learned = match (learnable, experience.as_ref()) {
+                (true, Some(store)) => store.learn(&task_id, &goal, &agent.transcript().0),
+                _ => false,
+            };
+            if learned {
+                log::info!("workflow memory: kept the steps of {task_id}");
+            }
             let saved = traces.and_then(|store| {
                 let (messages, tools) = agent.transcript();
                 let mut meta = TraceMeta::new(&task_id, &goal, &deps.settings.model, result.outcome, &result.message, usage);
@@ -790,7 +829,8 @@ Don't write a source list; it's added for you.{facts}",
                 store.save(&meta, &messages, &tools).map_err(|e| log::warn!("saving the training trace failed: {e:#}")).ok()
             });
             host.emit(AgentEvent::TaskFinished { task_id: task_id.clone(), outcome: result.outcome, message: result.message });
-            if saved.is_some() {
+            // A 👍/👎 then confirms or forgets what was learned (and rates the saved trace).
+            if saved.is_some() || learned {
                 host.emit(AgentEvent::TraceSaved { task_id });
             }
             if !leftover.is_empty() && result.outcome != Outcome::Halted {
@@ -1193,6 +1233,10 @@ mod tests {
             "Search for cooking videos on YouTube.",
             "Pull up my calendar.",
             "Remind me at 5 to call the bank.",
+            "\"Fly around the screen.\"",
+            "Make a mess.",
+            "Come here, Waddle.",
+            "Can you dance?",
         ] {
             assert!(asks_for_action(t), "{t}");
         }
@@ -1207,6 +1251,8 @@ mod tests {
             "show me how to change my wallpaper",
             "Go on, tell me a joke.",
             "Search the best laptops under 1000 dollars",
+            "Come on, that's funny.",
+            "I make a mess when I cook.",
         ] {
             assert!(!asks_for_action(t), "{t}");
         }

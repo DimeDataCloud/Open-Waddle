@@ -91,6 +91,7 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
         google: None,
         style: None,
         mcp: None,
+        recalled: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "live".into(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);

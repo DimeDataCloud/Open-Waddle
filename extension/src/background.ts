@@ -97,7 +97,10 @@ async function handle({ cmd, args }: Request): Promise<unknown> {
         return tabs.map((t) => ({ id: t.id, title: t.title ?? "", url: t.url ?? "", active: t.active, windowId: t.windowId }));
       }
       if (action === "open") {
-        const t = await chrome.tabs.create({ url: webUrl(args.url) });
+        const url = webUrl(args.url);
+        // A new window can then be snapped beside another one or sent to another monitor.
+        const t = args.new_window ? (await chrome.windows.create({ url, focused: true })).tabs?.[0] : await chrome.tabs.create({ url });
+        if (!t) throw new Error("Chrome didn't open the page");
         await show(t);
         const done = await loaded(t.id!);
         return { id: done.id, title: done.title ?? "", url: done.url ?? "" };

@@ -5,6 +5,7 @@ import { Duck, pickWanderTarget, usesLaptop } from "./body/behavior";
 import { asks, Fx, isThanks } from "./body/fx";
 import { alarmPalette, buildPalette } from "./body/palette";
 import { planIntent, type Plan } from "./body/intent";
+import { planTrick, type TrickStep } from "./body/tricks";
 import { standBeside } from "./body/pathfind";
 import { computeSegments, type Segment, type WinRect } from "./body/platforms";
 import { SpriteRenderer } from "./body/renderer";
@@ -48,6 +49,8 @@ const fx = new Fx(window.matchMedia?.("(prefers-reduced-motion: reduce)").matche
 let fallFrom: number | null = null;
 /** The reply being written, to see whether it ends with a question. */
 let reply = "";
+/** The running task's request, for "Try again" if it's stopped. */
+let lastGoal = "";
 
 /** Where head effects go: beside the duck's head, clear of the bubble and chat box above it. */
 function headOf(): { x: number; y: number } {
@@ -345,6 +348,51 @@ void on("duck:move", ({ id, x, y, purpose }) => {
   });
 });
 
+// Tricks the planner asks for ("fly around the screen"): steps one after another,
+// then the backend hears it's done.
+void on("duck:trick", ({ id, trick, cursor }) => {
+  touch();
+  window.clearTimeout(hoverTimer);
+  plan = null;
+  const steps = planTrick(trick, screen, duck.size, { x: duck.body.x, y: duck.body.y }, cursor);
+  const next = (i: number): void => {
+    const step: TrickStep | undefined = steps[i];
+    if (!step) {
+      void api.duckArrived(id);
+      return;
+    }
+    switch (step.kind) {
+      case "fly":
+        duck.moveTo({ x: step.x, y: step.y }, segments, { fly: true, onArrive: () => next(i + 1) });
+        break;
+      case "act": {
+        const now = performance.now();
+        duck.doAct(step.act, now, step.ms);
+        if (step.fx) {
+          const h = headOf();
+          fx.emit(step.fx, h.x, h.y, now);
+        }
+        window.setTimeout(() => next(i + 1), step.ms);
+        break;
+      }
+      case "face":
+        duck.facing = step.dir;
+        next(i + 1);
+        break;
+      case "sleep":
+        duck.sleeping = true;
+        next(i + 1);
+        break;
+      case "wake":
+        duck.sleeping = false;
+        touch();
+        next(i + 1);
+        break;
+    }
+  };
+  next(0);
+});
+
 void on("duck:act", ({ kind }) => {
   touch();
   duck.doAct(kind, performance.now(), kind === "type" ? 900 : 600);
@@ -483,6 +531,13 @@ void on("agent", (ev) => {
       reply = "";
       // The planner's final words already streamed; show the message only if it didn't.
       if (ev.outcome !== "done") bubble.say(ev.outcome === "failed" ? "error" : "notice", ev.message);
+      if (ev.outcome === "halted" && lastGoal) {
+        const goal = lastGoal;
+        bubble.again(() => {
+          bubble.say("user", goal);
+          void api.sendMessage(goal);
+        });
+      }
       break;
     }
     case "notice":
@@ -496,6 +551,7 @@ void on("agent", (ev) => {
       break;
     case "task_started":
       reply = "";
+      lastGoal = ev.goal;
       break;
     case "thinking":
       // Only the last step's words count as the reply.
@@ -522,6 +578,25 @@ void on("chat:open", ({ voice, selection }) => {
 
 void on("history:changed", () => void drawer.refresh());
 // Talk mode: Waddle just read out an answer to something said aloud.
+// Esc stops a task, but while the chat box or the history drawer is open the first
+// press closes it (the backend owns Esc while a task runs, so it needs to know).
+let panelsShown = false;
+function reportPanels(force = false): void {
+  const open = chat.visible || drawer.visible;
+  if (open !== panelsShown || force) {
+    panelsShown = open;
+    void api.panelsOpen(open);
+  }
+}
+const panelWatch = new MutationObserver(() => reportPanels());
+for (const el of [chat.el, drawer.el]) panelWatch.observe(el, { attributes: true, attributeFilter: ["class"] });
+void on("ui:dismiss", () => {
+  if (drawer.visible) drawer.close();
+  else chat.close();
+  // The backend assumed everything closed; tell it if the chat box is still open.
+  reportPanels(true);
+});
+
 void on("talk:listen", () => {
   touch();
   chat.open();

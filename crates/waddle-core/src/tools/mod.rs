@@ -4,6 +4,7 @@
 //! Coordinates: the host works in logical screen pixels. The model may use
 //! pixels or a 0..1000 grid (see `CoordMode`); conversion happens only here.
 
+pub mod arrange;
 pub mod browser;
 pub mod docs;
 pub mod fs;
@@ -113,7 +114,15 @@ pub enum GuiAction {
     WriteClipboard { text: String },
     /// Paste over the text the user selected before asking (focus goes back to its window first).
     ReplaceSelection { text: String },
+    /// Snap, maximize, minimize, restore or bring forward a window (by part of its
+    /// title or app; the front window if none), optionally on another monitor.
+    ArrangeWindow { window: Option<String>, how: arrange::Arrange, monitor: Option<arrange::MonitorPick> },
+    /// One of the duck's own tricks (fly around, come here, dance, nap…); touches nothing.
+    Duck { trick: String },
 }
+
+/// The tricks the `duck` tool knows (the overlay plays them).
+pub const DUCK_TRICKS: &[&str] = &["fly_around", "come_here", "dance", "nap", "wake_up", "hide", "mess"];
 
 impl GuiAction {
     /// Input that goes wherever focus happens to be (as opposed to an element Waddle found).
@@ -224,6 +233,17 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
         v.push(spec("look_at_screen", "Take a screenshot.", json!({}), &[]));
         v.push(spec("open_app", "Launch an app by name, e.g. \"notepad\".", json!({ "name": { "type": "string" } }), &["name"]));
         v.push(spec(
+            "arrange_window",
+            "Arrange a window in one step, without keys or clicks: snap it to the left or right half, maximize, minimize, restore, \
+or bring it to the front. monitor first moves it to another screen (\"put it on my right monitor\"). For split screen, arrange each window.",
+            json!({
+                "window": { "type": "string", "description": "Part of its title or its app name; default the front window" },
+                "action": { "type": "string", "enum": ["front", "left_half", "right_half", "maximize", "minimize", "restore"] },
+                "monitor": { "type": "string", "enum": ["left", "right", "primary", "other"] }
+            }),
+            &["action"],
+        ));
+        v.push(spec(
             "click",
             &format!("Click a point ({unit})."),
             json!({
@@ -266,6 +286,13 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             &format!("Show the user a spot ({unit}) without clicking it: you walk there and circle it, with a short label."),
             json!({ "x": { "type": "number" }, "y": { "type": "number" }, "label": { "type": "string" } }),
             &["x", "y"],
+        ));
+        v.push(spec(
+            "duck",
+            "Move your own duck body when the user asks you to: fly around the screen, come over to the pointer, dance, nap, wake up, \
+hide in a corner, or make a (harmless, pretend) mess. It touches nothing on the screen.",
+            json!({ "trick": { "type": "string", "enum": DUCK_TRICKS } }),
+            &["trick"],
         ));
         v.push(spec("read_clipboard", "Get the text the user copied.", json!({}), &[]));
         v.push(spec(
@@ -420,6 +447,7 @@ pub fn is_gui_tool(name: &str) -> bool {
             | "look_at_screen"
             | "find_elements"
             | "open_app"
+            | "arrange_window"
             | "click"
             | "click_element"
             | "type_text"
@@ -427,6 +455,7 @@ pub fn is_gui_tool(name: &str) -> bool {
             | "scroll"
             | "drag"
             | "point_at"
+            | "duck"
             | "read_clipboard"
             | "copy_to_clipboard"
             | "replace_selection"
@@ -500,6 +529,31 @@ pub fn parse_gui_action(call: &ToolCall, coords: &Coords) -> Result<GuiAction, S
         "read_clipboard" => GuiAction::ReadClipboard,
         "copy_to_clipboard" => GuiAction::WriteClipboard { text: text(a, "text").ok_or("`text` is required")? },
         "replace_selection" => GuiAction::ReplaceSelection { text: text(a, "text").ok_or("`text` is required")? },
+        "duck" => {
+            let trick = text(a, "trick").unwrap_or_default().trim().to_lowercase().replace([' ', '-'], "_");
+            let trick = match trick.as_str() {
+                "fly" | "fly_around_the_screen" => "fly_around".to_string(),
+                "come" | "come_over" => "come_here".to_string(),
+                "sleep" => "nap".to_string(),
+                "wake" => "wake_up".to_string(),
+                "make_a_mess" => "mess".to_string(),
+                _ => trick,
+            };
+            if !DUCK_TRICKS.contains(&trick.as_str()) {
+                return Err(format!("`trick` must be one of {}", DUCK_TRICKS.join(", ")));
+            }
+            GuiAction::Duck { trick }
+        }
+        "arrange_window" => {
+            let how = text(a, "action").as_deref().and_then(arrange::Arrange::parse).ok_or(
+                "`action` must be front, left_half, right_half, maximize, minimize or restore",
+            )?;
+            let monitor = match text(a, "monitor").filter(|s| !s.trim().is_empty()) {
+                Some(m) => Some(arrange::MonitorPick::parse(&m).ok_or("`monitor` must be left, right, primary or other")?),
+                None => None,
+            };
+            GuiAction::ArrangeWindow { window: text(a, "window").filter(|s| !s.trim().is_empty()), how, monitor }
+        }
         other => return Err(format!("`{other}` is not a GUI tool")),
     })
 }
@@ -569,6 +623,29 @@ pub fn summarize(call: &ToolCall) -> String {
         "look_at_screen" => "Take a screenshot".into(),
         "find_elements" => "Read the buttons and fields on screen".into(),
         "open_app" => format!("Open {}", s("name")),
+        "duck" => match s("trick").as_str() {
+            "fly_around" => "Fly around the screen".into(),
+            "come_here" => "Come over".into(),
+            "dance" => "Dance".into(),
+            "nap" => "Take a nap".into(),
+            "wake_up" => "Wake up".into(),
+            "hide" => "Hide in a corner".into(),
+            "mess" => "Make a (pretend) mess".into(),
+            other => format!("Do a trick: {other}"),
+        },
+        "arrange_window" => {
+            let what = if s("window").is_empty() { "the window".to_string() } else { short(s("window")) };
+            let how = match s("action").as_str() {
+                "left_half" => "to the left",
+                "right_half" => "to the right",
+                "maximize" => "full size",
+                "minimize" => "away",
+                "restore" => "back",
+                _ => "to the front",
+            };
+            let screen = if s("monitor").is_empty() { String::new() } else { format!(" on the {} screen", s("monitor")) };
+            format!("Move {what} {how}{screen}")
+        }
         // The duck walks to the spot, so the model's raw coordinates would only confuse.
         "click" => match (s("button").as_str(), a.get("double").and_then(Value::as_bool).unwrap_or(false)) {
             ("right", _) => "Right-click here".into(),
@@ -623,6 +700,28 @@ pub fn summarize(call: &ToolCall) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duck_tricks_and_window_arranging_parse() {
+        let c = coords(CoordMode::Norm1000);
+        let t = |name: &str, args: Value| parse_gui_action(&ToolCall { id: "1".into(), name: name.into(), arguments: args }, &c);
+        assert_eq!(t("duck", json!({"trick": "make a mess"})).unwrap(), GuiAction::Duck { trick: "mess".into() });
+        assert_eq!(t("duck", json!({"trick": "fly_around"})).unwrap(), GuiAction::Duck { trick: "fly_around".into() });
+        assert!(t("duck", json!({"trick": "explode"})).is_err());
+        assert_eq!(
+            t("arrange_window", json!({"window": "Music", "action": "maximize", "monitor": "right"})).unwrap(),
+            GuiAction::ArrangeWindow { window: Some("Music".into()), how: arrange::Arrange::Maximize, monitor: Some(arrange::MonitorPick::Right) }
+        );
+        assert_eq!(
+            t("arrange_window", json!({"action": "left_half"})).unwrap(),
+            GuiAction::ArrangeWindow { window: None, how: arrange::Arrange::LeftHalf, monitor: None }
+        );
+        assert!(t("arrange_window", json!({"action": "sideways"})).is_err());
+        assert!(t("arrange_window", json!({"action": "front", "monitor": "upstairs"})).is_err());
+        let offered = specs(Capabilities { gui: true, ..Default::default() }, &c);
+        assert!(offered.iter().any(|s| s.name == "duck") && offered.iter().any(|s| s.name == "arrange_window"));
+        assert!(!specs(Capabilities::default(), &c).iter().any(|s| s.name == "duck"), "no screen, no duck tool");
+    }
 
     fn coords(mode: CoordMode) -> Coords {
         Coords { mode, screen_w: 1440.0, screen_h: 960.0 }

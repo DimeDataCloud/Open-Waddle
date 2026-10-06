@@ -27,6 +27,8 @@ use crate::overlay::{Geometry, OverlayState};
 
 const OVERLAY: &str = "overlay";
 const ARRIVE_TIMEOUT: Duration = Duration::from_secs(6);
+/// The longest trick (a loop round the screen) takes a few seconds.
+const TRICK_TIMEOUT: Duration = Duration::from_secs(20);
 /// Longest selection sent along with a message.
 const MAX_SELECTION_CHARS: usize = 8000;
 
@@ -55,6 +57,8 @@ pub struct TauriHost {
     moves: Mutex<HashMap<String, oneshot::Sender<()>>>,
     windows: RwLock<Vec<DesktopWindow>>,
     busy: AtomicBool,
+    /// The chat box or the history drawer is open: Esc closes it before it stops a task.
+    panels_open: AtomicBool,
     halt_suppressed_until: AtomicU64,
     next_move: AtomicU64,
     /// Text grabbed by Ctrl+Alt+A, waiting for the message it goes with, and the window it came from.
@@ -82,6 +86,7 @@ impl TauriHost {
             moves: Mutex::default(),
             windows: RwLock::default(),
             busy: AtomicBool::new(false),
+            panels_open: AtomicBool::new(false),
             halt_suppressed_until: AtomicU64::new(0),
             next_move: AtomicU64::new(1),
             selection: Mutex::default(),
@@ -133,6 +138,15 @@ impl TauriHost {
     /// The Escape hotkey should halt, unless Waddle itself just pressed Escape.
     pub fn halt_hotkey_allowed(&self) -> bool {
         self.is_busy() && now_ms() > self.halt_suppressed_until.load(Ordering::SeqCst)
+    }
+
+    /// The overlay says whether the chat box or the history drawer is showing.
+    pub fn set_panels_open(&self, open: bool) {
+        self.panels_open.store(open, Ordering::SeqCst);
+    }
+
+    pub fn panels_open(&self) -> bool {
+        self.panels_open.load(Ordering::SeqCst)
     }
 
     pub fn emit_overlay<S: Serialize + Clone>(&self, event: &str, payload: S) {
@@ -284,6 +298,24 @@ impl TauriHost {
         let target = self.target_window(None).ok_or_else(|| anyhow::anyhow!("no other window is open to inspect"))?;
         let elements = self.uia.find(target.id as isize).await?;
         Ok((target.app, elements.len()))
+    }
+
+    /// Each monitor's usable area (without the taskbar) in physical pixels.
+    fn work_areas(&self) -> Vec<waddle_core::tools::arrange::Monitor> {
+        use waddle_core::tools::arrange::{Monitor, Rect};
+        let primary = self.app.primary_monitor().ok().flatten();
+        self.app
+            .available_monitors()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| {
+                let w = m.work_area();
+                Monitor {
+                    work: Rect { x: w.position.x, y: w.position.y, w: w.size.width as i32, h: w.size.height as i32 },
+                    primary: primary.as_ref().is_some_and(|p| p.position() == m.position()),
+                }
+            })
+            .collect()
     }
 
     #[cfg(windows)]
@@ -442,6 +474,67 @@ impl Host for TauriHost {
                 // Give the window a moment to appear before the next look.
                 tokio::time::sleep(Duration::from_millis(1200)).await;
                 Ok(GuiResult::Done(msg))
+            }
+            GuiAction::ArrangeWindow { window, how, monitor } => {
+                use waddle_core::tools::arrange::{self as arr, Arrange};
+                let query = window.clone();
+                let target = Self::blocking(move || {
+                    let list = desktop::list_windows();
+                    Ok(match query.as_deref() {
+                        // A title match first ("GitHub"), then the app ("chrome"), then minimized windows.
+                        Some(q) => list
+                            .iter()
+                            .find(|w| w.title.to_lowercase().contains(&q.to_lowercase()))
+                            .or_else(|| list.iter().find(|w| desktop::matches_window(w, q)))
+                            .cloned()
+                            .or_else(|| desktop::find_minimized(q)),
+                        None => list.iter().find(|w| w.focused).or(list.first()).cloned(),
+                    })
+                })
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("no window matches \"{}\"; check list_windows", window.as_deref().unwrap_or("")))?;
+                let monitors = self.work_areas();
+                let current = arr::monitor_of(&monitors, arr::Rect { x: target.x, y: target.y, w: target.w, h: target.h });
+                let chosen = arr::pick_monitor(&monitors, current, monitor);
+                let moving = monitor.is_some() && chosen != current;
+                let rect = chosen.and_then(|i| arr::place(monitors[i].work, how, moving)).map(|r| (r.x, r.y, r.w, r.h));
+                let state = match how {
+                    Arrange::Maximize => desktop::WindowState::Maximize,
+                    Arrange::Minimize => desktop::WindowState::Minimize,
+                    Arrange::Restore => desktop::WindowState::Restore,
+                    _ => desktop::WindowState::Keep,
+                };
+                self.act("peck");
+                let id = target.id;
+                Self::blocking(move || desktop::arrange_window(id, rect, state)).await?;
+                Ok(GuiResult::Done(arr::describe(&target.title, how, chosen.map(|i| (i, monitors.len())))))
+            }
+            GuiAction::Duck { trick } => {
+                // Coming over needs the pointer; everything else plays where the duck is.
+                let cursor = (trick == "come_here")
+                    .then(|| actuate::probe_input().ok())
+                    .flatten()
+                    .map(|(x, y)| self.physical_to_overlay(x as f64, y as f64))
+                    .map(|(x, y)| json!({ "x": x, "y": y }));
+                let id = format!("mv{}", self.next_move.fetch_add(1, Ordering::SeqCst));
+                let (tx, rx) = oneshot::channel();
+                self.moves.lock().unwrap().insert(id.clone(), tx);
+                self.emit_overlay("duck:trick", json!({ "id": id, "trick": trick, "cursor": cursor }));
+                tokio::select! {
+                    _ = rx => {}
+                    _ = tokio::time::sleep(TRICK_TIMEOUT) => { self.moves.lock().unwrap().remove(&id); }
+                    _ = cancel.cancelled() => { self.moves.lock().unwrap().remove(&id); }
+                }
+                let done = match trick.as_str() {
+                    "fly_around" => "Flew around the screen.",
+                    "come_here" => "Came over to the pointer.",
+                    "dance" => "Danced.",
+                    "nap" => "Napping (any click wakes me).",
+                    "wake_up" => "Awake.",
+                    "hide" => "Hiding in the corner.",
+                    _ => "Made a pretend mess (nothing on the screen was touched).",
+                };
+                Ok(GuiResult::Done(done.into()))
             }
             GuiAction::Click { x, y, button, double } => {
                 self.move_to(x, y, "act", cancel).await;
