@@ -27,6 +27,12 @@ It runs on your own machine and is free and open source (MIT). Apart from cheap 
             └─────────────────────────────────────────────────┘   └──────────────────────┘
 ```
 
+## Download
+
+Windows installers are on the [Releases page](https://github.com/DimeDataCloud/Open-Waddle/releases/latest): `Waddle_<version>_arm64-setup.exe` for Snapdragon PCs and `Waddle_<version>_x64-setup.exe` for Intel and AMD. Then follow [Quick start](#quick-start-windows-11). The Chrome extension is on the Chrome Web Store (Waddle's Settings → Chrome opens it).
+
+Windows builds are not code-signed yet, so SmartScreen warns on first run: **More info → Run anyway**. See the [code signing policy](#code-signing-policy).
+
 ## What it can do today
 
 - **Live on your desktop.**
@@ -275,6 +281,16 @@ Linux build dependencies: `libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatan
 ## Roadmap
 
 v0.2 (Gmail, Calendar, Chrome, files, nudges, memory) is done, and so is the v0.3 production pass in [docs/ROADMAP.md](docs/ROADMAP.md): reliability fixes, a spending meter and budget, multiple monitors, a conversation panel, spoken replies, MCP tools, routines, a first-run welcome and visual effects (0.2.1 → 0.2.9). 0.2.9 is the release candidate; fixes from on-device testing become 0.3.0. What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
+
+## Code signing policy
+
+We have applied for free code signing for Windows releases, provided by [SignPath.io](https://signpath.io), with the certificate from [SignPath Foundation](https://signpath.org). **Until that is approved, releases are not signed.** Once approved, the line below will be accurate and every installer will be signed this way:
+
+> Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- **What is signed:** only Windows installers built by this repository's [Release workflow](.github/workflows/release.yml) on GitHub-hosted runners, from the source in this repository.
+- **Team roles:** the maintainer, [@DimeDataCloud](https://github.com/DimeDataCloud), is the author, reviewer and approver. Every release is approved by hand before it is signed. Everyone with these roles uses multi-factor authentication.
+- **Privacy:** see [PRIVACY.md](PRIVACY.md). Waddle sends nothing to the project or to anyone else except the requests you set up (your chosen AI model, and Google if you connect it), and the update check when you press it.
 
 ## Contributing and license
 

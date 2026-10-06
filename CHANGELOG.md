@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Download and code signing sections in the README,** ready for the SignPath Foundation application. They say plainly that releases aren't signed yet.
 - **Chrome extension from the Web Store.** Settings → Assistant → Chrome → **Get Waddle for Chrome** opens the extension's Chrome Web Store page. The app now trusts both the store version and the folder-loaded one, so either connects. **Install from a file** still shows the Developer-mode steps for anyone who can't use the store.
 
 ## 0.2.9: release candidate
