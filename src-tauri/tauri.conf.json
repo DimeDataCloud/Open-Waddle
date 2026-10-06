@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Waddle",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "identifier": "dev.waddle.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -50,7 +50,20 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1RDUwNUNGMjZEQzgxN0YKUldSL2dkd216d1hWUlF6aUFaajBEQ2YvMUVGTnV4aWc3dm1uSVN1Vko1V3dySjVwd1lOMFJvNC8K",
+      "endpoints": [
+        "https://github.com/DimeDataCloud/open-waddle/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

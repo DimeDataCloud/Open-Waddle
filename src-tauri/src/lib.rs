@@ -442,6 +442,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         ledger.on_notice(move |text| host.emit(waddle_core::AgentEvent::Notice { text }));
     }
     let (provider, demo) = provider_for(&settings, &secrets, &ledger);
+    let welcome = demo && !settings.first_run_done;
     let decider = decider_for(&settings, &secrets, demo, &ledger);
     let skills = Arc::new(SkillStore::new(data_dir.join("skills"))?);
     let traces = Arc::new(TraceStore::new(data_dir.join("traces")));
@@ -509,6 +510,10 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         demo: RwLock::new(demo),
     });
 
+    if welcome {
+        // First run with no brain yet: the welcome walks through it.
+        open_settings_soon(&handle);
+    }
     spawn_display_watch(handle.clone(), overlay.clone(), host.clone());
     overlay::spawn_hit_test(handle.clone(), overlay);
     bridge::spawn_reminder_clock(host.clone(), reminders);
@@ -597,6 +602,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(shortcuts::handle).build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             setup(app).map_err(|e| {
@@ -623,6 +629,10 @@ pub fn run() {
             commands::clear_memory,
             commands::history_list,
             commands::speech_voices,
+            commands::test_key,
+            commands::detect_ollama,
+            commands::update_check,
+            commands::update_install,
             commands::mcp_status,
             commands::routines_list,
             commands::routine_add,

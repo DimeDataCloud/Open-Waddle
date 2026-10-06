@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.9: release candidate
+
+- **Ready to open source.** MIT license file, a contributing guide (what CI checks, ground rules for safety tiers and untrusted text) and a security policy with private reporting.
+- **Updates from inside Waddle.** Settings → Diagnostics → **Check for updates** looks on the GitHub releases page, and **Install and restart** downloads the new version and checks its signature against a key built into the app before installing. It only happens when you press the buttons: nothing is checked in the background, and Waddle can't start it by itself. Release builds sign the update files and publish `latest.json` beside the installers.
+- **Ready for the Chrome Web Store.** A privacy policy (`PRIVACY.md`), the listing text and permission justifications (`docs/CHROME_STORE.md`), and `npm run pack:extension`, which zips the extension without its development key.
+- **Installers for x64 too.** Pushing a version tag builds Windows installers for ARM64 (Snapdragon) and x64 (Intel and AMD) and attaches them to a draft GitHub release.
+- **The welcome offers Google and Chrome.** Optional "Set up…" links, ticked when already done, finish the welcome and open that section of Settings.
+- **High contrast.** With a Windows contrast theme on, the bubble, chat box, cards, history and Settings use the theme's colours, with borders where colour alone told things apart.
+- **Settings search** hides Save when only Diagnostics matches.
+- **Self-test covers more.** It now reports how many monitors there are and spending against the monthly budget, alongside MCP servers, routines and voices. A microphone that can't be opened says so in words.
+- **Finds "the newsletters".** Gmail search matches words literally, so a search for "newsletter" often finds nothing. Waddle is now told to look through the inbox and judge by sender and subject instead of giving up.
+- **README rewritten around what Waddle does,** with an on-device checklist of 43 steps grouped by area (first run, the duck, tasks and safety, conversation and voice, spending, Google, Chrome, files, routines and MCP).
+- **Checked:** all unit and integration tests; all 12 assistant benchmark tasks (mail, calendar, files, documents, Chrome, memory, delete guard) with the default model, at about $0.0005 and 5 s per task (tasks that hit OpenRouter's rate limit were re-run); routing, the screen check and mail importance (29 of 30) with the decision model; Windows ARM64 and x64 builds; no known vulnerabilities in npm or Rust dependencies.
+
+## 0.2.8: polish
+
+- **A welcome on first run.** With no brain set up yet, Waddle opens a short welcome.
+  - Paste an OpenRouter key and press **Test** (one tiny call), let Waddle find Ollama on this computer, or just look around in demo mode.
+  - Pick a colour, and you're done. It never appears again once finished or skipped.
+- **Settings in tabs, with search.** Brain, Assistant, Nudges & routines, Voice, Memory & privacy, Character and Diagnostics. Type in the search box to find any setting across tabs (field hints and options count). Save stays in view at the bottom, and a required field on another tab opens that tab instead of silently blocking Save. The last tab is remembered.
+- **Little effects.** A puff of dust when the duck lands, a sparkle when a task is done, a sweat drop when one fails, a "?" when Waddle asks you something, and a heart when you say thanks. With Windows' reduce-motion setting on, only still symbols show.
+- **Keyboard and screen readers.**
+  - Esc denies an approval card. There's no Enter shortcut to approve, and the card never takes focus by itself, so Enter typed in the chat box can't approve an action.
+  - Cards are announced: "needs your OK" urgently, countdowns politely.
+  - Visible focus rings across the overlay and Settings; ← and → move between Settings tabs.
+- **Clearer microphone errors.** "I can't find a microphone" or "I couldn't start the microphone", with where to fix it in Windows, instead of "microphone config".
+
 ## 0.2.7: routines
 
 - **Routines: tasks Waddle does on a schedule.** "Every weekday at 8:45, summarise my unread email." "Every Friday at 4pm, list the files I changed this week." "Today at 6pm, draft my weekly report."

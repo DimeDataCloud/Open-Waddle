@@ -126,7 +126,8 @@ fn month_key<Tz: TimeZone>(t: &DateTime<Tz>) -> String {
     format!("{:04}-{:02}", t.year(), t.month())
 }
 
-fn money(x: f64) -> String {
+/// Dollars, with more decimals for tiny amounts.
+pub fn money(x: f64) -> String {
     match x {
         x if x >= 1.0 => format!("${x:.2}"),
         x if x >= 0.01 => format!("${x:.3}"),

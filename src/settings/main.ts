@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanName, importJson, joinCommand, parseEnv, splitCommand, type McpEnv, type McpServer } from "./mcp";
+import { Tabs } from "./tabs";
 
 interface Settings {
   provider: "openai_compat" | "ollama" | "mock";
@@ -35,6 +36,7 @@ interface Settings {
   ollama: { num_thread: number | null; keep_alive: string; num_ctx: number };
   voice: { backend: "system" | "whisper_api" | "off"; base_url: string; model: string; language: string | null };
   mcp_servers: McpServer[];
+  first_run_done: boolean;
   voice_out: { enabled: boolean; replies: boolean; nudges: boolean; voice: string; rate: number; talk_mode: boolean };
 }
 
@@ -754,6 +756,35 @@ $("vo-test").addEventListener("click", async () => {
   }
 });
 $("open-ws").addEventListener("click", () => void invoke("open_workspace"));
+$("update-check").addEventListener("click", async () => {
+  const status = $("update-status");
+  $("update-install").classList.add("hidden");
+  status.textContent = "Checking…";
+  try {
+    const u = await invoke<{ current: string; version: string | null; notes: string | null }>("update_check");
+    if (u.version) {
+      status.textContent = `Version ${u.version} is available (you have ${u.current}).${u.notes ? ` ${u.notes.split("\n")[0]}` : ""}`;
+      $("update-install").classList.remove("hidden");
+    } else {
+      status.textContent = `You're on the latest version (${u.current}).`;
+    }
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
+
+$("update-install").addEventListener("click", async () => {
+  const status = $("update-status");
+  $("update-install").classList.add("hidden");
+  status.textContent = "Downloading and checking the update… Waddle will restart.";
+  try {
+    await invoke("update_install");
+  } catch (err) {
+    status.textContent = String(err);
+    $("update-install").classList.remove("hidden");
+  }
+});
+
 $("verify").addEventListener("click", async () => {
   const r = await invoke<{ ok: boolean; entries: number; first_bad_id: number | null }>("audit_verify");
   $("verify-result").textContent = r.ok
@@ -800,6 +831,25 @@ $("selftest").addEventListener("click", async () => {
   }
 });
 
+const savedTab = (() => {
+  try {
+    return localStorage.getItem("settings-tab") ?? "brain";
+  } catch {
+    return "brain";
+  }
+})();
+const tabs = new Tabs($("tabs"), $<HTMLInputElement>("search"), $("no-match"), document, document.querySelector<HTMLElement>(".actions"), savedTab);
+
+// A required field on another tab would block Save without showing why: open its tab first.
+document.querySelector<HTMLButtonElement>("button[type=submit]")!.addEventListener("click", (e) => {
+  const form = $<HTMLFormElement>("form");
+  if (form.checkValidity()) return;
+  e.preventDefault();
+  const bad = form.querySelector(":invalid");
+  if (bad) tabs.reveal(bad);
+  form.reportValidity();
+});
+
 $<HTMLFormElement>("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const status = $("status");
@@ -844,7 +894,118 @@ $("export-traces").addEventListener("click", async () => {
   }
 });
 
-void invoke<SettingsView>("get_settings").then(fill);
+// ---------- first-run welcome ----------
+
+let ollamaModel: string | null = null;
+
+function showWelcome(on: boolean): void {
+  document.body.classList.toggle("welcoming", on);
+  $("welcome").classList.toggle("hidden", !on);
+}
+
+function welcomeChoice(): string {
+  return document.querySelector<HTMLInputElement>('input[name="brain"]:checked')?.value ?? "openrouter";
+}
+
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="brain"]')) {
+  r.addEventListener("change", () => {
+    $("w-openrouter").classList.toggle("hidden", welcomeChoice() !== "openrouter");
+    $("w-ollama").classList.toggle("hidden", welcomeChoice() !== "ollama");
+  });
+}
+
+$("w-test").addEventListener("click", async () => {
+  const status = $("w-test-status");
+  status.textContent = "Asking the model…";
+  try {
+    status.textContent = await invoke<string>("test_key", { settings: { ...current, ...PRESETS.openrouter }, key: $("w_key").value.trim() || null });
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
+
+$("w-detect").addEventListener("click", async () => {
+  const status = $("w-ollama-status");
+  status.textContent = "Looking…";
+  try {
+    const [models, pick] = await invoke<[string[], string | null]>("detect_ollama", { baseUrl: null });
+    ollamaModel = pick;
+    status.textContent = pick ? `Found Ollama with ${models.length} model${models.length === 1 ? "" : "s"}. I'll use ${pick}.` : "Ollama is running but has no models yet. Run: ollama pull qwen3.5:4b";
+  } catch (err) {
+    ollamaModel = null;
+    status.textContent = String(err);
+  }
+});
+
+/** Ticks the optional steps that are already done (e.g. Google connected before). */
+async function welcomeTicks(): Promise<void> {
+  const tick = (id: string, done: boolean) => {
+    $(id).textContent = done ? "✓" : "○";
+    $(id).classList.toggle("done", done);
+    $(id).setAttribute("aria-label", done ? "done" : "not set up");
+  };
+  try {
+    tick("w-google-tick", (await invoke<GoogleStatus>("google_status")).connected);
+    tick("w-chrome-tick", (await invoke<BrowserStatus>("browser_status")).connected);
+  } catch {
+    // The ticks are a nicety.
+  }
+}
+
+/** Finishes the welcome; `then` is a section to open afterwards (Google or Chrome setup). */
+async function finishWelcome(skip: boolean, then?: string): Promise<void> {
+  const status = $("w-status");
+  let settings: Settings = { ...current, first_run_done: true };
+  let apiKey: string | null = null;
+  if (!skip) {
+    settings = { ...settings, character: { ...current.character, color: $("w_color").value } };
+    const choice = welcomeChoice();
+    if (choice === "openrouter") {
+      apiKey = $("w_key").value.trim() || null;
+      if (!apiKey) {
+        status.textContent = "Paste your OpenRouter key first, or pick another option.";
+        return;
+      }
+      settings = { ...settings, ...PRESETS.openrouter };
+    } else if (choice === "ollama") {
+      if (!ollamaModel) {
+        status.textContent = "Press “Look for Ollama” first (it needs to be running).";
+        return;
+      }
+      settings = { ...settings, ...PRESETS.ollama, model: ollamaModel };
+    }
+  }
+  status.textContent = "Saving…";
+  try {
+    const view = await invoke<SettingsView>("save_settings", { settings, apiKey, sttKey: null, mcpEnv: {} });
+    fill(view);
+    showWelcome(false);
+    if (then) {
+      tabs.reveal($(then));
+      // Below the sticky header, not under it.
+      const header = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
+      window.scrollTo({ top: $(then).getBoundingClientRect().top + window.scrollY - header - 8 });
+    }
+  } catch (err) {
+    status.textContent = `Couldn't save: ${err}`;
+  }
+}
+
+for (const b of document.querySelectorAll<HTMLButtonElement>("#welcome [data-setup]")) {
+  b.addEventListener("click", () => void finishWelcome(false, b.dataset.setup));
+}
+
+$("w-done").addEventListener("click", () => void finishWelcome(false));
+$("w-skip").addEventListener("click", () => void finishWelcome(true));
+
+void invoke<SettingsView>("get_settings").then((view) => {
+  fill(view);
+  if (view.demo && !view.settings.first_run_done) {
+    $("w_color").value = view.settings.character.color;
+    showWelcome(true);
+    void welcomeTicks();
+  }
+});
 void loadTraces();
 void loadSpending();
 void loadAudit();

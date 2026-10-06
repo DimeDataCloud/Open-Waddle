@@ -73,6 +73,69 @@ pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<
     }
 }
 
+/// The welcome's "Test" button: one tiny model call with these settings and key
+/// (or the saved key). Returns what happened, in plain words.
+#[tauri::command]
+pub async fn test_key(state: State<'_, AppState>, settings: Settings, key: Option<String>) -> CmdResult<String> {
+    let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| state.secrets.get(Secret::LlmKey));
+    if needs_key(&settings) && key.is_none() {
+        return Err("Paste your key first.".into());
+    }
+    let provider = waddle_core::llm::build_provider(&settings, key);
+    let provider: std::sync::Arc<dyn waddle_core::llm::Provider> = if settings.is_local() { provider } else { std::sync::Arc::new(waddle_core::ledger::Metered::new(provider, state.ledger.clone())) };
+    match waddle_core::diagnostics::probe_model(provider.as_ref(), &settings.model).await {
+        Ok((_, detail)) => Ok(format!("It works: {detail}.")),
+        Err(e) => Err(format!("{e:#}")),
+    }
+}
+
+/// The models of an Ollama server on this computer.
+#[tauri::command]
+pub async fn detect_ollama(base_url: Option<String>) -> CmdResult<(Vec<String>, Option<String>)> {
+    let base = base_url.unwrap_or_else(|| "http://localhost:11434".into());
+    let models = waddle_core::diagnostics::ollama_models(&base).await.map_err(|_| "Ollama isn't running on this computer. Install it from ollama.com, start it, then run: ollama pull qwen3.5:4b".to_string())?;
+    let pick = waddle_core::diagnostics::pick_ollama_model(&models);
+    Ok((models, pick))
+}
+
+#[derive(Serialize)]
+pub struct UpdateInfo {
+    pub current: String,
+    pub version: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Settings → "Check for updates": asks the release page whether a newer, signed
+/// build exists. Only ever started by the user's click; no model tool reaches it.
+#[tauri::command]
+pub async fn update_check(app: tauri::AppHandle) -> CmdResult<UpdateInfo> {
+    use tauri_plugin_updater::UpdaterExt;
+    let current = app.package_info().version.to_string();
+    let updater = app.updater().map_err(|e| format!("Updates aren't set up in this build ({e})"))?;
+    match updater.check().await {
+        Ok(Some(u)) => Ok(UpdateInfo { current, version: Some(u.version), notes: u.body }),
+        Ok(None) => Ok(UpdateInfo { current, version: None, notes: None }),
+        Err(e) => Err(format!("Couldn't check for updates: {e}")),
+    }
+}
+
+/// Downloads the update found by `update_check`, checks its signature against the key
+/// built into this app, and installs it. Refuses while a task is running.
+#[tauri::command]
+pub async fn update_install(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    use tauri_plugin_updater::UpdaterExt;
+    if state.session.is_busy() {
+        return Err("Waddle is in the middle of a task. Try again when it's done.".into());
+    }
+    let updater = app.updater().map_err(err)?;
+    let Some(update) = updater.check().await.map_err(|e| format!("Couldn't check for updates: {e}"))? else {
+        return Err("You're already on the latest version.".into());
+    };
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| format!("The update didn't install: {e}"))?;
+    // On Windows the installer closes Waddle itself; elsewhere restart into the new build.
+    app.restart();
+}
+
 /// The voices that can read replies aloud (empty: only the system's default).
 #[tauri::command]
 pub async fn speech_voices() -> CmdResult<Vec<String>> {
@@ -578,7 +641,7 @@ pub async fn voice_start(state: State<'_, AppState>) -> CmdResult<&'static str> 
             Ok("system")
         }
         VoiceBackend::WhisperApi => {
-            let rec = tokio::task::spawn_blocking(voice::start).await.map_err(err)?.map_err(err)?;
+            let rec = tokio::task::spawn_blocking(voice::start).await.map_err(err)?.map_err(|e| voice::plain(&e))?;
             *state.recording.lock().unwrap() = Some(rec);
             Ok("recording")
         }

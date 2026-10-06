@@ -251,6 +251,8 @@ pub struct Settings {
     pub voice_out: VoiceOutSettings,
     /// MCP servers whose tools Waddle may use. Only the user changes these.
     pub mcp_servers: Vec<McpServerSettings>,
+    /// The first-run welcome has been seen (or skipped).
+    pub first_run_done: bool,
     /// OAuth client ID of the user's Google Cloud project (Desktop app type). Empty = Google off.
     pub google_client_id: String,
     /// Hours (local, 24h) that `calendar_free` proposes meetings in, on weekdays.
@@ -309,6 +311,7 @@ impl Default for Settings {
             voice: VoiceSettings::default(),
             voice_out: VoiceOutSettings::default(),
             mcp_servers: vec![],
+            first_run_done: false,
             google_client_id: String::new(),
             working_hours: (9, 17),
             send_undo_secs: 10,

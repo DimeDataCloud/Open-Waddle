@@ -41,11 +41,16 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
     let mut checks = vec![];
 
     let g = state.overlay.geometry();
+    let monitors = app.available_monitors().map(|m| m.len()).unwrap_or(0);
     checks.push(
         run_check("Display", || async move {
+            let others = match monitors {
+                0 | 1 => String::new(),
+                n => format!("; {n} monitors{}", if g.primary { "" } else { ", on a secondary one" }),
+            };
             Ok((
                 Status::Pass,
-                format!("{}x{} work area at {:.0}% scale (screen {}x{})", g.width, g.height, g.scale * 100.0, g.screen_w, g.screen_h),
+                format!("{}x{} work area at {:.0}% scale (screen {}x{}){others}", g.width, g.height, g.scale * 100.0, g.screen_w, g.screen_h),
             ))
         })
         .await,
@@ -218,6 +223,25 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
                 }
                 (false, true) => (Status::Warn, "no voice to read with; answers stay on screen".into()),
                 (false, false) => (Status::Skip, "no voice installed; reading aloud is off".into()),
+            })
+        })
+        .await,
+    );
+
+    let spend = state.ledger.summary(&chrono::Local::now());
+    checks.push(
+        run_check("Spending", || async move {
+            use waddle_core::ledger::money;
+            if spend.budget <= 0.0 {
+                return Ok((Status::Pass, format!("{} this month; no monthly limit set", money(spend.month))));
+            }
+            let detail = format!("{} of the {} monthly budget used ({} today)", money(spend.month), money(spend.budget), money(spend.today));
+            Ok(if spend.paused {
+                (Status::Warn, format!("{detail}; paid model calls are paused until the 1st"))
+            } else if spend.month >= spend.budget * 0.8 {
+                (Status::Warn, format!("{detail}; close to the limit"))
+            } else {
+                (Status::Pass, detail)
             })
         })
         .await,

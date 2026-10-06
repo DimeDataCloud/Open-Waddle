@@ -266,7 +266,11 @@ where
         "mail_search" => {
             let list = g.mail_search(&s("query"), n("max").unwrap_or(10) as u32).await?;
             if list.is_empty() {
-                return Ok(ToolOutcome::trusted(format!("No emails match \"{}\".", s("query"))));
+                let q = s("query");
+                // Gmail matches words literally: "newsletter" doesn't find a digest from Medium.
+                let words = q.split_whitespace().any(|w| !w.contains(':'));
+                let hint = if words { " Gmail matches words exactly. To find a kind of email (newsletters, promotions, receipts), search \"in:inbox\" and judge by sender and subject." } else { "" };
+                return Ok(ToolOutcome::trusted(format!("No emails match \"{q}\".{hint}")));
             }
             let lines: Vec<String> = list
                 .iter()

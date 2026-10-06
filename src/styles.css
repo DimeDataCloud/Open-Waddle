@@ -209,6 +209,10 @@ body {
   font-size: 14px;
 }
 
+.card button:focus-visible,
+.card summary:focus-visible,
+.bubble button:focus-visible,
+.badge:focus-visible,
 .chat button:focus-visible,
 .drawer button:focus-visible,
 .drawer .entries:focus-visible,
@@ -620,4 +624,33 @@ body {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 4px;
+}
+
+/* Windows contrast themes: system colours, with borders where colour alone told things apart. */
+@media (forced-colors: active) {
+  .bubble,
+  .chat,
+  .card,
+  .drawer {
+    border: 2px solid CanvasText;
+    forced-color-adjust: auto;
+  }
+  .card.tier3 {
+    border: 3px double Highlight;
+  }
+  .card button,
+  .chat button,
+  .bubble button,
+  .stop {
+    border: 1px solid ButtonText;
+  }
+  .card button.approve {
+    border-width: 2px;
+  }
+  .card .bar > div {
+    background: Highlight;
+  }
+  .bubble::after {
+    display: none;
+  }
 }
