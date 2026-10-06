@@ -6,6 +6,9 @@ export const GOOGLE_URL = "https://generativelanguage.googleapis.com/v1beta/open
 // 3.5 Flash-Lite passed every assistant-bench job, about twice as fast as the default planner (docs/MODELS.md).
 export const GOOGLE_PLANNER = "gemini-3.5-flash-lite";
 export const GOOGLE_QUICK = "gemini-3.5-flash-lite";
+// What OpenRouter runs for a Gemini task Google turns down (same as GOOGLE_FALLBACK in config.rs):
+// it clicks on Gemini's 0–1000 grid and costs less than half of Gemini there (docs/LAB.md).
+export const GOOGLE_FALLBACK = "inclusionai/ling-3.0-flash-vl";
 
 export type FastService = "same" | "google" | "custom";
 

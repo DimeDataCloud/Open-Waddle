@@ -2,7 +2,7 @@
   "name": "waddle",
   "private": true,
   "license": "MIT",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Project Waddle: an embodied desktop AI agent that walks to what it acts on.",
   "type": "module",
   "scripts": {

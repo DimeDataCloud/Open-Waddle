@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.2: a cheaper fallback, chosen in a test lab
+
+- **A cheaper stand-in when Google says no.** When the free Gemini key is over a limit (or not set yet), OpenRouter now answers with cheaper models than the same Gemini there:
+  - **Ling 3.0 Flash VL** for tasks: it passed 11 of 12 assistant jobs at about $0.0003 a task, roughly a sixth of Gemini 3.5 Flash-Lite there;
+  - **Gemini 2.5 Flash-Lite** for quick replies.
+
+  Settings → Brain → **When Google turns a task down, OpenRouter runs** takes any other model.
+- **Why Ling and not GPT-6 Luna:** a Gemini task tells the model to click on a 0–1000 grid, and Luna, a pixel model, hits 60% on that grid (93% in pixels). Ling answers on the grid like Gemini and hits 83%.
+- **Clicks read right for more models.**
+  - Auto coordinates now ask Ling for the 0–1000 grid; it hit 40% in pixels.
+  - Waddle reads coordinates a model garbles (`{"x":": 380, "y": 352}`) or sends as a pair (`"x": [564, 263]`, `"coordinate": [x, y]`). Before, those clicks were lost and the step wasted.
+- **The click lab** (`crates/waddle-core/tests/lab.rs`, [docs/LAB.md](docs/LAB.md)) tests which models and coordinate systems click Waddle's screens best, for a fraction of a cent per model:
+  - one request per probe, built from the bench screens (86 probes);
+  - free services first, answers kept and never asked again, a screening round, and a hard budget;
+  - a report of the coordinate space each model really answers in.
+
+  This round tested 14 models and cost about $0.04, plus $0.01 for full checks of Ling.
+
 ## 0.3.1: Gemini on a free key, for real
 
 The first test with a real Google key found that tasks on Google's own API failed at their second step. These fixes were checked against Google's API with a free key.

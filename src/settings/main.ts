@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanName, importJson, joinCommand, parseEnv, splitCommand, type McpEnv, type McpServer } from "./mcp";
-import { fastDefaults, fastServiceFor, GOOGLE_PLANNER, GOOGLE_QUICK, GOOGLE_URL, plannerFor, tasksOnGoogle, usesGoogle, type FastService } from "./services";
+import { fastDefaults, fastServiceFor, GOOGLE_FALLBACK, GOOGLE_PLANNER, GOOGLE_QUICK, GOOGLE_URL, plannerFor, tasksOnGoogle, usesGoogle, type FastService } from "./services";
 import { Tabs } from "./tabs";
 
 interface Settings {
@@ -9,6 +9,7 @@ interface Settings {
   model: string;
   fast_model: string;
   fast_base_url: string;
+  fallback_model: string;
   coord_mode: "auto" | "pixels" | "norm1000";
   tier2_mode: "countdown" | "ask";
   tier2_countdown_ms: number;
@@ -96,6 +97,7 @@ function syncVisibility(): void {
   const fast = $<HTMLSelectElement>("fast_service").value as FastService;
   $("fast-opts").classList.toggle("hidden", fast === "same");
   $("tasks-google-row").classList.toggle("hidden", fast !== "google");
+  $("fallback-row").classList.toggle("hidden", fast !== "google");
   $("fast_base_url").required = !demo && fast !== "same";
   $("google-note").classList.toggle("hidden", demo || !usesGoogle($("base_url").value, fast === "same" ? "" : $("fast_base_url").value));
   $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
@@ -299,6 +301,8 @@ function fill(view: SettingsView): void {
   $<HTMLSelectElement>("fast_service").value = fastServiceFor(s.fast_base_url);
   $<HTMLInputElement>("tasks_on_google").checked = tasksOnGoogle(s.model, s.fast_base_url);
   $("fast_base_url").value = s.fast_base_url;
+  $("fallback_model").value = s.fallback_model ?? "";
+  $<HTMLInputElement>("fallback_model").placeholder = `${GOOGLE_FALLBACK} (Waddle's pick)`;
   $("fast_key").value = "";
   $("fast_key").placeholder = view.has_fast_key ? "saved (leave blank to keep)" : "paste the key for this service";
   $("fast-status").textContent = "";
@@ -369,6 +373,7 @@ function collect(): Settings {
     model: $("model").value.trim(),
     fast_model: $("fast_model").value.trim(),
     fast_base_url: $<HTMLSelectElement>("fast_service").value === "same" ? "" : $("fast_base_url").value.trim(),
+    fallback_model: $("fallback_model").value.trim(),
     coord_mode: $<HTMLSelectElement>("coord_mode").value as Settings["coord_mode"],
     tier2_mode: $<HTMLSelectElement>("tier2_mode").value as Settings["tier2_mode"],
     tier2_countdown_ms: num("tier2_countdown_ms", 2000),
