@@ -82,9 +82,10 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
     );
 
     let (lw, lh) = g.screen_logical();
+    let origin = (g.screen_x, g.screen_y);
     checks.push(
         run_check("Screenshot", || async move {
-            let (image, w, h) = blocking(move || actuate::screenshot(lw.round() as u32, lh.round() as u32)).await?;
+            let (image, w, h) = blocking(move || actuate::screenshot(lw.round() as u32, lh.round() as u32, origin)).await?;
             Ok((Status::Pass, format!("{w}x{h}, {} KB", image.base64.len() * 3 / 4 / 1024)))
         })
         .await,
@@ -166,6 +167,57 @@ pub async fn run(app: &AppHandle) -> Vec<Check> {
             Ok(match blocking(voice::probe).await {
                 Ok(name) => (Status::Pass, name),
                 Err(e) => (Status::Warn, format!("{e:#}; typing still works")),
+            })
+        })
+        .await,
+    );
+
+    let servers: Vec<String> = settings.mcp_servers.iter().filter(|s| s.enabled).map(|s| s.name.clone()).collect();
+    let hub = state.mcp.clone();
+    checks.push(
+        run_check("Tools (MCP)", || async move {
+            if servers.is_empty() {
+                return Ok((Status::Skip, "no MCP servers added".into()));
+            }
+            let mut ok = vec![];
+            let mut bad = vec![];
+            for name in &servers {
+                match hub.refresh(name, &tokio_util::sync::CancellationToken::new()).await {
+                    Ok(tools) => ok.push(format!("{name}: {} tools", tools.len())),
+                    Err(e) => bad.push(format!("{name}: {e:#}")),
+                }
+            }
+            Ok(if bad.is_empty() { (Status::Pass, ok.join("; ")) } else { (Status::Warn, [bad, ok].concat().join("; ")) })
+        })
+        .await,
+    );
+
+    let routines = state.reminders.routines.list();
+    checks.push(
+        run_check("Routines", || async move {
+            if routines.is_empty() {
+                return Ok((Status::Skip, "none set up".into()));
+            }
+            let paused = routines.iter().filter(|r| r.paused).count();
+            let missed = routines.iter().filter(|r| r.last_result.as_deref().is_some_and(|l| !l.starts_with("Done"))).count();
+            let detail = format!("{} set up, {paused} paused; {missed} didn't finish last time", routines.len());
+            Ok((if missed > 0 { Status::Warn } else { Status::Pass }, detail))
+        })
+        .await,
+    );
+
+    let speak = settings.voice_out.enabled;
+    checks.push(
+        run_check("Spoken replies", || async move {
+            let voices = blocking(|| Ok(crate::speech::voices())).await?;
+            let can = !voices.is_empty() || blocking(|| Ok(crate::speech::available())).await?;
+            Ok(match (can, speak) {
+                (true, on) => {
+                    let which = if voices.is_empty() { "the default voice".to_string() } else { format!("{} voices ({})", voices.len(), voices.iter().take(3).cloned().collect::<Vec<_>>().join(", ")) };
+                    (Status::Pass, format!("{which}{}", if on { "" } else { "; reading aloud is off" }))
+                }
+                (false, true) => (Status::Warn, "no voice to read with; answers stay on screen".into()),
+                (false, false) => (Status::Skip, "no voice installed; reading aloud is off".into()),
             })
         })
         .await,

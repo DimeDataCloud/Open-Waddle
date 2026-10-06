@@ -12,6 +12,55 @@ fn enigo() -> anyhow::Result<Enigo> {
     Enigo::new(&Settings::default()).map_err(|e| anyhow!("input simulation unavailable: {e}"))
 }
 
+/// Moves the pointer to a physical desktop point. enigo scales absolute moves to
+/// the primary monitor only, so on Windows a point on another monitor goes
+/// through SendInput over the whole virtual desktop instead.
+fn move_to(e: &mut Enigo, x: i32, y: i32) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    if !on_primary(x, y) {
+        return virtual_desk_move(x, y);
+    }
+    e.move_mouse(x, y, Coordinate::Abs).map_err(|err| anyhow!("moving the pointer: {err}"))
+}
+
+#[cfg(windows)]
+fn on_primary(x: i32, y: i32) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    let (w, h) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+    x >= 0 && y >= 0 && x < w && y < h
+}
+
+#[cfg(windows)]
+fn virtual_desk_move(x: i32, y: i32) -> anyhow::Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN};
+    let (vx, vy, vw, vh) = unsafe {
+        (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
+    };
+    anyhow::ensure!(vw > 1 && vh > 1, "no virtual desktop to move the pointer on");
+    // 0..65535 spans the whole virtual desktop with MOUSEEVENTF_VIRTUALDESK.
+    let norm = |p: i32, origin: i32, size: i32| (((p - origin) as i64 * 65535 + (size as i64 - 1) / 2) / (size as i64 - 1)) as i32;
+    let mi = MOUSEINPUT {
+        dx: norm(x, vx, vw),
+        dy: norm(y, vy, vh),
+        mouseData: 0,
+        dwFlags: MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+        time: 0,
+        dwExtraInfo: 0,
+    };
+    let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi } };
+    let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+    anyhow::ensure!(sent == 1, "the pointer move was blocked");
+    Ok(())
+}
+
 /// Self-test: input simulation can start and read the cursor (physical pixels).
 pub fn probe_input() -> anyhow::Result<(i32, i32)> {
     enigo()?.location().map_err(|e| anyhow!("can't read the cursor: {e}"))
@@ -20,7 +69,7 @@ pub fn probe_input() -> anyhow::Result<(i32, i32)> {
 pub fn click(x: i32, y: i32, button: MouseButton, double: bool) -> anyhow::Result<()> {
     let mut e = enigo()?;
     let home = e.location().ok();
-    e.move_mouse(x, y, Coordinate::Abs)?;
+    move_to(&mut e, x, y)?;
     std::thread::sleep(Duration::from_millis(40));
     let b = match button {
         MouseButton::Left => Button::Left,
@@ -34,7 +83,7 @@ pub fn click(x: i32, y: i32, button: MouseButton, double: bool) -> anyhow::Resul
     // Hand the cursor back where the user left it.
     if let Some((hx, hy)) = home {
         std::thread::sleep(Duration::from_millis(40));
-        let _ = e.move_mouse(hx, hy, Coordinate::Abs);
+        let _ = move_to(&mut e, hx, hy);
     }
     Ok(())
 }
@@ -44,7 +93,7 @@ pub fn scroll(at: Option<(i32, i32)>, dx: i32, dy: i32) -> anyhow::Result<()> {
     let mut e = enigo()?;
     let home = e.location().ok();
     if let Some((x, y)) = at {
-        e.move_mouse(x, y, Coordinate::Abs)?;
+        move_to(&mut e, x, y)?;
         std::thread::sleep(Duration::from_millis(40));
     }
     // A notch at a time reads as real scrolling to apps that smooth it.
@@ -55,7 +104,7 @@ pub fn scroll(at: Option<(i32, i32)>, dx: i32, dy: i32) -> anyhow::Result<()> {
         }
     }
     if let (Some(_), Some((hx, hy))) = (at, home) {
-        let _ = e.move_mouse(hx, hy, Coordinate::Abs);
+        let _ = move_to(&mut e, hx, hy);
     }
     Ok(())
 }
@@ -64,7 +113,7 @@ pub fn scroll(at: Option<(i32, i32)>, dx: i32, dy: i32) -> anyhow::Result<()> {
 pub fn drag(from: (i32, i32), to: (i32, i32)) -> anyhow::Result<()> {
     let mut e = enigo()?;
     let home = e.location().ok();
-    e.move_mouse(from.0, from.1, Coordinate::Abs)?;
+    move_to(&mut e, from.0, from.1)?;
     std::thread::sleep(Duration::from_millis(60));
     e.button(Button::Left, Direction::Press)?;
     let steps = 20;
@@ -72,7 +121,7 @@ pub fn drag(from: (i32, i32), to: (i32, i32)) -> anyhow::Result<()> {
     for i in 1..=steps {
         let x = from.0 + (to.0 - from.0) * i / steps;
         let y = from.1 + (to.1 - from.1) * i / steps;
-        if let Err(err) = e.move_mouse(x, y, Coordinate::Abs) {
+        if let Err(err) = move_to(&mut e, x, y) {
             result = Err(err);
             break;
         }
@@ -84,7 +133,7 @@ pub fn drag(from: (i32, i32), to: (i32, i32)) -> anyhow::Result<()> {
     released?;
     if let Some((hx, hy)) = home {
         std::thread::sleep(Duration::from_millis(40));
-        let _ = e.move_mouse(hx, hy, Coordinate::Abs);
+        let _ = move_to(&mut e, hx, hy);
     }
     Ok(())
 }
@@ -217,13 +266,16 @@ pub fn press_combo(keys: &[Key]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Captures the primary monitor and scales it to logical size, so screenshot
-/// pixels line up with the coordinates the model is told about.
-pub fn screenshot(logical_w: u32, logical_h: u32) -> anyhow::Result<(ImageData, u32, u32)> {
+/// Captures the monitor whose top-left corner is `origin` (physical pixels; the
+/// one the duck is on) and scales it to logical size, so screenshot pixels line
+/// up with the coordinates the model is told about.
+pub fn screenshot(logical_w: u32, logical_h: u32, origin: (i32, i32)) -> anyhow::Result<(ImageData, u32, u32)> {
     let monitors = xcap::Monitor::all().context("listing monitors")?;
+    let at = |m: &xcap::Monitor| (m.x().unwrap_or(i32::MIN), m.y().unwrap_or(i32::MIN));
     let monitor = monitors
         .iter()
-        .find(|m| m.is_primary().unwrap_or(false))
+        .find(|m| at(m) == origin)
+        .or_else(|| monitors.iter().find(|m| m.is_primary().unwrap_or(false)))
         .or_else(|| monitors.first())
         .ok_or_else(|| anyhow!("no monitor found"))?;
     let img = monitor.capture_image().context("screen capture failed (on macOS, grant Screen Recording permission)")?;

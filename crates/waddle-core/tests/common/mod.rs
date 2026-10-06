@@ -47,6 +47,8 @@ pub struct FakeHost {
     pub browser_calls: Mutex<Vec<(String, serde_json::Value)>>,
     /// Whether the screen tools exist (off for text-only benchmarks).
     pub gui: Mutex<bool>,
+    /// Follows the events like the app's history drawer does, when set.
+    pub history: Mutex<Option<Arc<waddle_core::history::History>>>,
     started: Instant,
 }
 
@@ -71,6 +73,7 @@ impl FakeHost {
             browser_replies: Mutex::default(),
             browser_calls: Mutex::default(),
             gui: Mutex::new(true),
+            history: Mutex::default(),
             started: Instant::now(),
         })
     }
@@ -91,13 +94,16 @@ impl Host for FakeHost {
         if let Some(label) = label {
             self.timeline.lock().unwrap().push((self.started.elapsed().as_secs_f64(), label));
         }
+        if let Some(h) = self.history.lock().unwrap().as_ref() {
+            h.observe(&event);
+        }
         self.events.lock().unwrap().push(event);
     }
     fn env(&self) -> EnvInfo {
         // Like Windows: the accessibility fast path exists when there are elements to list.
         let accessibility = !self.elements.lock().unwrap().is_empty();
         let browser = !self.browser_replies.lock().unwrap().is_empty();
-        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: *self.gui.lock().unwrap(), accessibility, browser, ..Default::default() } }
+        EnvInfo { os: self.os.lock().unwrap().clone(), screen_w: 1440.0, screen_h: 960.0, caps: Capabilities { gui: *self.gui.lock().unwrap(), accessibility, browser, ..Default::default() }, background: None }
     }
     async fn request_approval(&self, req: ApprovalRequest) -> Decision {
         self.approvals.lock().unwrap().push(req.clone());

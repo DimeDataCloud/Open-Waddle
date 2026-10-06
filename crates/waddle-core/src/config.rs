@@ -97,6 +97,66 @@ impl Default for VoiceSettings {
     }
 }
 
+/// An MCP server the user added: a program Waddle starts whose tools it may use.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct McpServerSettings {
+    /// A short name, shown to the user and in tool names.
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    /// Environment variables it needs (API keys); their values are in the keychain.
+    pub env_keys: Vec<String>,
+    /// Its tools that say they only read may run without asking, and others after a countdown.
+    pub trusted: bool,
+    pub enabled: bool,
+}
+
+impl Default for McpServerSettings {
+    fn default() -> Self {
+        Self { name: String::new(), command: String::new(), args: vec![], env_keys: vec![], trusted: false, enabled: true }
+    }
+}
+
+/// Server names must be short, distinct and plain (they become part of tool names).
+pub fn check_mcp_servers(servers: &[McpServerSettings]) -> anyhow::Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for s in servers {
+        let name = s.name.trim();
+        anyhow::ensure!(!name.is_empty(), "every MCP server needs a name");
+        anyhow::ensure!(name.len() <= 24 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'), "MCP server name \"{name}\": use up to 24 letters, digits, - or _");
+        anyhow::ensure!(seen.insert(name.to_ascii_lowercase()), "two MCP servers are called \"{name}\"");
+        anyhow::ensure!(!s.command.trim().is_empty(), "MCP server \"{name}\" needs a command");
+        for k in &s.env_keys {
+            anyhow::ensure!(!k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "MCP server \"{name}\": \"{k}\" isn't a valid variable name");
+        }
+    }
+    Ok(())
+}
+
+/// Spoken replies: Waddle reads its answers (and nudges) aloud.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceOutSettings {
+    pub enabled: bool,
+    /// Answers: chat replies, research summaries, a task's last words.
+    pub replies: bool,
+    /// Nudges and reminders.
+    pub nudges: bool,
+    /// The voice's name as the system lists it. Empty = the system's default voice.
+    pub voice: String,
+    /// 0.5 (slow) to 2.0 (fast); 1.0 is normal.
+    pub rate: f64,
+    /// After reading out the answer to something said aloud, listen again for a few seconds.
+    pub talk_mode: bool,
+}
+
+impl Default for VoiceOutSettings {
+    fn default() -> Self {
+        Self { enabled: false, replies: true, nudges: true, voice: String::new(), rate: 1.0, talk_mode: false }
+    }
+}
+
 /// How much hidden thinking a hosted model may do before answering (OpenRouter's
 /// `reasoning.effort`). Thinking makes each step slower and dearer; Waddle's steps
 /// are small, so most models do best with it off or low.
@@ -177,6 +237,8 @@ pub struct Settings {
     /// None = Documents/Waddle.
     pub workspace_dir: Option<PathBuf>,
     pub wander: bool,
+    /// The duck moves to the monitor the user is working on.
+    pub follow_monitors: bool,
     /// Folder holding Waddle's own source code. When set, Waddle can read it
     /// (as `self/...`) and edit it with approval. None = self-editing off.
     pub self_source_dir: Option<PathBuf>,
@@ -185,6 +247,10 @@ pub struct Settings {
     pub character: CharacterSettings,
     pub ollama: OllamaSettings,
     pub voice: VoiceSettings,
+    /// Reading replies aloud.
+    pub voice_out: VoiceOutSettings,
+    /// MCP servers whose tools Waddle may use. Only the user changes these.
+    pub mcp_servers: Vec<McpServerSettings>,
     /// OAuth client ID of the user's Google Cloud project (Desktop app type). Empty = Google off.
     pub google_client_id: String,
     /// Hours (local, 24h) that `calendar_free` proposes meetings in, on weekdays.
@@ -235,11 +301,14 @@ impl Default for Settings {
             command_timeout_secs: 60,
             workspace_dir: None,
             wander: true,
+            follow_monitors: true,
             self_source_dir: None,
             max_delegation_depth: 2,
             character: CharacterSettings::default(),
             ollama: OllamaSettings::default(),
             voice: VoiceSettings::default(),
+            voice_out: VoiceOutSettings::default(),
+            mcp_servers: vec![],
             google_client_id: String::new(),
             working_hours: (9, 17),
             send_undo_secs: 10,
@@ -310,6 +379,7 @@ pub const SELF_EDITABLE: &[&str] = &[
     "max_steps",
     "command_timeout_secs",
     "voice_backend",
+    "spoken_replies",
 ];
 
 fn parse_enum<T: serde::de::DeserializeOwned>(key: &str, v: &serde_json::Value) -> anyhow::Result<T> {
@@ -350,6 +420,7 @@ pub fn apply_patch(base: &Settings, patch: &serde_json::Value) -> anyhow::Result
             "max_steps" => next.max_steps = num(1, 50)? as u32,
             "command_timeout_secs" => next.command_timeout_secs = num(5, 600)?,
             "voice_backend" => next.voice.backend = parse_enum(k, v)?,
+            "spoken_replies" => next.voice_out.enabled = v.as_bool().ok_or_else(|| anyhow::anyhow!("`spoken_replies` must be true or false"))?,
             _ => unreachable!(),
         }
         changed.push(k.clone());
@@ -376,6 +447,22 @@ mod tests {
         ] {
             assert!(apply_patch(&base, &bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn mcp_servers_need_plain_distinct_names() {
+        let ok = McpServerSettings { name: "github".into(), command: "npx".into(), env_keys: vec!["GITHUB_TOKEN".into()], ..Default::default() };
+        assert!(check_mcp_servers(&[ok.clone(), McpServerSettings { name: "files".into(), ..ok.clone() }]).is_ok());
+        for bad in [
+            vec![McpServerSettings { name: "".into(), ..ok.clone() }],
+            vec![McpServerSettings { name: "my server".into(), ..ok.clone() }],
+            vec![ok.clone(), McpServerSettings { name: "GitHub".into(), ..ok.clone() }],
+            vec![McpServerSettings { command: " ".into(), ..ok.clone() }],
+            vec![McpServerSettings { env_keys: vec!["BAD-KEY".into()], ..ok.clone() }],
+        ] {
+            assert!(check_mcp_servers(&bad).is_err(), "{bad:?}");
+        }
+        assert!(apply_patch(&Settings::default(), &serde_json::json!({ "mcp_servers": [] })).is_err(), "the model can't change them");
     }
 
     #[test]

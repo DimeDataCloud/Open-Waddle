@@ -13,6 +13,7 @@ mod presence;
 mod secrets;
 mod selftest;
 mod shortcuts;
+mod speech;
 #[cfg(windows)]
 mod uia;
 mod voice;
@@ -60,6 +61,8 @@ pub struct AppState {
     pub style: Arc<StyleNote>,
     /// What Waddle spends on model calls, and the monthly budget.
     pub ledger: Arc<Ledger>,
+    /// The user's MCP servers and their tools.
+    pub mcp: Arc<waddle_core::mcp::McpHub>,
     /// Cancels a Google sign-in that's waiting for the browser.
     pub google_signin: Mutex<Option<tokio_util::sync::CancellationToken>>,
     /// Meeting, mail and brief nudges: the watcher's memory and what's on screen.
@@ -190,6 +193,8 @@ impl AppState {
             style: Some(self.style.clone()),
         });
         *self.google.write().unwrap() = google;
+        self.host.speech.set_settings(settings.voice_out.clone());
+        configure_mcp(&self.mcp, &settings, &self.secrets);
         *self.settings.write().unwrap() = settings;
         *self.workspace.write().unwrap() = workspace;
         *self.demo.write().unwrap() = demo;
@@ -254,15 +259,23 @@ pub fn open_settings_soon(app: &AppHandle) {
     });
 }
 
-/// Where the overlay belongs: the primary monitor's work area (not the full
-/// screen, so Windows doesn't treat it as a full-screen app).
-fn monitor_geometry(window: &tauri::WebviewWindow) -> anyhow::Result<Geometry> {
-    let monitor = window
-        .primary_monitor()?
-        .or(window.current_monitor()?)
-        .ok_or_else(|| anyhow::anyhow!("no monitor"))?;
+/// The overlay's place on a monitor: its work area (not the full screen, so
+/// Windows doesn't treat it as a full-screen app). `at` picks the monitor that
+/// contains that physical point; otherwise, or if none does, the primary one.
+fn monitor_geometry(window: &tauri::WebviewWindow, at: Option<(f64, f64)>) -> anyhow::Result<Geometry> {
+    let primary = window.primary_monitor()?;
+    let containing = match at {
+        Some((x, y)) => window.available_monitors()?.into_iter().find(|m| {
+            let (p, s) = (m.position(), m.size());
+            x >= p.x as f64 && y >= p.y as f64 && x < p.x as f64 + s.width as f64 && y < p.y as f64 + s.height as f64
+        }),
+        None => None,
+    };
+    let monitor = containing.or_else(|| primary.clone()).or(window.current_monitor()?).ok_or_else(|| anyhow::anyhow!("no monitor"))?;
+    let is_primary = primary.as_ref().is_none_or(|p| p.position() == monitor.position() && p.size() == monitor.size());
     let work = monitor.work_area();
     Ok(Geometry {
+        primary: is_primary,
         origin_x: work.position.x,
         origin_y: work.position.y,
         width: work.size.width,
@@ -285,30 +298,62 @@ fn apply_geometry(window: &tauri::WebviewWindow, g: &Geometry) -> anyhow::Result
 /// Places the overlay over the primary monitor's work area.
 fn place_overlay(app: &AppHandle) -> anyhow::Result<Geometry> {
     let window = app.get_webview_window("overlay").ok_or_else(|| anyhow::anyhow!("overlay window missing"))?;
-    let geometry = monitor_geometry(&window)?;
+    let geometry = monitor_geometry(&window, None)?;
     apply_geometry(&window, &geometry)?;
     Ok(geometry)
 }
 
-/// Follows display changes: rotating the Surface, docking, a new resolution or
-/// scale, or the taskbar moving. Checked every 2 s; the overlay and every
-/// coordinate conversion move to the new layout.
+/// Keeps the overlay on the right monitor, checked every 2 s:
+/// - display changes (rotating the Surface, docking, a new resolution or scale,
+///   the taskbar moving) re-place it at once;
+/// - with "follow me" on, it moves to the monitor of the window the user is
+///   working in once they've been there for two checks, but never mid-task;
+/// - with it off, or if its monitor is unplugged, it goes back to the primary one.
 fn spawn_display_watch(app: AppHandle, overlay: Arc<OverlayState>, host: Arc<TauriHost>) {
     let spawned = std::thread::Builder::new().name("waddle-display".into()).spawn(move || {
         let Some(window) = app.get_webview_window("overlay") else { return };
+        let mut pending: Option<(i32, i32)> = None;
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            let Ok(now) = monitor_geometry(&window) else { continue };
-            if now == overlay.geometry() {
+            let follow = app.try_state::<AppState>().is_some_and(|s| s.settings.read().unwrap().follow_monitors);
+            let current = overlay.geometry();
+            let here = ((current.screen_x as f64) + current.screen_w as f64 / 2.0, (current.screen_y as f64) + current.screen_h as f64 / 2.0);
+            let point = match (follow, host.is_busy()) {
+                (true, false) => host.focused_center_physical().or(Some(here)),
+                (true, true) => Some(here),
+                (false, _) => None,
+            };
+            let Ok(next) = monitor_geometry(&window, point) else { continue };
+            if next == current {
+                pending = None;
                 continue;
             }
-            log::info!("display changed: {}x{} at {}% → re-placing the overlay", now.width, now.height, (now.scale * 100.0).round());
-            if let Err(e) = apply_geometry(&window, &now) {
+            let moving = (next.screen_x, next.screen_y) != (current.screen_x, current.screen_y);
+            // Our monitor is still there: wait for a second sighting before hopping across.
+            let still_here = monitor_geometry(&window, Some(here)).is_ok_and(|g| (g.screen_x, g.screen_y) == (current.screen_x, current.screen_y));
+            if moving && still_here && follow && pending != Some((next.screen_x, next.screen_y)) {
+                pending = Some((next.screen_x, next.screen_y));
+                continue;
+            }
+            pending = None;
+            log::info!(
+                "{}: {}x{} at {}%",
+                if moving { "moving to another monitor" } else { "display changed" },
+                next.width,
+                next.height,
+                (next.scale * 100.0).round()
+            );
+            if let Err(e) = apply_geometry(&window, &next) {
                 log::warn!("re-placing the overlay: {e:#}");
                 continue;
             }
-            *overlay.geometry.write().unwrap() = now;
+            *overlay.geometry.write().unwrap() = next;
             host.refresh_platforms();
+            if moving {
+                // The duck flies in from the side the user came from.
+                let from = if next.screen_x >= current.screen_x { "left" } else { "right" };
+                host.emit_overlay("monitor:moved", serde_json::json!({ "from": from }));
+            }
         }
     });
     if let Err(e) = spawned {
@@ -386,7 +431,9 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         }
         Err(e) => log::warn!("couldn't register the Chrome link: {e:#}"),
     }
-    let host = TauriHost::new(handle.clone(), overlay.clone(), link);
+    let history = Arc::new(waddle_core::history::History::new(Some(data_dir.join("history.json"))));
+    let host = TauriHost::new(handle.clone(), overlay.clone(), link, history.clone());
+    host.speech.set_settings(settings.voice_out.clone());
     let ledger = Arc::new(Ledger::new(Some(data_dir.join("spending.json"))));
     ledger.set_budget(settings.monthly_budget);
     {
@@ -429,6 +476,11 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     );
 
     session.keep_memory_in(data_dir.join("memory.json"));
+    session.keep_history(history);
+    let mcp = waddle_core::mcp::McpHub::new(Some(data_dir.join("mcp_tools.json")));
+    session.keep_mcp(mcp.clone());
+    configure_mcp(&mcp, &settings, &secrets);
+    spawn_mcp_idle_stop(mcp.clone());
 
     app.manage(AppState {
         app: handle.clone(),
@@ -447,6 +499,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         google: RwLock::new(google),
         style,
         ledger,
+        mcp,
         google_signin: Mutex::default(),
         nudges: nudges.clone(),
         data_dir: data_dir.clone(),
@@ -471,8 +524,44 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         if let Err(e) = handle.global_shortcut().register(shortcuts::selection_key()) {
             log::warn!("could not register Ctrl+Alt+A: {e}");
         }
+        if let Err(e) = handle.global_shortcut().register(shortcuts::history_key()) {
+            log::warn!("could not register Ctrl+Alt+H: {e}");
+        }
     }
     Ok(())
+}
+
+/// The enabled MCP servers, with their secret environment values. Servers whose
+/// tools haven't been listed yet are started in the background to list them.
+fn configure_mcp(hub: &Arc<waddle_core::mcp::McpHub>, settings: &Settings, secrets: &Secrets) {
+    let env = secrets.mcp_env();
+    let launches: Vec<waddle_core::mcp::Launch> = settings
+        .mcp_servers
+        .iter()
+        .filter(|s| s.enabled)
+        .map(|s| waddle_core::mcp::Launch {
+            name: s.name.clone(),
+            command: s.command.clone(),
+            args: s.args.clone(),
+            env: s.env_keys.iter().filter_map(|k| Some((k.clone(), env.get(&s.name)?.get(k)?.clone()))).collect(),
+            trusted: s.trusted,
+        })
+        .collect();
+    let hub = hub.clone();
+    tauri::async_runtime::spawn(async move {
+        hub.configure(launches).await;
+        hub.refresh_unlisted().await;
+    });
+}
+
+/// Stops MCP servers nobody has used for a while.
+fn spawn_mcp_idle_stop(hub: Arc<waddle_core::mcp::McpHub>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            hub.stop_idle(waddle_core::mcp::IDLE_STOP).await;
+        }
+    });
 }
 
 /// Whether a second launch can find the first: always on Windows and macOS; on
@@ -532,6 +621,16 @@ pub fn run() {
             commands::open_settings,
             commands::open_workspace,
             commands::clear_memory,
+            commands::history_list,
+            commands::speech_voices,
+            commands::mcp_status,
+            commands::routines_list,
+            commands::routine_add,
+            commands::routine_pause,
+            commands::routine_delete,
+            commands::mcp_test,
+            commands::speech_test,
+            commands::open_link,
             commands::skills_list,
             commands::skill_forget,
             commands::facts_list,

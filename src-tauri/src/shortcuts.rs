@@ -2,6 +2,7 @@
 //! a task runs, so Waddle never steals Escape from other apps when idle.
 //! Ctrl+Alt+Space (any time) opens the chat and starts listening.
 //! Ctrl+Alt+A opens the chat with the text selected in the front app attached.
+//! Ctrl+Alt+H opens (or closes) the conversation history.
 
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutEvent, ShortcutState};
@@ -18,6 +19,10 @@ pub fn talk_key() -> Shortcut {
 
 pub fn selection_key() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyA)
+}
+
+pub fn history_key() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyH)
 }
 
 pub fn set_halt_hotkey(app: &AppHandle, on: bool) {
@@ -47,6 +52,9 @@ pub fn handle(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
     } else if *shortcut == talk_key() {
         crate::focus_overlay(app);
         let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": true }));
+    } else if *shortcut == history_key() {
+        crate::focus_overlay(app);
+        let _ = app.emit_to("overlay", "history:toggle", ());
     } else if *shortcut == selection_key() {
         let (app, host) = (app.clone(), state.host.clone());
         tauri::async_runtime::spawn(async move {

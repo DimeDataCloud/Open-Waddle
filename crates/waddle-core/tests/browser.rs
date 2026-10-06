@@ -42,6 +42,7 @@ fn fixture(script: Vec<waddle_core::llm::ChatResponse>) -> Fixture {
         selection: None,
         google: None,
         style: None,
+        mcp: None,
     };
     Fixture { _dir: dir, host, provider, deps }
 }

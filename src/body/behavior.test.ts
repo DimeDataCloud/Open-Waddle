@@ -37,6 +37,15 @@ describe("Duck", () => {
     expect(duck.body.y).toBe(640);
   });
 
+  it("enters a new monitor from the side the user came from", () => {
+    const duck = new Duck(size, 700, 100);
+    duck.enterFrom("right", { w: 1440, h: 900 });
+    expect(duck.body.x).toBe(1408);
+    expect(duck.facing).toBe(-1);
+    settle(duck, computeSegments([], opts), 2);
+    expect(duck.body.y).toBe(900);
+  });
+
   it("respects the trip time cap", () => {
     const segs = computeSegments([], opts);
     const duck = new Duck(size, 100, 900);

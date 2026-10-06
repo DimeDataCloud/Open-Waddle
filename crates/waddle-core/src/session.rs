@@ -115,6 +115,10 @@ pub struct Session {
     /// Some while the router runs; messages arriving meanwhile wait here.
     deciding: Mutex<Option<Deciding>>,
     answers: Mutex<Vec<Answer>>,
+    /// The conversation as the user saw it, for the history drawer.
+    history: Mutex<Option<Arc<crate::history::History>>>,
+    /// Tools from the user's MCP servers.
+    mcp: Mutex<Option<Arc<crate::mcp::McpHub>>>,
 }
 
 /// True when the whole utterance is a request to stop ("stop", "wait!", "please cancel", "stop stop").
@@ -152,6 +156,8 @@ impl Session {
             active: Mutex::default(),
             deciding: Mutex::default(),
             answers: Mutex::default(),
+            history: Mutex::default(),
+            mcp: Mutex::default(),
         })
     }
 
@@ -185,6 +191,16 @@ impl Session {
         if let Some(path) = self.memory_file.lock().unwrap().as_ref() {
             let _ = std::fs::remove_file(path);
         }
+    }
+
+    /// Offers the tools of the user's MCP servers to every task.
+    pub fn keep_mcp(&self, hub: Arc<crate::mcp::McpHub>) {
+        *self.mcp.lock().unwrap() = Some(hub);
+    }
+
+    /// Research answers are also kept in `history`, so their button works after a restart.
+    pub fn keep_history(&self, history: Arc<crate::history::History>) {
+        *self.history.lock().unwrap() = Some(history);
     }
 
     /// Keeps the conversation in `path` so it survives a restart. What's there
@@ -265,6 +281,7 @@ impl Session {
             selection: None,
             google: config.google,
             style: config.style,
+            mcp: self.mcp.lock().unwrap().clone(),
         }
     }
 
@@ -289,17 +306,26 @@ impl Session {
             // Mid-task, the selection becomes steering like anything else said.
             return self.user_message(goal);
         }
-        let task = self.spawn_task(goal, None, Some(selection.app));
+        let task = self.spawn_task(goal, None, Some(selection.app), None);
         *self.active.lock().unwrap() = Some(task);
     }
 
     /// Saves a research answer as Markdown in the workspace and opens it.
     pub fn open_answer(&self, id: &str) -> anyhow::Result<PathBuf> {
-        let (question, markdown, saved) = {
+        let kept = {
             let answers = self.answers.lock().unwrap();
-            let a = answers.iter().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("that answer is no longer available"))?;
-            (a.question.clone(), a.markdown.clone(), a.saved.clone())
+            answers.iter().find(|a| a.id == id).map(|a| (a.question.clone(), a.markdown.clone(), a.saved.clone()))
         };
+        let from_history = || {
+            let markdown = self.history.lock().unwrap().as_ref()?.answer(id)?;
+            // The question is the Markdown's first heading.
+            let question = markdown.lines().next().unwrap_or("answer").trim_start_matches('#').trim().to_string();
+            Some((question, markdown, None))
+        };
+        let (question, markdown, saved) = kept.or_else(from_history).ok_or_else(|| anyhow::anyhow!("that answer is no longer available"))?;
+        if !self.answers.lock().unwrap().iter().any(|a| a.id == id) {
+            self.answers.lock().unwrap().push(Answer { id: id.to_string(), question: question.clone(), markdown: markdown.clone(), saved: None });
+        }
         if let Some(path) = saved.filter(|p| p.exists()) {
             self.host.open_path(&path);
             return Ok(path);
@@ -369,7 +395,7 @@ impl Session {
                 return;
             }
             let held = Arc::new(Held::new(self.host.clone()));
-            let task = self.spawn_task(text.clone(), Some(held.clone()), None);
+            let task = self.spawn_task(text.clone(), Some(held.clone()), None, None);
             *d = Some(Deciding { queue: vec![], held: held.clone(), task });
             held
         };
@@ -522,9 +548,12 @@ Don't write a source list; it's added for you.{facts}",
         let id = format!("answer_{}", &new_task_id()[5..]);
         {
             let mut answers = self.answers.lock().unwrap();
-            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown, saved: None });
+            answers.push(Answer { id: id.clone(), question: text.to_string(), markdown: markdown.clone(), saved: None });
             let excess = answers.len().saturating_sub(KEEP_ANSWERS);
             answers.drain(..excess);
+        }
+        if let Some(history) = self.history.lock().unwrap().as_ref() {
+            history.attach_answer(&id, &markdown);
         }
         self.host.emit(AgentEvent::Offer { id, label: "Full answer".into() });
         let _ = self.audit.append(AuditEntry { task_id: "research".into(), kind: "research".into(), detail: Some(format!("{text} → {} sources", resp.citations.len())), ..Default::default() });
@@ -537,13 +566,25 @@ Don't write a source list; it's added for you.{facts}",
     }
 
     fn start_task(self: &Arc<Self>, goal: String) {
-        let task = self.spawn_task(goal, None, None);
+        let task = self.spawn_task(goal, None, None, None);
         *self.active.lock().unwrap() = Some(task);
     }
 
     /// Starts a task. With `held`, its events wait and it doesn't act until
     /// the router lets it go; the caller registers it as active then.
-    fn spawn_task(self: &Arc<Self>, goal: String, held: Option<Arc<Held>>, selection: Option<String>) -> Active {
+    /// Starts a routine as a task of its own: no screen, and every step that
+    /// changes something waits for a click. Returns false (and starts nothing)
+    /// while another task is running.
+    pub fn run_routine(self: &Arc<Self>, routine: &crate::routines::Routine) -> bool {
+        let mut active = self.active.lock().unwrap();
+        if active.is_some() || self.deciding.lock().unwrap().is_some() {
+            return false;
+        }
+        *active = Some(self.spawn_task(routine.goal.clone(), None, None, Some(routine.clone())));
+        true
+    }
+
+    fn spawn_task(self: &Arc<Self>, goal: String, held: Option<Arc<Held>>, selection: Option<String>, routine: Option<crate::routines::Routine>) -> Active {
         let config = self.config.read().unwrap().clone();
         let task_id = new_task_id();
         let cancel = CancellationToken::new();
@@ -565,6 +606,7 @@ Don't write a source list; it's added for you.{facts}",
 
             let timeout = Duration::from_secs(config.settings.task_timeout_secs);
             let traces = config.traces.clone().filter(|_| config.settings.record_traces);
+            let routines = config.reminders.clone();
             let mut deps = this.deps_on(config, host.clone());
             if selection.is_some() {
                 // The selection is in the message; the screen isn't needed to see it.
@@ -572,7 +614,17 @@ Don't write a source list; it's added for you.{facts}",
                 deps.selection = selection;
             }
             let memory = this.memory.lock().unwrap().clone();
-            let env = host.env();
+            let mut env = host.env();
+            if let Some(r) = &routine {
+                // The user may be working (or away): hands off the screen, and every change asks.
+                deps.settings.look_first = false;
+                deps.settings.tier2_mode = crate::config::Tier2Mode::Ask;
+                env.background = Some(r.schedule());
+                env.caps.gui = false;
+                env.caps.accessibility = false;
+                env.caps.browser = false;
+                env.caps.selection = false;
+            }
             let agent = Agent::new(&deps, task_id.clone(), cancel.clone(), status, &env);
             let result = match tokio::time::timeout(timeout, agent.run(&goal, &memory, &mut steer_rx)).await {
                 Ok(r) => r,
@@ -611,6 +663,14 @@ Don't write a source list; it's added for you.{facts}",
                 ..Default::default()
             });
             host.set_busy(false);
+            if let (Some(r), Some(store)) = (&routine, &routines) {
+                let how = match result.outcome {
+                    Outcome::Done => "Done".to_string(),
+                    Outcome::Halted => "Stopped".to_string(),
+                    other => format!("{other:?}: {}", result.message),
+                };
+                store.routines.record(&r.id, &how);
+            }
             let saved = traces.and_then(|store| {
                 let (messages, tools) = agent.transcript();
                 let mut meta = TraceMeta::new(&task_id, &goal, &deps.settings.model, result.outcome, &result.message, usage);

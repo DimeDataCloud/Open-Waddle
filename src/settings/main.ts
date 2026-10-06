@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { cleanName, importJson, joinCommand, parseEnv, splitCommand, type McpEnv, type McpServer } from "./mcp";
 
 interface Settings {
   provider: "openai_compat" | "ollama" | "mock";
@@ -13,6 +14,7 @@ interface Settings {
   command_timeout_secs: number;
   workspace_dir: string | null;
   wander: boolean;
+  follow_monitors: boolean;
   record_traces: boolean;
   no_training: boolean;
   google_client_id: string;
@@ -32,6 +34,8 @@ interface Settings {
   character: { id: string; color: string };
   ollama: { num_thread: number | null; keep_alive: string; num_ctx: number };
   voice: { backend: "system" | "whisper_api" | "off"; base_url: string; model: string; language: string | null };
+  mcp_servers: McpServer[];
+  voice_out: { enabled: boolean; replies: boolean; nudges: boolean; voice: string; rate: number; talk_mode: boolean };
 }
 
 interface SettingsView {
@@ -83,10 +87,197 @@ function syncVisibility(): void {
   $("model").required = !demo;
   $("ollama-opts").classList.toggle("hidden", preset !== "ollama");
   $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
+  $("vo-opts").classList.toggle("hidden", !$("vo_enabled").checked);
+  $("vo_rate_label").textContent = `${Number($("vo_rate").value).toFixed(1)}×`;
 }
+
+/** Makes sure the saved voice is in the list, even before (or without) the system's list. */
+function pickVoice(name: string): void {
+  const select = $<HTMLSelectElement>("vo_voice");
+  if (name && ![...select.options].some((o) => o.value === name)) select.add(new Option(name, name));
+  select.value = name;
+}
+
+async function loadVoices(): Promise<void> {
+  try {
+    const names = await invoke<string[]>("speech_voices");
+    const select = $<HTMLSelectElement>("vo_voice");
+    const keep = select.value;
+    for (const n of names) if (![...select.options].some((o) => o.value === n)) select.add(new Option(n, n));
+    select.value = keep;
+  } catch {
+    // The default voice still works.
+  }
+}
+
+// ---------- Tools (MCP) ----------
+
+interface McpStatus {
+  name: string;
+  tools: string[];
+  problem: string | null;
+  saved_env: string[];
+}
+
+/** The servers as edited here; saved with the rest of the form. */
+let mcpServers: McpServer[] = [];
+/** Values typed for servers' variables, saved to the keychain with the form. */
+let mcpEnv: McpEnv = {};
+let mcpStatus: McpStatus[] = [];
+
+function mcpLabel(s: McpServer): string {
+  return joinCommand([s.command, ...s.args]);
+}
+
+function renderMcp(): void {
+  const list = $("mcp-list");
+  if (!mcpServers.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "No servers yet.";
+    list.replaceChildren(li);
+    return;
+  }
+  list.replaceChildren(
+    ...mcpServers.map((srv, i) => {
+      const li = document.createElement("li");
+      const info = document.createElement("div");
+      info.className = "mcp-server";
+      const name = document.createElement("strong");
+      name.textContent = srv.name;
+      const cmd = document.createElement("code");
+      cmd.textContent = mcpLabel(srv);
+      info.append(name, cmd);
+      const st = mcpStatus.find((x) => x.name === srv.name);
+      const pending = Object.keys(mcpEnv[srv.name] ?? {});
+      if (srv.env_keys.length) {
+        const env = document.createElement("div");
+        env.className = "tools";
+        env.textContent = `Needs ${srv.env_keys
+          .map((k) => `${k}${st?.saved_env.includes(k) || pending.includes(k) ? " ✓" : " (no value yet)"}`)
+          .join(", ")}`;
+        info.append(env);
+      }
+      const line = document.createElement("div");
+      if (st?.problem) {
+        line.className = "problem";
+        line.textContent = `Couldn't start it: ${st.problem}`;
+      } else {
+        line.className = "tools";
+        line.textContent = st?.tools.length ? `${st.tools.length} tools: ${st.tools.slice(0, 8).join(", ")}${st.tools.length > 8 ? "…" : ""}` : "Tools are listed after Save.";
+      }
+      info.append(line);
+      const actions = document.createElement("div");
+      actions.className = "mcp-actions";
+      const toggle = (label: string, key: "enabled" | "trusted") => {
+        const l = document.createElement("label");
+        l.className = "check";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = srv[key];
+        box.onchange = () => (srv[key] = box.checked);
+        l.append(box, ` ${label}`);
+        return l;
+      };
+      const test = document.createElement("button");
+      test.type = "button";
+      test.className = "link";
+      test.textContent = "Test";
+      test.onclick = () => void testMcp(srv, mcpEnv[srv.name] ?? {}, line);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "link";
+      remove.textContent = "Remove";
+      remove.onclick = () => {
+        mcpServers.splice(i, 1);
+        delete mcpEnv[srv.name];
+        renderMcp();
+      };
+      actions.append(toggle("On", "enabled"), toggle("Trusted", "trusted"), test, remove);
+      li.append(info, actions);
+      return li;
+    }),
+  );
+}
+
+async function testMcp(srv: McpServer, env: Record<string, string>, out: HTMLElement): Promise<void> {
+  out.className = "tools";
+  out.textContent = "Starting it…";
+  try {
+    const tools = await invoke<string[]>("mcp_test", { server: srv, env });
+    out.textContent = tools.length ? `Works: ${tools.length} tools: ${tools.join(", ")}` : "It started but offers no tools.";
+  } catch (err) {
+    out.className = "problem";
+    out.textContent = `Couldn't start it: ${err}`;
+  }
+}
+
+async function loadMcp(): Promise<void> {
+  try {
+    mcpStatus = await invoke<McpStatus[]>("mcp_status");
+  } catch {
+    mcpStatus = [];
+  }
+  renderMcp();
+}
+
+function draftServer(): { server: McpServer; values: Record<string, string> } | null {
+  const words = splitCommand($("mcp_command").value);
+  const name = cleanName($("mcp_name").value) || cleanName(words[words.length - 1]?.split("/").pop() ?? "");
+  if (!words.length || !name) {
+    $("mcp-status").textContent = "Give it a name and a command.";
+    return null;
+  }
+  const env = parseEnv($<HTMLTextAreaElement>("mcp_env").value);
+  return {
+    server: { name, command: words[0], args: words.slice(1), env_keys: env.keys, trusted: $("mcp_trusted").checked, enabled: true },
+    values: env.values,
+  };
+}
+
+function addServers(servers: McpServer[], env: McpEnv): void {
+  for (const srv of servers) {
+    let name = srv.name;
+    for (let n = 2; mcpServers.some((x) => x.name.toLowerCase() === name.toLowerCase()); n++) name = `${srv.name.slice(0, 21)}-${n}`;
+    mcpServers.push({ ...srv, name });
+    if (env[srv.name]) mcpEnv[name] = { ...env[srv.name] };
+  }
+  renderMcp();
+}
+
+$("mcp-test").addEventListener("click", () => {
+  const d = draftServer();
+  if (d) void testMcp(d.server, d.values, $("mcp-status"));
+});
+
+$("mcp-add-btn").addEventListener("click", () => {
+  const d = draftServer();
+  if (!d) return;
+  addServers([d.server], { [d.server.name]: d.values });
+  for (const id of ["mcp_name", "mcp_command"]) $(id).value = "";
+  $<HTMLTextAreaElement>("mcp_env").value = "";
+  $("mcp_trusted").checked = false;
+  $("mcp-status").textContent = "Added. Press Save to start using it.";
+});
+
+$("mcp-import").addEventListener("click", () => {
+  try {
+    const { servers, env } = importJson($<HTMLTextAreaElement>("mcp_json").value);
+    addServers(servers, env);
+    $<HTMLTextAreaElement>("mcp_json").value = "";
+    $("mcp-status").textContent = `Imported ${servers.map((s) => s.name).join(", ")}. Press Save to start using ${servers.length > 1 ? "them" : "it"}.`;
+  } catch (err) {
+    $("mcp-status").textContent = `Couldn't read that: ${err instanceof Error ? err.message : err}`;
+  }
+});
 
 function fill(view: SettingsView): void {
   const s = (current = view.settings);
+  mcpServers = s.mcp_servers.map((x) => ({ ...x, args: [...x.args], env_keys: [...x.env_keys] }));
+  mcpEnv = {};
+  void loadMcp();
+  // Servers saved just now list their tools in the background.
+  if (mcpServers.length) for (const ms of [2500, 8000]) window.setTimeout(() => void loadMcp(), ms);
   $<HTMLSelectElement>("preset").value = presetFor(s);
   $("base_url").value = s.base_url;
   $("model").value = s.model;
@@ -107,12 +298,19 @@ function fill(view: SettingsView): void {
   $("voice_base_url").value = s.voice.base_url;
   $("voice_model").value = s.voice.model;
   $("voice_language").value = s.voice.language ?? "";
+  $("vo_enabled").checked = s.voice_out.enabled;
+  $("vo_replies").checked = s.voice_out.replies;
+  $("vo_nudges").checked = s.voice_out.nudges;
+  pickVoice(s.voice_out.voice);
+  $("vo_rate").value = String(s.voice_out.rate);
+  $("vo_talk").checked = s.voice_out.talk_mode;
   $("stt_key").value = "";
   $("stt_key").placeholder = view.has_stt_key ? "saved (leave blank to keep)" : "e.g. a free Groq key";
   $("self_source_dir").value = s.self_source_dir ?? "";
   $("max_delegation_depth").value = String(s.max_delegation_depth);
   $("color").value = s.character.color;
   $("wander").checked = s.wander;
+  $("follow_monitors").checked = s.follow_monitors;
   $("record_traces").checked = s.record_traces;
   $("no_training").checked = s.no_training;
   $("google_client_id").value = s.google_client_id;
@@ -159,6 +357,7 @@ function collect(): Settings {
     command_timeout_secs: num("command_timeout_secs", 60),
     workspace_dir: $("workspace_dir").value.trim() || null,
     wander: $("wander").checked,
+    follow_monitors: $("follow_monitors").checked,
     record_traces: $("record_traces").checked,
     no_training: $("no_training").checked,
     google_client_id: $("google_client_id").value.trim(),
@@ -185,6 +384,15 @@ function collect(): Settings {
       base_url: $("voice_base_url").value.trim(),
       model: $("voice_model").value.trim(),
       language: $("voice_language").value.trim() || null,
+    },
+    mcp_servers: mcpServers,
+    voice_out: {
+      enabled: $("vo_enabled").checked,
+      replies: $("vo_replies").checked,
+      nudges: $("vo_nudges").checked,
+      voice: $<HTMLSelectElement>("vo_voice").value,
+      rate: num("vo_rate", 1),
+      talk_mode: $("vo_talk").checked,
     },
   };
 }
@@ -272,6 +480,84 @@ async function loadSkills(): Promise<void> {
     }),
   );
 }
+
+interface RoutineView {
+  id: string;
+  goal: string;
+  schedule: string;
+  next: string;
+  paused: boolean;
+  last_result: string | null;
+}
+
+function renderRoutines(list: RoutineView[]): void {
+  const ul = $("routines");
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = "No routines yet.";
+    ul.replaceChildren(li);
+    return;
+  }
+  ul.replaceChildren(
+    ...list.map((r) => {
+      const li = document.createElement("li");
+      const text = document.createElement("div");
+      text.className = "mcp-server";
+      const goal = document.createElement("strong");
+      goal.textContent = r.goal;
+      const when = document.createElement("div");
+      when.className = "tools";
+      when.textContent = `${r.schedule}${r.paused ? " (paused)" : r.next === "finished" ? " (finished)" : `, next ${r.next}`}`;
+      text.append(goal, when);
+      if (r.last_result) {
+        const last = document.createElement("div");
+        last.className = r.last_result.startsWith("Done") ? "tools" : "problem";
+        last.textContent = `Last time: ${r.last_result}`;
+        text.append(last);
+      }
+      const actions = document.createElement("div");
+      actions.className = "mcp-actions";
+      const pause = document.createElement("button");
+      pause.type = "button";
+      pause.className = "link";
+      pause.textContent = r.paused ? "Resume" : "Pause";
+      pause.onclick = async () => renderRoutines(await invoke<RoutineView[]>("routine_pause", { id: r.id, paused: !r.paused }));
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "link";
+      del.textContent = "Delete";
+      del.onclick = async () => renderRoutines(await invoke<RoutineView[]>("routine_delete", { id: r.id }));
+      actions.append(pause, del);
+      li.append(text, actions);
+      return li;
+    }),
+  );
+}
+
+async function loadRoutines(): Promise<void> {
+  try {
+    renderRoutines(await invoke<RoutineView[]>("routines_list"));
+  } catch {
+    // Shown empty.
+  }
+}
+
+$("routine-add").addEventListener("click", async () => {
+  const status = $("routine-status");
+  const goal = $("routine_goal").value.trim();
+  if (!goal) {
+    status.textContent = "Say what the routine should do.";
+    return;
+  }
+  try {
+    renderRoutines(await invoke<RoutineView[]>("routine_add", { goal, time: $("routine_time").value, days: [$<HTMLSelectElement>("routine_days").value] }));
+    $("routine_goal").value = "";
+    status.textContent = "Added.";
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
 
 async function loadFacts(): Promise<void> {
   const facts = await invoke<{ id: string; text: string }[]>("facts_list");
@@ -455,6 +741,18 @@ $<HTMLSelectElement>("preset").addEventListener("change", () => {
   syncVisibility();
 });
 $<HTMLSelectElement>("voice_backend").addEventListener("change", syncVisibility);
+$("vo_enabled").addEventListener("change", syncVisibility);
+$("vo_rate").addEventListener("input", syncVisibility);
+$("vo-test").addEventListener("click", async () => {
+  const status = $("vo-status");
+  status.textContent = "";
+  try {
+    await invoke("speech_test", { voice: $<HTMLSelectElement>("vo_voice").value, rate: Number($("vo_rate").value) });
+    status.textContent = "Listen…";
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
 $("open-ws").addEventListener("click", () => void invoke("open_workspace"));
 $("verify").addEventListener("click", async () => {
   const r = await invoke<{ ok: boolean; entries: number; first_bad_id: number | null }>("audit_verify");
@@ -513,6 +811,7 @@ $<HTMLFormElement>("form").addEventListener("submit", async (e) => {
       settings: collect(),
       apiKey: apiKey ? apiKey : null,
       sttKey: sttKey ? sttKey : null,
+      mcpEnv,
     });
     fill(view);
     status.textContent = view.key_storage === "file" ? "Saved (keychain unavailable: key stored in a private file)." : "Saved.";
@@ -554,6 +853,8 @@ void loadFacts();
 void loadGoogle();
 void loadStyle();
 void loadBrowser();
+void loadVoices();
+void loadRoutines();
 setInterval(() => {
   void loadSpending();
   void loadBrowser();

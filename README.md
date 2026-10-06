@@ -37,10 +37,12 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - Replies stream into the bubble as they're generated.
   - Messages you send *during* a task get an instant quick reply, and they change the running task at its next step.
   - Saying or typing "stop", "wait" or "cancel" halts at once.
+  - **Conversation history:** 🕘 in the chat box (or **Ctrl+Alt+H**) opens the last 50 messages beside the duck, with formatting, working links and a copy button on each. Long replies show their start in the bubble and a **More…** button. ↑ in the chat box brings back what you said before; Shift+Enter starts a new line.
 - **Voice.**
   - Press **Ctrl+Alt+Space** (or the 🎙 button) to talk.
   - On Windows this uses the built-in voice typing: free and live.
   - A Whisper-compatible backend is also available: Groq's free tier, OpenAI, or a local whisper server.
+  - **Spoken replies** (Settings → Voice, off by default): Waddle reads its answers aloud in a Windows voice of your choice, and optionally nudges and reminders. Only answers are read, not every step. It keeps quiet in full screen and during meetings on your calendar, and stops when you open the chat box, talk or press Stop. **Talk mode** listens again for 6 seconds after answering something you said aloud, so you can have a back-and-forth without touching anything.
 - **Act.**
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
   - Open apps, click, type, press shortcuts, scroll and drag. Waddle walks to the target and stands beside it before each action.
@@ -73,6 +75,8 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - Clicks are real mouse clicks: the duck walks to the button and presses it, so pages behave just as they do for you.
   - "Search for…" goes straight to Google's results and reads them.
   - Without the extension, Waddle still drives Chrome from the screen.
+- **Routines.** "Every weekday at 8:45, summarise my unread email" or "every Friday at 4pm, list what I worked on this week": Waddle does it on its own at that time and shows the result. Routines work without the screen (email, calendar, files, connected tools), ask before changing anything, and are skipped (not run late) if Waddle wasn't running. Setting one up through chat needs your click; manage them in Settings → Nudges & routines.
+- **Use more apps through MCP.** Add the MCP servers of apps you use (GitHub, Notion, your notes, a database…) in Settings → Tools, by typing the command or pasting the JSON block their instructions show, and Waddle can use their tools. Untrusted servers wait for your click; what tools return is treated as untrusted text. See [docs/MCP.md](docs/MCP.md).
 - **Work on what you selected.** Select text anywhere and press **Ctrl+Alt+A**: the chat opens with the selection attached ("make this friendlier", "translate to French"). Waddle puts the result on your clipboard or, after a 2 s notice, replaces the selection.
 - **Remember what matters.** "Remember that I take my coffee black" or "my manager is Sam" go into a short list of facts (2 KB at most) that every later task can see. Waddle may save useful facts on its own, never from the screen, files or web pages. See and edit the list in Settings → Memory & privacy.
 - **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Each decision costs about $0.00002.
@@ -204,6 +208,7 @@ docs/ARCHITECTURE.md  How the blueprint maps to this MVP, what's deferred and wh
 docs/MODELS.md        Which model to use, with benchmark results (screen tasks and assistant tasks)
 docs/GOOGLE_SETUP.md  Connecting Gmail, Calendar, Contacts and Drive
 docs/TRAINING.md      How to make the model better: harness, data, fine-tuning
+docs/MCP.md           Adding MCP servers (other apps' tools) and how they're kept safe
 ```
 
 ## Development

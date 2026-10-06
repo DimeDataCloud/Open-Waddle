@@ -50,6 +50,7 @@ fn fixture(script: impl FnOnce(&std::path::Path) -> Vec<waddle_core::llm::ChatRe
         selection: None,
         google: None,
         style: None,
+        mcp: None,
     };
     Fixture { dir, host, provider, deps }
 }

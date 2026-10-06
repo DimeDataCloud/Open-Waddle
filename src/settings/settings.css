@@ -285,3 +285,54 @@ textarea {
   padding-left: 18px;
   font-size: 13px;
 }
+
+.mcp-server {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-server code {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.mcp-server .tools {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mcp-server .problem {
+  font-size: 12px;
+  color: #c0392b;
+}
+
+.mcp-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+#mcp-add {
+  margin-top: 8px;
+}
+
+.routine-add {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.routine-add .add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.routine-add .add-row input[type="time"] {
+  flex: 0 0 auto;
+}

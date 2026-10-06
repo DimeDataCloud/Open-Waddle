@@ -180,6 +180,20 @@ export class Duck {
     this.mode = "falling";
   }
 
+  /** Arrives on a new monitor: in from that side, high up, then down onto whatever is below. */
+  enterFrom(side: "left" | "right", screen: { w: number; h: number }): void {
+    if (this.mode === "dragged") return;
+    this.cancelMove();
+    const b = this.body;
+    b.x = side === "left" ? this.size.w / 2 : screen.w - this.size.w / 2;
+    b.y = Math.max(this.size.h, screen.h * 0.25);
+    b.vy = 0;
+    b.grounded = false;
+    b.supportId = null;
+    this.facing = side === "left" ? 1 : -1;
+    this.mode = "falling";
+  }
+
   release(): void {
     if (this.mode !== "dragged") return;
     this.mode = "falling";

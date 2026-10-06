@@ -108,6 +108,8 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>, shared: Shared) {
                     let to = now + chrono::Duration::minutes(10);
                     match g.calendar_events(&now.to_rfc3339(), &to.to_rfc3339(), "", 20).await {
                         Ok(events) => {
+                            // Spoken replies keep quiet until a meeting that's on now ends.
+                            host.speech.set_meeting_until(nudges::meeting_until(&events, now_ms));
                             let mut n = shared.lock().unwrap();
                             for e in nudges::announceable(&events) {
                                 let start = e.start.instant(&chrono::Local).timestamp_millis();
@@ -150,9 +152,12 @@ pub fn spawn(app: AppHandle, host: Arc<TauriHost>, shared: Shared) {
             };
             for d in due {
                 log::info!("nudge: {:?} {}", d.stage, match d.topic { Topic::Meeting { .. } => "meeting", Topic::Mail { .. } => "mail", Topic::Brief => "brief" });
-                host.emit_overlay("nudge", payload(&d, now_ms));
+                let p = payload(&d, now_ms);
+                host.emit_overlay("nudge", p.clone());
                 if d.stage == Stage::Full {
                     host.emit_overlay("nudge:chime", ());
+                    host.record(waddle_core::history::Who::Nudge, p["text"].as_str().unwrap_or_default());
+                    host.speech.announce(p["text"].as_str().unwrap_or_default(), seen.fullscreen);
                 }
             }
         }

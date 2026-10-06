@@ -6,6 +6,7 @@ use waddle_core::audit::{AuditRecord, VerifyReport};
 use waddle_core::config::{ProviderKind, VoiceBackend};
 use waddle_core::google::gmail::MailDraft;
 use waddle_core::google::{auth, OAuthClient, SCOPES};
+use waddle_core::history::Who;
 use waddle_core::Settings;
 
 use crate::bridge::Platform;
@@ -53,12 +54,157 @@ fn view(state: &AppState, key_storage: Option<&'static str>) -> SettingsView {
 }
 
 #[tauri::command]
-pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<bool>) {
+pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<bool>, voice: Option<bool>) {
+    // A new message cuts off whatever Waddle was saying.
+    state.host.speech.stop();
+    state.host.speech.set_by_voice(voice.unwrap_or(false));
     // Focus stays in the chat box for follow-ups; the bridge hands focus back
     // to the user's app right before Waddle types anything.
     match selection.filter(|s| *s).and_then(|_| state.host.take_selection()) {
-        Some(sel) => state.session.user_message_with_selection(text, sel),
-        None => state.session.user_message(text),
+        Some(sel) => {
+            let said = if text.trim().is_empty() { "Help with this".to_string() } else { text.clone() };
+            state.host.record(Who::You, &format!("{said} 📎"));
+            state.session.user_message_with_selection(text, sel)
+        }
+        None => {
+            state.host.record(Who::You, &text);
+            state.session.user_message(text)
+        }
+    }
+}
+
+/// The voices that can read replies aloud (empty: only the system's default).
+#[tauri::command]
+pub async fn speech_voices() -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(crate::speech::voices).await.map_err(err)
+}
+
+/// Reads a sample sentence in this voice and speed.
+#[tauri::command]
+pub fn speech_test(state: State<'_, AppState>, voice: String, rate: f64) -> CmdResult<()> {
+    if !crate::speech::available() {
+        return Err(if cfg!(windows) {
+            "Windows has no voices installed. Add one in Settings → Time & language → Speech.".into()
+        } else {
+            "No speech program found. Install speech-dispatcher or espeak-ng.".into()
+        });
+    }
+    state.host.speech.test(voice, rate);
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct RoutineView {
+    pub id: String,
+    pub goal: String,
+    pub schedule: String,
+    /// "Tue 6 Oct 08:45", "paused" or "finished".
+    pub next: String,
+    pub paused: bool,
+    pub last_result: Option<String>,
+}
+
+fn routine_views(state: &AppState) -> Vec<RoutineView> {
+    use chrono::TimeZone;
+    state
+        .reminders
+        .routines
+        .list()
+        .into_iter()
+        .map(|r| RoutineView {
+            next: match (r.paused, r.next_ms) {
+                (true, _) => "paused".into(),
+                (false, Some(ms)) => chrono::Local.timestamp_millis_opt(ms).single().map(|t| t.format("%a %-d %b %H:%M").to_string()).unwrap_or_default(),
+                (false, None) => "finished".into(),
+            },
+            schedule: r.schedule(),
+            id: r.id,
+            goal: r.goal,
+            paused: r.paused,
+            last_result: r.last_result,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn routines_list(state: State<'_, AppState>) -> Vec<RoutineView> {
+    routine_views(&state)
+}
+
+/// Adds a routine from Settings (the user's own, so no approval card).
+#[tauri::command]
+pub fn routine_add(state: State<'_, AppState>, goal: String, time: String, days: Vec<String>) -> CmdResult<Vec<RoutineView>> {
+    let mask = waddle_core::routines::parse_days(&serde_json::json!(days)).map_err(err)?;
+    state.reminders.routines.add(&goal, &time, mask, None, &chrono::Local::now()).map_err(err)?;
+    Ok(routine_views(&state))
+}
+
+#[tauri::command]
+pub fn routine_pause(state: State<'_, AppState>, id: String, paused: bool) -> CmdResult<Vec<RoutineView>> {
+    state.reminders.routines.set_paused(&id, paused, &chrono::Local::now()).map_err(err)?;
+    Ok(routine_views(&state))
+}
+
+#[tauri::command]
+pub fn routine_delete(state: State<'_, AppState>, id: String) -> CmdResult<Vec<RoutineView>> {
+    state.reminders.routines.delete(&id).map_err(err)?;
+    Ok(routine_views(&state))
+}
+
+#[derive(Serialize)]
+pub struct McpStatus {
+    pub name: String,
+    pub tools: Vec<String>,
+    pub problem: Option<String>,
+    /// Variables that have a saved value.
+    pub saved_env: Vec<String>,
+}
+
+/// Each MCP server's tools (as last listed) and any problem starting it.
+#[tauri::command]
+pub fn mcp_status(state: State<'_, AppState>) -> Vec<McpStatus> {
+    let settings = state.settings.read().unwrap().clone();
+    let env = state.secrets.mcp_env();
+    settings
+        .mcp_servers
+        .iter()
+        .map(|s| McpStatus {
+            name: s.name.clone(),
+            tools: state.mcp.tools_of(&s.name).into_iter().map(|t| t.name).collect(),
+            problem: state.mcp.problem(&s.name),
+            saved_env: env.get(&s.name).map(|m| m.keys().cloned().collect()).unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// Starts a server once and lists its tools (Settings → Test). Values typed but
+/// not saved yet are used along with saved ones.
+#[tauri::command]
+pub async fn mcp_test(state: State<'_, AppState>, server: waddle_core::config::McpServerSettings, env: std::collections::BTreeMap<String, String>) -> CmdResult<Vec<String>> {
+    waddle_core::config::check_mcp_servers(std::slice::from_ref(&server)).map_err(err)?;
+    let saved = state.secrets.mcp_env().remove(&server.name).unwrap_or_default();
+    let values: Vec<(String, String)> = server
+        .env_keys
+        .iter()
+        .filter_map(|k| env.get(k).filter(|v| !v.is_empty()).or_else(|| saved.get(k)).map(|v| (k.clone(), v.clone())))
+        .collect();
+    let launch = waddle_core::mcp::Launch { name: server.name, command: server.command, args: server.args, env: values, trusted: server.trusted };
+    let tools = waddle_core::mcp::probe(&launch).await.map_err(|e| format!("{e:#}"))?;
+    Ok(tools.into_iter().map(|t| if t.read_only { format!("{} (reads only)", t.name) } else { t.name }).collect())
+}
+
+/// The conversation so far, for the history drawer.
+#[tauri::command]
+pub fn history_list(state: State<'_, AppState>) -> Vec<waddle_core::history::Entry> {
+    state.host.history.list()
+}
+
+/// A link in a reply. Only web links open; anything else in a reply is just text.
+#[tauri::command]
+pub fn open_link(url: String) -> CmdResult<()> {
+    match tauri::Url::parse(url.trim()) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") => crate::desktop::open_url(u.as_str()).map_err(err),
+        _ => Err("Only web links (http or https) open from a reply.".into()),
     }
 }
 
@@ -91,11 +237,14 @@ pub async fn fact_forget(state: State<'_, AppState>, id: String) -> CmdResult<St
 
 #[tauri::command]
 pub fn warm_up(state: State<'_, AppState>) {
+    // The chat box opened: the user is about to speak, so Waddle stops.
+    state.host.speech.stop();
     state.session.warm();
 }
 
 #[tauri::command]
 pub fn halt(state: State<'_, AppState>) -> bool {
+    state.host.speech.stop();
     state.session.halt()
 }
 
@@ -233,6 +382,7 @@ pub async fn nudge_action(state: State<'_, AppState>, id: String, action: String
             let (provider, model) = state.session.fast();
             let decider = state.decider.read().unwrap().clone();
             let text = nudges::compose_brief(&google, provider.as_ref(), &model, decider.as_deref(), chrono::Local::now()).await.map_err(|e| format!("{e:#}"))?;
+            state.host.record(Who::Waddle, &text);
             Ok(Some(text))
         }
         _ => Err(format!("`{action}` doesn't apply to that nudge")),
@@ -325,13 +475,35 @@ pub async fn save_settings(
     settings: Settings,
     api_key: Option<String>,
     stt_key: Option<String>,
+    mcp_env: Option<crate::secrets::McpEnv>,
 ) -> CmdResult<SettingsView> {
+    waddle_core::config::check_mcp_servers(&settings.mcp_servers).map_err(err)?;
     let mut storage = None;
     if let Some(k) = api_key {
         storage = Some(state.secrets.set(Secret::LlmKey, &k).map_err(err)?);
     }
     if let Some(k) = stt_key {
         state.secrets.set(Secret::SttKey, &k).map_err(err)?;
+    }
+    // New MCP values replace old ones; values of servers or variables that are gone are dropped.
+    let mut env = state.secrets.mcp_env();
+    for (server, values) in mcp_env.unwrap_or_default() {
+        let slot = env.entry(server).or_default();
+        for (k, v) in values {
+            if !v.is_empty() {
+                slot.insert(k, v);
+            }
+        }
+    }
+    env.retain(|server, values| match settings.mcp_servers.iter().find(|s| &s.name == server) {
+        Some(s) => {
+            values.retain(|k, _| s.env_keys.contains(k));
+            !values.is_empty()
+        }
+        None => false,
+    });
+    if env != state.secrets.mcp_env() {
+        state.secrets.set_mcp_env(&env).map_err(err)?;
     }
     state.apply_settings(settings).map_err(err)?;
     let s = state.settings.read().unwrap().clone();
@@ -366,6 +538,8 @@ pub async fn open_workspace(state: State<'_, AppState>) -> CmdResult<()> {
 #[tauri::command]
 pub fn clear_memory(state: State<'_, AppState>) {
     state.session.clear_memory();
+    state.host.history.clear();
+    state.host.emit_overlay("history:changed", ());
 }
 
 #[derive(Serialize)]
@@ -387,6 +561,7 @@ pub async fn skill_forget(state: State<'_, AppState>, name: String) -> CmdResult
 /// Starts listening. Returns "system" (OS dictation types into the focused chat box) or "recording".
 #[tauri::command]
 pub async fn voice_start(state: State<'_, AppState>) -> CmdResult<&'static str> {
+    state.host.speech.stop();
     let backend = state.settings.read().unwrap().voice.backend;
     match backend {
         VoiceBackend::Off => Err("Voice input is off. Turn it on in Settings.".into()),

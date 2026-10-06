@@ -38,7 +38,8 @@ body {
 
 .bubble,
 .card,
-.chat {
+.chat,
+.drawer {
   position: fixed;
   left: 0;
   top: 0;
@@ -142,6 +143,7 @@ body {
 .chat {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
   gap: 4px;
   padding: 4px;
   width: 300px;
@@ -179,14 +181,21 @@ body {
   background: transparent;
 }
 
-.chat input {
+.chat textarea {
   flex: 1;
+  min-width: 0;
   border: none;
   outline: none;
+  resize: none;
   font: inherit;
   font-size: 14px;
+  line-height: 1.35;
   background: transparent;
   padding: 4px 6px;
+  height: 27px;
+  max-height: 120px;
+  overflow-y: auto;
+  box-sizing: border-box;
   user-select: text;
 }
 
@@ -195,8 +204,17 @@ body {
   background: #f1e6c8;
   border-radius: 6px;
   width: 30px;
+  height: 27px;
   cursor: pointer;
   font-size: 14px;
+}
+
+.chat button:focus-visible,
+.drawer button:focus-visible,
+.drawer .entries:focus-visible,
+.drawer a:focus-visible {
+  outline: 2px solid var(--quick);
+  outline-offset: 1px;
 }
 
 .chat button.live {
@@ -310,6 +328,167 @@ body {
 
 .line-reminder {
   font-weight: 700;
+}
+
+/* Long replies: the newest words while streaming, then the start and "More…" */
+.line-planner,
+.line-quick {
+  max-height: 8.1em;
+  overflow: hidden;
+}
+
+.more-row {
+  margin-top: 2px !important;
+}
+
+.bubble .rate.more {
+  margin-left: 0;
+}
+
+/* The history drawer */
+.drawer {
+  outline: none;
+  width: 340px;
+  max-height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1.5px solid #e8dcbc;
+}
+
+.drawer header strong {
+  flex: 1;
+}
+
+.drawer header button,
+.drawer .copy,
+.drawer .offer {
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.drawer header .clear.armed {
+  background: var(--tier3);
+  color: #fff;
+}
+
+.drawer .entries {
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+  outline: none;
+  user-select: text;
+}
+
+.drawer .empty {
+  color: var(--muted);
+  margin: 8px 0;
+}
+
+.drawer .entry {
+  margin-top: 8px;
+}
+
+.drawer .meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.drawer .meta .who {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.drawer .meta .copy {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0;
+}
+
+.drawer .entry:hover .copy,
+.drawer .copy:focus-visible {
+  opacity: 1;
+}
+
+.drawer .body {
+  word-break: break-word;
+}
+
+.drawer .who-you .body {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.drawer .who-problem .body {
+  color: var(--error);
+}
+
+.drawer .who-nudge .body,
+.drawer .who-reminder .body {
+  font-weight: 600;
+}
+
+.drawer .body p,
+.drawer .body ul,
+.drawer .body ol,
+.drawer .body pre,
+.drawer .body blockquote {
+  margin: 2px 0 6px;
+}
+
+.drawer .body ul,
+.drawer .body ol {
+  padding-left: 20px;
+}
+
+.drawer .body code {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 12px;
+  background: #f1e6c8;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.drawer .body pre {
+  background: #f1e6c8;
+  border-radius: 6px;
+  padding: 6px;
+  overflow-x: auto;
+}
+
+.drawer .body pre code {
+  padding: 0;
+  background: none;
+}
+
+.drawer .body blockquote {
+  border-left: 3px solid #e8dcbc;
+  padding-left: 8px;
+  color: var(--muted);
+}
+
+.drawer .body a {
+  color: var(--quick);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.drawer .offer {
+  margin-top: 2px;
 }
 
 /* "Show me where" ring (never takes clicks) */

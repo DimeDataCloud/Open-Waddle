@@ -222,6 +222,19 @@ pub fn announceable(events: &[Event]) -> Vec<&Event> {
     events.iter().filter(|e| !e.cancelled && e.my_response() != Some("declined") && matches!(e.start, When::At(_))).collect()
 }
 
+/// When the meeting the user is in right now ends (ms), or 0 when they're in none.
+/// All-day, cancelled, declined and "free" events don't count.
+pub fn meeting_until(events: &[Event], now_ms: i64) -> i64 {
+    announceable(events)
+        .into_iter()
+        .filter(|e| !e.transparent && matches!(e.end, When::At(_)))
+        .map(|e| (e.start.instant(&chrono::Utc).timestamp_millis(), e.end.instant(&chrono::Utc).timestamp_millis()))
+        .filter(|(start, end)| *start <= now_ms && now_ms < *end)
+        .map(|(_, end)| end)
+        .max()
+        .unwrap_or(0)
+}
+
 /// Composes the morning brief: today's meetings and important unread email, in
 /// one fast-model call (none at all on an empty day).
 pub async fn compose_brief(
@@ -280,6 +293,27 @@ mod tests {
     use chrono::FixedOffset;
 
     const MIN: i64 = 60_000;
+
+    #[test]
+    fn knows_when_a_meeting_is_on() {
+        let ev = |id: &str, start: &str, end: &str, extra: serde_json::Value| {
+            let mut v = serde_json::json!({ "id": id, "start": { "dateTime": start }, "end": { "dateTime": end } });
+            v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            Event::parse(&v).unwrap()
+        };
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-05T10:15:00Z").unwrap().timestamp_millis();
+        let events = vec![
+            ev("on", "2026-10-05T10:00:00Z", "2026-10-05T10:30:00Z", serde_json::json!({})),
+            ev("long", "2026-10-05T09:00:00Z", "2026-10-05T11:00:00Z", serde_json::json!({ "transparency": "transparent" })),
+            ev("later", "2026-10-05T10:20:00Z", "2026-10-05T10:50:00Z", serde_json::json!({})),
+            ev("gone", "2026-10-05T10:00:00Z", "2026-10-05T12:00:00Z", serde_json::json!({ "status": "cancelled" })),
+        ];
+        let half_past = chrono::DateTime::parse_from_rfc3339("2026-10-05T10:30:00Z").unwrap().timestamp_millis();
+        assert_eq!(meeting_until(&events, now), half_past);
+        assert_eq!(meeting_until(&events[1..], now), 0, "free, later and cancelled events don't count");
+        let all_day = Event::parse(&serde_json::json!({ "id": "d", "start": { "date": "2026-10-05" }, "end": { "date": "2026-10-06" } })).unwrap();
+        assert_eq!(meeting_until(&[all_day], now), 0);
+    }
 
     fn meeting(state: &mut NudgeState, start: i64, now: i64) -> bool {
         state.add_meeting("e1", "Standup", start, Some("https://meet.google.com/x".into()), now)

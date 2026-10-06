@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{AgentEvent, ApprovalRequest, Decision, EnvInfo, Host};
+use waddle_core::history::{History, Who};
 use waddle_core::session::Selection;
 use waddle_core::google::gmail::MailDraft;
 
@@ -44,6 +45,10 @@ pub struct TauriHost {
     overlay: Arc<OverlayState>,
     /// Waddle's Chrome extension, when it's connected.
     pub browser: Arc<crate::browser::BrowserLink>,
+    /// The conversation as the user saw it (the history drawer).
+    pub history: Arc<History>,
+    /// Reads replies aloud when that's on.
+    pub speech: Arc<crate::speech::Speech>,
     approvals: Mutex<HashMap<String, oneshot::Sender<Answer>>>,
     /// Undo buttons showing after Send, by approval id.
     undos: Mutex<HashMap<String, oneshot::Sender<()>>>,
@@ -65,11 +70,13 @@ fn now_ms() -> u64 {
 }
 
 impl TauriHost {
-    pub fn new(app: AppHandle, overlay: Arc<OverlayState>, browser: Arc<crate::browser::BrowserLink>) -> Arc<Self> {
+    pub fn new(app: AppHandle, overlay: Arc<OverlayState>, browser: Arc<crate::browser::BrowserLink>, history: Arc<History>) -> Arc<Self> {
         Arc::new(Self {
             app,
             overlay,
             browser,
+            history,
+            speech: crate::speech::Speech::new(),
             approvals: Mutex::default(),
             undos: Mutex::default(),
             moves: Mutex::default(),
@@ -132,6 +139,13 @@ impl TauriHost {
         let _ = self.app.emit_to(OVERLAY, event, payload);
     }
 
+    /// Adds to the conversation history and tells an open drawer.
+    pub fn record(&self, who: Who, text: &str) {
+        if self.history.add(who, text) {
+            self.emit_overlay("history:changed", ());
+        }
+    }
+
     /// Window bounds → logical screen coordinates (relative to the primary monitor).
     fn to_logical(&self, w: &DesktopWindow) -> (f64, f64, f64, f64) {
         let g = self.geometry();
@@ -158,6 +172,14 @@ impl TauriHost {
         let platforms = self.to_platforms(&list);
         *self.windows.write().unwrap() = list;
         self.emit_overlay("desktop:windows", platforms);
+    }
+
+    /// The middle of the window the user is working in, in physical desktop pixels.
+    pub fn focused_center_physical(&self) -> Option<(f64, f64)> {
+        let list = self.windows.read().unwrap();
+        let w = list.iter().find(|w| w.focused)?;
+        let scale = if desktop::BOUNDS_ARE_LOGICAL { self.geometry().scale } else { 1.0 };
+        Some(((w.x as f64 + w.w as f64 / 2.0) * scale, (w.y as f64 + w.h as f64 / 2.0) * scale))
     }
 
     /// Sends the platforms again after the display changed (same windows, new conversion).
@@ -280,7 +302,18 @@ impl TauriHost {
 #[async_trait]
 impl Host for TauriHost {
     fn emit(&self, event: AgentEvent) {
+        let recorded = self.history.observe(&event);
+        let app = self.app.clone();
+        // Talk mode: after answering something said aloud, listen again.
+        let listen_again = move || {
+            crate::focus_overlay(&app);
+            let _ = app.emit_to(OVERLAY, "talk:listen", ());
+        };
+        self.speech.observe(&event, || self.front_window().is_some_and(|w| w.2), listen_again);
         self.emit_overlay("agent", event);
+        if recorded {
+            self.emit_overlay("history:changed", ());
+        }
     }
 
     fn env(&self) -> EnvInfo {
@@ -293,15 +326,18 @@ impl Host for TauriHost {
             "Linux"
         };
         let caps = Capabilities { gui: true, accessibility: cfg!(windows), browser: self.browser.connected(), ..Default::default() };
-        EnvInfo { os: os.into(), screen_w: w, screen_h: h, caps }
+        EnvInfo { os: os.into(), screen_w: w, screen_h: h, caps, background: None }
     }
 
     async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let mut r = self.browser.request(cmd, args).await?;
         if cmd == "locate" {
             anyhow::ensure!(!r.is_null(), "that element isn't on the page any more");
-            // Page coordinates → logical screen pixels, for a real click.
-            if let Some((x, y)) = waddle_core::tools::browser::screen_point(&r, self.geometry().scale) {
+            // Page coordinates → logical screen pixels, for a real click. Chrome's screen
+            // coordinates are only reliable on the primary monitor; elsewhere the click
+            // happens inside the page instead.
+            let g = self.geometry();
+            if let Some((x, y)) = waddle_core::tools::browser::screen_point(&r, g.scale).filter(|_| g.primary) {
                 r["screen_x"] = json!(x);
                 r["screen_y"] = json!(y);
             }
@@ -372,7 +408,8 @@ impl Host for TauriHost {
             GuiAction::LookAtScreen => {
                 self.act("look");
                 let (w, h) = g.screen_logical();
-                let (image, width, height) = Self::blocking(move || actuate::screenshot(w.round() as u32, h.round() as u32)).await?;
+                let origin = (g.screen_x, g.screen_y);
+                let (image, width, height) = Self::blocking(move || actuate::screenshot(w.round() as u32, h.round() as u32, origin)).await?;
                 Ok(GuiResult::Screenshot { image, width, height })
             }
             GuiAction::FindElements { window } => {
@@ -547,6 +584,31 @@ impl Host for TauriHost {
     }
 }
 
+/// Starts a routine that's due when Waddle is free, and says which ones were missed.
+fn run_due_routines(host: &Arc<TauriHost>, store: &waddle_core::reminders::ReminderStore) {
+    use waddle_core::routines::Due;
+    let Some(state) = host.app.try_state::<crate::AppState>() else { return };
+    let free = !state.session.is_busy();
+    for due in store.routines.take_due(&chrono::Local::now(), free) {
+        match due {
+            Due::Run(r) => {
+                log::info!("routine {} due: starting", r.id);
+                let text = format!("🔁 Routine ({}): {}", r.schedule(), r.goal);
+                host.emit(AgentEvent::Notice { text: text.clone() });
+                host.record(Who::Nudge, &text);
+                if !state.session.run_routine(&r) {
+                    store.routines.record(&r.id, "Skipped: something else was running");
+                }
+            }
+            Due::Missed(r) => {
+                let text = format!("I missed your routine \"{}\" ({}) because I wasn't running. It'll run next time.", r.goal, r.schedule());
+                host.emit(AgentEvent::Notice { text: text.clone() });
+                host.record(Who::Nudge, &text);
+            }
+        }
+    }
+}
+
 /// Pops up reminders when they're due, including ones that came due while Waddle was closed.
 pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::reminders::ReminderStore>) {
     std::thread::Builder::new()
@@ -559,7 +621,10 @@ pub fn spawn_reminder_clock(host: Arc<TauriHost>, store: Arc<waddle_core::remind
                 for r in store.take_due(now) {
                     let late = now - r.due_ms > 120_000;
                     host.emit_overlay("reminder", json!({ "text": r.text, "late": late }));
+                    host.record(Who::Reminder, &r.text);
+                    host.speech.announce(&format!("Reminder: {}", r.text), host.front_window().is_some_and(|w| w.2));
                 }
+                run_due_routines(&host, &store);
                 std::thread::sleep(Duration::from_secs(5));
             }
         })

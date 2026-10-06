@@ -15,6 +15,8 @@ pub enum Secret {
     GoogleRefreshToken,
     /// The Desktop OAuth client's secret from the user's Google Cloud project.
     GoogleClient,
+    /// MCP servers' environment values (API keys), all in one entry as base64 JSON.
+    McpEnv,
 }
 
 impl Secret {
@@ -24,13 +26,14 @@ impl Secret {
             Secret::SttKey => "stt_api_key",
             Secret::GoogleRefreshToken => "google_refresh_token",
             Secret::GoogleClient => "google_client_secret",
+            Secret::McpEnv => "mcp_env",
         }
     }
     fn env_vars(self) -> &'static [&'static str] {
         match self {
             Secret::LlmKey => &["WADDLE_API_KEY", "OPENROUTER_API_KEY"],
             Secret::SttKey => &["WADDLE_STT_API_KEY", "GROQ_API_KEY"],
-            Secret::GoogleRefreshToken | Secret::GoogleClient => &[],
+            Secret::GoogleRefreshToken | Secret::GoogleClient | Secret::McpEnv => &[],
         }
     }
 }
@@ -40,6 +43,8 @@ impl Secret {
 fn clean(v: &str) -> String {
     v.chars().filter(|c| c.is_ascii_graphic()).collect()
 }
+
+pub type McpEnv = std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>;
 
 pub struct Secrets {
     fallback_file: PathBuf,
@@ -90,6 +95,22 @@ impl Secrets {
                 Ok("file")
             }
         }
+    }
+
+    /// MCP servers' environment values: server name → variable → value.
+    pub fn mcp_env(&self) -> McpEnv {
+        use base64::Engine;
+        self.get(Secret::McpEnv)
+            .and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
+            .and_then(|json| serde_json::from_slice(&json).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn set_mcp_env(&self, env: &McpEnv) -> anyhow::Result<()> {
+        use base64::Engine;
+        let value = if env.values().all(|m| m.is_empty()) { String::new() } else { base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(env)?) };
+        self.set(Secret::McpEnv, &value)?;
+        Ok(())
     }
 
     /// Self-test: whether the OS keychain can store, read and delete an entry.

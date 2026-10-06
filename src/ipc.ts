@@ -77,6 +77,16 @@ export interface Bootstrap {
   notices: string[];
 }
 
+/** One line of the conversation, as kept for the history drawer. */
+export interface HistoryEntry {
+  n: number;
+  at_ms: number;
+  who: "you" | "waddle" | "nudge" | "reminder" | "problem";
+  text: string;
+  /** A research answer's id, for its "Full answer" button. */
+  answer?: string;
+}
+
 export interface HitRect {
   x: number;
   y: number;
@@ -86,9 +96,12 @@ export interface HitRect {
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
-  sendMessage: (text: string, selection = false) => invoke<void>("send_message", { text, selection }),
+  sendMessage: (text: string, selection = false, voice = false) => invoke<void>("send_message", { text, selection, voice }),
   dropSelection: () => invoke<void>("drop_selection"),
   openAnswer: (id: string) => invoke<string>("open_answer", { id }),
+  historyList: () => invoke<HistoryEntry[]>("history_list"),
+  clearMemory: () => invoke<void>("clear_memory"),
+  openLink: (url: string) => invoke<void>("open_link", { url }),
   warmUp: () => invoke<void>("warm_up"),
   halt: () => invoke<boolean>("halt"),
   answerApproval: (id: string, approved: boolean, draft: MailDraft | null = null) => invoke<void>("answer_approval", { id, approved, draft }),
@@ -121,6 +134,10 @@ export interface Events {
   "nudge:chime": null;
   "undo:done": { id: string; undone: boolean };
   "power:battery": boolean;
+  "monitor:moved": { from: "left" | "right" };
+  "history:changed": null;
+  "history:toggle": null;
+  "talk:listen": null;
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {

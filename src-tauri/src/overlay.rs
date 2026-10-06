@@ -29,6 +29,8 @@ impl Rect {
 /// Where the overlay sits, in physical pixels, and the display scale.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Geometry {
+    /// Whether this is the primary monitor (Chrome's coordinates are reliable there).
+    pub primary: bool,
     pub origin_x: i32,
     pub origin_y: i32,
     pub width: u32,
@@ -144,7 +146,7 @@ mod tests {
     use super::*;
 
     fn geo() -> Geometry {
-        Geometry { origin_x: 0, origin_y: 0, width: 2880, height: 1800, scale: 2.0, screen_w: 2880, screen_h: 1920, screen_x: 0, screen_y: 0 }
+        Geometry { primary: true, origin_x: 0, origin_y: 0, width: 2880, height: 1800, scale: 2.0, screen_w: 2880, screen_h: 1920, screen_x: 0, screen_y: 0 }
     }
 
     #[test]

@@ -37,6 +37,8 @@ pub struct Capabilities {
     pub google: bool,
     /// Chrome is reachable through Waddle's extension.
     pub browser: bool,
+    /// Routines can be set up (not inside a routine).
+    pub routines: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -310,6 +312,22 @@ pub fn specs(caps: Capabilities, coords: &Coords) -> Vec<ToolSpec> {
             &["action"],
         ));
     }
+    if caps.routines {
+        v.push(spec(
+            "routine",
+            "Set up, list, pause, resume or delete routines: tasks you run on your own on a schedule, e.g. every weekday at 08:45 summarise my unread email. \
+A routine runs without the screen (email, calendar, files, connected tools) and asks the user before changing anything. Setting one up needs the user's OK.",
+            json!({
+                "action": { "type": "string", "enum": ["add", "list", "pause", "resume", "delete"] },
+                "goal": { "type": "string", "description": "What to do each time, written as the user's request" },
+                "time": { "type": "string", "description": "Local time HH:MM (24h)" },
+                "days": { "type": "array", "items": { "type": "string" }, "description": "Day names (mon … sun), or [\"weekdays\"], [\"weekends\"], [\"daily\"]. Leave out for a one-off." },
+                "date": { "type": "string", "description": "For a one-off on a later day: YYYY-MM-DD" },
+                "id": { "type": "string", "description": "For pause, resume and delete" }
+            }),
+            &["action"],
+        ));
+    }
     // Paths are relative to the workspace (the system prompt says so); only self/ needs explaining.
     let path = if caps.self_edit {
         json!({ "type": "string", "description": "Relative to the workspace, or start with self/ for your own source code" })
@@ -497,6 +515,11 @@ pub fn format_gui_result(result: GuiResult, coords: &Coords) -> ToolOutcome {
                 .iter()
                 .enumerate()
                 .map(|(i, w)| {
+                    // Windows on another monitor aren't on this screenshot and can't be clicked from here.
+                    let on_screen = w.x < coords.screen_w && w.x + w.w > 0.0 && w.y < coords.screen_h && w.y + w.h > 0.0;
+                    if !on_screen {
+                        return format!("{}. \"{}\" [{}] on another screen{}", i + 1, w.title, w.app, if w.focused { " (focused)" } else { "" });
+                    }
                     let (x, y) = coords.from_screen(w.x, w.y);
                     let (x2, y2) = coords.from_screen(w.x + w.w, w.y + w.h);
                     format!(
@@ -567,6 +590,23 @@ pub fn summarize(call: &ToolCall) -> String {
             "list" => "Check your reminders".into(),
             "cancel" => "Cancel a reminder".into(),
             _ => format!("Remind you: {}", short(s("text"))),
+        },
+        "routine" => match s("action").as_str() {
+            "list" => "Check your routines".into(),
+            "pause" => "Pause a routine".into(),
+            "resume" => "Resume a routine".into(),
+            "delete" => "Delete a routine".into(),
+            _ => {
+                let days = match a.get("days") {
+                    Some(d) if !d.is_null() => crate::routines::parse_days(d).ok().filter(|m| *m != 0),
+                    _ => None,
+                };
+                let when = match days {
+                    Some(mask) => crate::routines::Routine { days: mask, time: s("time"), ..crate::routines::Routine::blank() }.schedule(),
+                    None => format!("once at {}{}", s("time"), if s("date").is_empty() { String::new() } else { format!(" on {}", s("date")) }),
+                };
+                format!("Set up a routine ({when}): {}", short(s("goal")))
+            }
         },
         "run_command" => format!("Run `{}`", short(s("command"))),
         "read_file" => format!("Read {}", s("path")),
@@ -651,7 +691,7 @@ mod tests {
         let names = |caps| specs(caps, &c).into_iter().map(|s| s.name).collect::<Vec<_>>();
         let headless = names(Capabilities::default());
         assert!(headless.contains(&"run_command".to_string()) && !headless.contains(&"click".to_string()));
-        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true, google: true, browser: true });
+        let full = names(Capabilities { gui: true, accessibility: true, self_edit: true, delegation: true, self_improve: true, reminders: true, memory: true, selection: true, google: true, browser: true, routines: true });
         assert!(full.contains(&"browser_click".to_string()) && !headless.contains(&"browser_read".to_string()));
         assert!(full.contains(&"mail_send".to_string()) && full.contains(&"calendar_free".to_string()));
         assert!(!headless.contains(&"mail_search".to_string()), "Google tools only when connected");
@@ -676,5 +716,15 @@ mod tests {
         );
         assert_eq!(out.untrusted_source, Some("screen_elements"));
         assert!(out.text.contains("[3] button \"Save\" at (500,500)"), "{}", out.text);
+    }
+
+    #[test]
+    fn windows_on_another_screen_are_named_without_coordinates() {
+        let c = coords(CoordMode::Pixels);
+        let win = |title: &str, x: f64| WindowInfo { title: title.into(), app: "app".into(), x, y: 10.0, w: 400.0, h: 300.0, focused: false };
+        let out = format_gui_result(GuiResult::Windows(vec![win("Here", 100.0), win("Over there", c.screen_w + 50.0), win("Left", -900.0)]), &c);
+        assert!(out.text.contains("1. \"Here\" [app] from (100,10)"), "{}", out.text);
+        assert!(out.text.contains("2. \"Over there\" [app] on another screen"), "{}", out.text);
+        assert!(out.text.contains("3. \"Left\" [app] on another screen"), "{}", out.text);
     }
 }

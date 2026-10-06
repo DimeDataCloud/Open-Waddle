@@ -45,7 +45,7 @@ fn fixture() -> Fixture {
 }
 
 async fn run_agent(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, cancel: CancellationToken) -> (Outcome, String) {
-    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None };
+    let deps = AgentDeps { provider, host: host.clone(), audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills: None, reminders: None, facts: None, decider: None, self_source: None, selection: None, google: None, style: None, mcp: None };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), cancel, Arc::new(Mutex::new(TaskStatus::default())), &env);
     let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -155,6 +155,7 @@ async fn gui_actions_convert_coordinates_and_screenshots_ride_in_user_messages()
         selection: None,
         google: None,
         style: None,
+        mcp: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
@@ -396,7 +397,7 @@ async fn warming_sends_the_next_tasks_opening_to_local_models_only() {
 }
 
 fn deps_with(f: &Fixture, host: Arc<FakeHost>, provider: Arc<MockProvider>, skills: Option<Arc<SkillStore>>, self_source: Option<Arc<Workspace>>) -> AgentDeps {
-    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None }
+    AgentDeps { provider, host, audit: f.audit.clone(), workspace: f.workspace.clone(), settings: settings(), skills, reminders: None, facts: None, decider: None, self_source, selection: None, google: None, style: None, mcp: None }
 }
 
 async fn run_with(deps: &AgentDeps) -> waddle_core::agent::RunResult {
@@ -436,8 +437,8 @@ async fn delegation_stops_at_the_depth_limit() {
     let deps = deps_with(&f, host, provider.clone(), None, None);
     run_with(&deps).await;
     let requests = provider.requests.lock().unwrap().clone();
-    // Depth-2 agent is not offered `delegate`; its attempt is refused.
-    let refused = requests.iter().flatten().any(|m| m.text.contains("delegation depth limit (2) reached"));
+    // Depth-2 agent is not offered `delegate`; its attempt is refused without running.
+    let refused = requests.iter().flatten().any(|m| m.text.contains("`delegate` isn't one of your tools"));
     assert!(refused);
 }
 
@@ -737,7 +738,11 @@ async fn current_facts_and_research_search_the_web() {
     ]));
     let decider = Arc::new(SequenceDecider(Mutex::new(vec![routed(Route::Research, 0.95, 0.9), routed(Route::Chat, 0.97, 0.98)])));
     let config = SessionConfig { decider: Some(decider), ..session_config(&f, provider.clone()) };
-    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config.clone());
+    let history_file = f.workspace.root().join("history.json");
+    let history = Arc::new(waddle_core::history::History::new(Some(history_file.clone())));
+    *host.history.lock().unwrap() = Some(history.clone());
+    session.keep_history(history.clone());
 
     session.user_message("what's the weather in london".into());
     wait_until(|| provider.request_count() == 1).await;
@@ -769,8 +774,20 @@ async fn current_facts_and_research_search_the_web() {
     assert!(std::fs::read_to_string(&path).unwrap().contains("## Running costs"));
     assert_eq!(std::fs::read_to_string(&older).unwrap(), "yesterday's answer");
     assert_eq!(session.open_answer(&id).unwrap(), path);
-    assert_eq!(*host.opened.lock().unwrap(), vec![path.clone(), path]);
+    assert_eq!(*host.opened.lock().unwrap(), vec![path.clone(), path.clone()]);
     assert!(host.busy.lock().unwrap().is_empty(), "neither started a task");
+
+    // The history has both replies, and the research one keeps its button after a restart.
+    let list = history.list();
+    let replies: Vec<_> = list.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(replies, vec!["Sunny and 21°C.", "Heat pumps cost less to run [1]. They need a well-insulated home [2]."]);
+    assert_eq!(list[1].answer.as_deref(), Some(id.as_str()));
+    std::fs::remove_file(&path).unwrap();
+    let restarted = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    restarted.keep_history(Arc::new(waddle_core::history::History::new(Some(history_file))));
+    let again = restarted.open_answer(&id).unwrap();
+    assert!(std::fs::read_to_string(&again).unwrap().starts_with("# heat pumps or gas boilers?\n"), "{}", again.display());
+    assert!(restarted.open_answer("answer_unknown").is_err());
 }
 
 /// A router that answers from a list, last first.
@@ -792,6 +809,7 @@ async fn typing_text_and_then_copying_it_is_refused() {
         reply("", vec![call("press_keys", json!({"keys": "ctrl+a"}))]),
         reply("", vec![call("press_keys", json!({"keys": "Ctrl + C"}))]),
         reply("", vec![call("press_keys", json!({"keys": "ctrl+alt+a"}))]),
+        reply("", vec![call("press_keys", json!({"keys": "Alt+Ctrl+H"}))]),
         reply("", vec![call("copy_to_clipboard", json!({"text": "Offsite agenda"}))]),
         reply("Copied.", vec![]),
     ]));
@@ -803,7 +821,7 @@ async fn typing_text_and_then_copying_it_is_refused() {
     assert!(calls.contains(&GuiAction::WriteClipboard { text: "Offsite agenda".into() }));
     let after = provider.requests.lock().unwrap()[4].clone();
     assert!(after.last().unwrap().text.contains("copy_to_clipboard"), "the refusal says what to do instead");
-    assert!(!calls.iter().any(|c| matches!(c, GuiAction::PressKeys { keys } if keys == "ctrl+alt+a")), "never presses Waddle's own hotkeys");
+    assert!(!calls.iter().any(|c| matches!(c, GuiAction::PressKeys { keys } if keys.to_lowercase().contains("ctrl+alt") || keys.contains("Alt+Ctrl"))), "never presses Waddle's own hotkeys: {calls:?}");
 }
 
 #[tokio::test]
@@ -949,4 +967,70 @@ async fn the_conversation_survives_a_restart_until_it_goes_stale() {
     third.user_message("hello".into());
     wait_until(|| provider.request_count() == 3).await;
     assert!(!saw(2, "ancient"));
+}
+
+#[tokio::test]
+async fn a_routine_runs_without_the_screen_and_asks_before_changes() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::reminders::ReminderStore::new(f.workspace.root().join("reminders.json")));
+    let now = chrono::Local::now();
+    let routine = store.routines.add("Write today's notes file", "23:59", waddle_core::routines::EVERY_DAY, None, &now).unwrap();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("write_file", json!({"path": "notes.txt", "content": "notes"}))]),
+        reply("Wrote notes.txt.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let config = SessionConfig { reminders: Some(store.clone()), ..session_config(&f, provider.clone()) };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+
+    assert!(session.run_routine(&routine));
+    assert!(!session.run_routine(&routine), "one task at a time");
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+
+    let offered = provider.tools.lock().unwrap()[0].clone();
+    for gone in ["list_windows", "click", "type_text", "look_at_screen", "routine"] {
+        assert!(!offered.contains(&gone.to_string()), "{gone} offered to a routine: {offered:?}");
+    }
+    assert!(offered.contains(&"write_file".to_string()));
+    let system = provider.requests.lock().unwrap()[0][0].text.clone();
+    assert!(system.contains("routine the user scheduled (every day at 23:59)"), "{system}");
+    // Even a tier-2 change waits for a click (no countdown) when nobody may be watching.
+    let asked = host.approvals.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1);
+    assert_eq!((asked[0].tool.as_str(), asked[0].countdown_ms), ("write_file", None));
+    assert_eq!(store.routines.list()[0].last_result.as_deref(), Some("Done"));
+}
+
+#[tokio::test]
+async fn tools_that_were_not_offered_are_not_run() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("", vec![call("click", json!({"x": 10, "y": 10}))]), reply("Okay.", vec![])]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    *host.gui.lock().unwrap() = false;
+    let (outcome, _) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+    assert_eq!(outcome, Outcome::Done);
+    assert!(host.gui_calls.lock().unwrap().is_empty(), "no click without the screen tools");
+    let after = provider.requests.lock().unwrap()[1].clone();
+    assert!(after.last().unwrap().text.contains("`click` isn't one of your tools"));
+}
+
+#[tokio::test]
+async fn setting_up_a_routine_needs_a_click() {
+    let f = fixture();
+    let store = Arc::new(waddle_core::reminders::ReminderStore::new(f.workspace.root().join("reminders.json")));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("routine", json!({"action": "add", "goal": "Summarise my unread email", "time": "08:45", "days": ["weekdays"]}))]),
+        reply("", vec![call("routine", json!({"action": "list"}))]),
+        reply("Set.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let deps = AgentDeps { reminders: Some(store.clone()), ..deps_with(&f, host.clone(), provider.clone(), None, None) };
+    let env = host.env();
+    let agent = Agent::new(&deps, "t".into(), CancellationToken::new(), Arc::default(), &env);
+    let (_tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    assert_eq!(agent.run("every weekday at 8:45 summarise my email", &[], &mut rx).await.outcome, Outcome::Done);
+    let asked = host.approvals.lock().unwrap().clone();
+    assert_eq!(asked.iter().map(|a| (a.tool.as_str(), a.tier, a.countdown_ms)).collect::<Vec<_>>(), vec![("routine", 3, None)], "only the add asks");
+    assert!(asked[0].summary.contains("weekdays at 08:45"), "{}", asked[0].summary);
+    assert_eq!(store.routines.list().len(), 1);
 }
