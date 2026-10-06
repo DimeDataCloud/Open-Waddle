@@ -99,7 +99,7 @@ async function handle({ cmd, args }: Request): Promise<unknown> {
       if (action === "open") {
         const url = webUrl(args.url);
         // A new window can then be snapped beside another one or sent to another monitor.
-        const t = args.new_window ? (await chrome.windows.create({ url, focused: true })).tabs?.[0] : await chrome.tabs.create({ url });
+        const t = args.new_window ? (await chrome.windows.create({ url, focused: true }))?.tabs?.[0] : await chrome.tabs.create({ url });
         if (!t) throw new Error("Chrome didn't open the page");
         await show(t);
         const done = await loaded(t.id!);

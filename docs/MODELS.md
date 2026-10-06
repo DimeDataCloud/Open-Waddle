@@ -12,6 +12,10 @@ Short version:
   - **Planner:** `openai/gpt-6-luna`. 12/12 on the new assistant bench in both passes, at about $0.0005 a task. That's the cheapest of the models that passed everything.
   - **Chat and research:** `google/gemini-2.5-flash-lite`. Replies take 1–1.6 s, and a cited research summary takes 4.5 s.
   - **Decisions** (routing, the screen check, mail importance): Jev 1.13, at about $0.00002 each.
+- **0.3.0 (October 6, 2026): Gemini on our own harness.** `gemini-3.5-flash-lite` passed every assistant job (12/12) in **2.9 s a task, about twice as fast as `openai/gpt-6-luna` (5.6 s)**, and did at least as well on the screen tasks. Through OpenRouter it costs about 4× as much; **on a free Google key it costs nothing.** So:
+  - with a free Gemini key: run tasks on it (Settings → Brain → Quick replies run on **Google Gemini API** → tick **Run tasks on Gemini too**, or pick Google Gemini in the welcome);
+  - without one: `openai/gpt-6-luna` stays the default, the cheapest model that passes everything.
+  - Details are in [Gemini on Waddle's harness](#gemini-on-waddles-harness-030-october-6-2026).
 - Two moves are worth making next:
   - try the newer, cheaper Qwen Flash models (your OpenRouter guardrail blocks them for now)
   - fine-tune a 4B model for the local, free brain ([TRAINING.md](TRAINING.md))
@@ -174,7 +178,23 @@ Waddle can use Google's own endpoint (`https://generativelanguage.googleapis.com
 - **Rate limits** aren't published; Google shows them per account in AI Studio.
 - **What differs:** Google's endpoint rejects OpenRouter's extra request fields, so Waddle leaves them out for it (hidden-thinking effort and the web-search plugin). Searches for current facts and research therefore go through the planner's service even when quick replies are on Google.
 - **Metering:** only OpenRouter reports a dollar cost, so calls to Google show as calls in the spending meter without a cost, even on a paid Google plan.
-- **Not yet benchmarked** in Waddle's assistant tasks; the quick-reply model's job is chat and short summaries, so run the bench before using either as the planner.
+- **Benchmarked in 0.3.0:** both pass every assistant job; see below.
+
+### Gemini on Waddle's harness (0.3.0, October 6, 2026)
+
+Through OpenRouter, with the 0.3.0 prompt and tools (arrange_window, read-in-the-same-step, search addresses, the duck tool). Runs that hit OpenRouter's 20-requests-a-minute limit for new accounts were re-run one at a time; times leave those waits out.
+
+| Model | Assistant jobs (12) | Time per task | Cost per task (OpenRouter) | Screen tasks (21): passed / right target | Time per screen task |
+|---|---|---|---|---|---|
+| `openai/gpt-6-luna` (default) | **12/12** | 5.6 s | **$0.0005** | 14 / 21 | 7.7 s |
+| `google/gemini-3.5-flash-lite` | **12/12** | **2.9 s** | $0.0018 | **16 / 21** | **5.0 s** |
+| `google/gemini-3.8-flash` | **12/12** | 8.0 s | $0.0082 | not run | |
+
+- Every model hit the right target on every screen task. The "passed" count is lower because the fake desktop doesn't change after a click, so a model that checks its work clicks again until it runs out of steps (see [Limits](#the-benchmark-bench)).
+- **Reading:** Flash-Lite is the quickest model that passes everything, and quick is what matters most once a task is right: a model step is most of the wait (the median step in real use was 3.2 s on the default). 3.8 Flash is as accurate but slower and costlier, so it isn't worth it for Waddle's short tasks.
+- **On a free Google key** Flash-Lite costs nothing. Keep OpenRouter's key too: routing (Jev), the screen check and web searches stay there, and if the Google key is missing or rate-limited out, the same model runs through OpenRouter instead (`google/gemini-3.5-flash-lite`). With only a Google key, everything runs on Google (no quick chat lane: every message goes to the planner).
+- **Not yet checked against Google's own endpoint** (no key in the test environment). Use the **Test** button in Settings after pasting a key.
+- These runs cost about $0.21 in all.
 
 ## Jev and Laya (decision models)
 

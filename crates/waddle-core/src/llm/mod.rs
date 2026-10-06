@@ -175,23 +175,53 @@ pub struct Routed {
     fast_model: String,
     /// The second service can search the web for a request (only OpenRouter's plugin can).
     fast_has_web: bool,
+    /// The second service is Google's Gemini API: any model it names ("gemini-…", no
+    /// "google/" in front) goes there, the planner's too, so tasks can run on a free key.
+    google: bool,
+    /// What the planner's service runs instead when the second service can't take a request.
+    fallback: String,
+}
+
+/// A model name for Google's own API ("gemini-3.5-flash-lite"), not OpenRouter's ("google/…").
+pub fn is_google_name(model: &str) -> bool {
+    !model.contains('/') && (model.starts_with("gemini") || model.starts_with("gemma"))
 }
 
 impl Routed {
     pub fn new(main: Arc<dyn Provider>, fast: Option<Arc<dyn Provider>>, main_model: &str, fast_model: &str, fast_has_web: bool) -> Self {
-        Self { main, fast, main_model: main_model.to_string(), fast_model: fast_model.to_string(), fast_has_web }
+        Self {
+            main,
+            fast,
+            main_model: main_model.to_string(),
+            fast_model: fast_model.to_string(),
+            fast_has_web,
+            google: false,
+            fallback: main_model.to_string(),
+        }
+    }
+
+    /// The second service is Google's Gemini API. A planner model named for it runs
+    /// there too; without the Google key it runs as the same Gemini model on
+    /// OpenRouter (`main_is_openrouter`), or as the planner's model elsewhere.
+    pub fn with_google(mut self, main_is_openrouter: bool) -> Self {
+        self.google = true;
+        if main_is_openrouter && is_google_name(&self.main_model) {
+            self.fallback = format!("google/{}", self.main_model);
+        }
+        self
     }
 
     /// Where `req` goes, and the request to send there.
     fn pick<'a>(&'a self, req: ChatRequest<'a>) -> (&'a Arc<dyn Provider>, ChatRequest<'a>) {
-        if req.model != self.fast_model || self.fast_model == self.main_model {
+        let to_fast = (req.model == self.fast_model && self.fast_model != self.main_model) || (self.google && is_google_name(req.model));
+        if !to_fast {
             return (&self.main, req);
         }
         match &self.fast {
             Some(fast) if req.web.is_none() || self.fast_has_web => (fast, req),
             // No key for the second service yet, or a web search it can't do: the planner's
-            // service and model answer instead.
-            _ => (&self.main, ChatRequest { model: &self.main_model, ..req }),
+            // service answers instead.
+            _ => (&self.main, ChatRequest { model: &self.fallback, ..req }),
         }
     }
 }
@@ -306,6 +336,32 @@ mod routed_tests {
         ask(&r, "same", None).await;
         assert_eq!(main.models.lock().unwrap().len(), 1);
         assert!(fast.models.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn tasks_run_on_a_free_gemini_key_when_the_planner_is_a_gemini_model() {
+        // OpenRouter for routing and web searches, Google's free API for the planner and quick replies.
+        let (main, fast) = pair();
+        let r = Routed::new(main.clone(), Some(fast.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(true);
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*fast.models.lock().unwrap(), ["gemini-3.5-flash-lite"], "the planner went to Google");
+        assert!(main.models.lock().unwrap().is_empty());
+        // A web search Google's endpoint can't run goes to OpenRouter, under OpenRouter's name for the model.
+        ask(&r, "gemini-3.5-flash-lite", Some(5)).await;
+        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-3.5-flash-lite"]);
+        // Without the Google key, everything still works on OpenRouter.
+        let (main, _) = pair();
+        let r = Routed::new(main.clone(), None, "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(true);
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-3.5-flash-lite"]);
+        // OpenRouter's own names stay on OpenRouter.
+        let (main, fast) = pair();
+        let r = Routed::new(main.clone(), Some(fast.clone()), "openai/gpt-6-luna", "gemini-3.5-flash-lite", false).with_google(true);
+        ask(&r, "openai/gpt-6-luna", None).await;
+        ask(&r, "google/gemini-3.8-flash", None).await;
+        assert_eq!(main.models.lock().unwrap().len(), 2);
+        assert!(fast.models.lock().unwrap().is_empty());
+        assert!(is_google_name("gemini-3.8-flash") && !is_google_name("google/gemini-3.8-flash") && !is_google_name("openai/gpt-6-luna"));
     }
 
     #[test]

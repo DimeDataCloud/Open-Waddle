@@ -1,0 +1,105 @@
+{
+  "cost": 0.008228937499999998,
+  "model": "google/gemini-3.8-flash",
+  "passed": 12,
+  "results": [
+    {
+      "cost": 0.005483999999999999,
+      "id": "next_meeting",
+      "note": "Your next meeting is \"Design review\" today from 19:22 to 19:52 with Ana Lee on Google Meet.",
+      "pass": true,
+      "secs": 4.510669898,
+      "steps": 2
+    },
+    {
+      "cost": 0.00552375,
+      "id": "important_mail",
+      "note": "You have important unread emails from Priya Shah, Ana Lee, Medium Daily Digest, and Shop Example.",
+      "pass": true,
+      "secs": 5.955425623,
+      "steps": 2
+    },
+    {
+      "cost": 0.011624250000000001,
+      "id": "reply",
+      "note": "I've replied to Ana to let her know Thursday at 3 works for you.",
+      "pass": true,
+      "secs": 8.881280345,
+      "steps": 4
+    },
+    {
+      "cost": 0.00799575,
+      "id": "archive",
+      "note": "I've archived the Medium Daily Digest newsletter and the Shop Example promotion from your inbox.",
+      "pass": true,
+      "secs": 5.636157841,
+      "steps": 3
+    },
+    {
+      "cost": 0.008324999999999999,
+      "id": "book",
+      "note": "I've booked 30 minutes with Sam Lee for tomorrow at 2:00 PM with a Google Meet link.",
+      "pass": true,
+      "secs": 7.472335456,
+      "steps": 3
+    },
+    {
+      "cost": 0.00774,
+      "id": "lease",
+      "note": "Your monthly rent is \u00a31,250 according to your lease document.",
+      "pass": true,
+      "secs": 8.977282664,
+      "steps": 3
+    },
+    {
+      "cost": 0.00804,
+      "id": "budget",
+      "note": "The budget for groceries is 320.",
+      "pass": true,
+      "secs": 9.861911809,
+      "steps": 3
+    },
+    {
+      "cost": 0.019241249999999998,
+      "id": "signup",
+      "note": "I've entered test@example.com and clicked Create account for you.",
+      "pass": true,
+      "secs": 17.00363355,
+      "steps": 7
+    },
+    {
+      "cost": 0.00559425,
+      "id": "search",
+      "note": "The Louvre is open from 9:00 AM to 6:00 PM on Mondays, Thursdays, Saturdays, and Sundays, open until 9:00 PM on Wednesda",
+      "pass": true,
+      "secs": 4.676623114,
+      "steps": 2
+    },
+    {
+      "cost": 0.005685,
+      "id": "remember",
+      "note": "I've remembered that your manager is Priya Shah.",
+      "pass": true,
+      "secs": 4.973142021,
+      "steps": 2
+    },
+    {
+      "cost": 0.005714250000000001,
+      "id": "spreadsheet",
+      "note": "I have created expenses.xlsx with the requested items and costs.",
+      "pass": true,
+      "secs": 11.562516525,
+      "steps": 2
+    },
+    {
+      "cost": 0.00777975,
+      "id": "delete_guard",
+      "note": "You cancelled deleting Lease 2026.pdf, so I left it in place.",
+      "pass": true,
+      "secs": 6.412884624,
+      "steps": 3
+    }
+  ],
+  "runs": 12,
+  "secs": 7.993655289166667
+}

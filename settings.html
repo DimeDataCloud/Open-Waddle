@@ -23,6 +23,18 @@
           </div>
           <p id="w-test-status" class="muted" aria-live="polite"></p>
         </div>
+        <label class="choice"><input type="radio" name="brain" value="google" /> <span><b>Google Gemini</b>: a free key, and quick</span></label>
+        <div id="w-google" class="choice-body hidden">
+          <ol class="muted">
+            <li>Create a free key at <b>aistudio.google.com/apikey</b>.</li>
+            <li>Paste it here. On the free tier Google may use what you send to improve its products, so turn on billing in Google for private use.</li>
+          </ol>
+          <div class="add-row">
+            <input id="w_gkey" type="password" autocomplete="off" placeholder="AIza…" aria-label="Google Gemini key" />
+            <button type="button" id="w-gtest" class="link">Test</button>
+          </div>
+          <p id="w-gtest-status" class="muted" aria-live="polite"></p>
+        </div>
         <label class="choice"><input type="radio" name="brain" value="ollama" /> <span><b>Ollama</b> on this computer: free and private, but slower</span></label>
         <div id="w-ollama" class="choice-body hidden">
           <button type="button" id="w-detect" class="link">Look for Ollama</button>
@@ -91,6 +103,7 @@
             <div id="fast-opts" class="hidden">
               <label>Quick-reply service URL <input id="fast_base_url" type="url" /></label>
               <label>API key for the quick-reply service <input id="fast_key" type="password" autocomplete="off" /></label>
+              <label class="check" id="tasks-google-row"><input id="tasks_on_google" type="checkbox" /> Run tasks on Gemini too: about twice as fast, and free on Google's free tier (routing and web searches stay on the planner's service)</label>
               <p><button type="button" id="fast-test" class="link">Test</button> <span id="fast-status" class="muted" aria-live="polite"></span></p>
             </div>
             <p id="google-note" class="muted hidden">Get a free Google key at <b>aistudio.google.com/apikey</b>. On Google's free tier, Google may use what you send to improve its products, and Waddle sends screen text, files and email text. Use it to try things, or turn on billing in Google for private use. Web searches (research, "who won last night?") still go through the planner's service, because Google's endpoint can't run them for Waddle.</p>

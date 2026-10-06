@@ -1,6 +1,46 @@
 # Changelog
 
-## Unreleased
+## 0.3.0: built from real use
+
+Designed from three batches of the first weeks' task traces, research on desktop agents, and model tests on Waddle's own benchmark. The plan and the evidence are in [docs/BLUEPRINT-0.3.md](docs/BLUEPRINT-0.3.md).
+
+- **Esc closes the chat box first.** While a task runs, the first Esc closes an open chat box or history drawer, as it does when Waddle is idle. The next Esc stops the task. In real use, three tasks in a row had stopped before they began, most likely from an Esc meant for the chat box.
+- **Try again.** A stopped task has a **Try again** button that runs the same request again.
+- **Quicker actions.**
+  - Keys that only move around run straight away, without the 2-second countdown. These are snapping and switching windows, a new tab or window, the address bar, scrolling keys, back and forward, zoom and Esc.
+  - Keys that could send, submit, type, paste or save still wait. In one real split-screen task, 13 key presses each waited 2 seconds.
+- **Arrange windows in one step.** "Put YouTube Music on my right monitor" and "GitHub left, music right" use a new window tool, instead of key presses checked with screenshots. It snaps to either half, maximizes, minimizes, restores, brings a window forward, or moves it to another monitor.
+- **Fewer steps.**
+  - Opening a page or clicking on one can read the page in the same step.
+  - Chrome can open a page in a new window, ready to arrange (Chrome extension 0.3.0).
+  - "Search YouTube for…" goes straight to the search results: the tool knows the search addresses of YouTube, YouTube Music, GitHub, Google, Maps, Wikipedia and Amazon.
+  - Waddle plans several steps in one reply when they're clear. If one fails, the rest are skipped and it looks again.
+- **Misheard app names.**
+  - "Open the Clawed desktop app" opens Claude: an app name with no exact match is compared with the installed apps (Start menu shortcuts and Store apps) by spelling and by sound.
+  - When nothing is clearly meant, Waddle hears the closest names and asks, instead of trying a shell command that waits for approval.
+  - Spoken messages lose dictation's quotation marks and the "uh"s; the history keeps what you said.
+- **The duck does tricks.** "Fly around the screen", "come here", "dance", "take a nap", "hide" and "make a mess" (a pretend one, with dust; nothing on screen is touched) use a new duck tool.
+- **Waddle learns what works.**
+  - A task that went well leaves a short recipe of its steps, and a similar request later gets it as a hint: workflow memory, a way to improve without training a model.
+  - Only what Waddle chose is kept (tool and app names, addresses without their query, keys), never typed text or anything a page or email said.
+  - 👍 confirms a recipe, 👎 forgets it, and Forget conversation clears them all. The 👍/👎 question now appears after any task that taught Waddle something, not only recorded ones.
+- **Gemini on a free key.**
+  - Gemini 3.5 Flash-Lite passed every assistant job in Waddle's benchmark about twice as fast as the default planner (2.9 s against 5.6 s a task). It costs nothing on a free Google key.
+  - **Run tasks on Gemini too** (Settings → Brain → Quick replies on Google Gemini API) runs tasks on that key, while OpenRouter keeps routing, the screen check and web searches. Without the Google key, the same model runs through OpenRouter.
+  - The welcome offers **Google Gemini** as a brain, and the Google preset's planner is now Gemini 3.5 Flash-Lite.
+  - Results are in [docs/MODELS.md](docs/MODELS.md).
+- **Training data, version 2.** **Export training file** now writes two files:
+  - `train.jsonl` for fine-tuning, without replies that claimed something no tool did, and without duplicates.
+  - `kto.jsonl`: every reply of a rated task, labelled with your 👍/👎, for KTO training from thumbs alone. A new `training/finetune_kto.py` trains on it, and its `--check` validates the file without a GPU.
+  - Email addresses, names in email headers, phone numbers, your user folder, saved facts and the email style note are masked in the text.
+- **Checked:**
+  - Unit and integration tests, frontend tests, and Windows ARM64 and x64 builds.
+  - All 12 assistant jobs pass with the default model and with Gemini 3.5 Flash-Lite and 3.8 Flash.
+  - The screen tasks were run with the default model and Gemini 3.5 Flash-Lite.
+  - The training export was run on the real traces: nothing personal was left in the masked fields.
+  - Not checked here: Google's own endpoint (no key in the test environment) and Windows window placement on a real screen (it's compiled and its geometry tested). Both are in the on-device checklist.
+
+The rest of this release:
 
 - **No more "I've opened YouTube" when nothing happened.** In real use, the quick-reply lane and sometimes the planner said they had opened, played or searched things without doing anything, and later replies copied those lines. Now:
   - Plain requests ("Uh, can you open up YouTube?", "Go to GitHub and check the pull requests") go straight to a task instead of the chat lane. Spoken fillers and stray quotes don't get in the way.

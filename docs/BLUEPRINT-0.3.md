@@ -70,8 +70,14 @@ Every number below comes from those traces.
   - A **scrubbed** option masks email addresses, phone numbers and user folders.
   - Repeated conversation prefixes are dropped.
   - Pipeline steps are in [TRAINING.md](TRAINING.md).
-- **Model choice on data.** The Gemini models (3.5 Flash, 3.5 Flash-Lite, 3.8 Flash) run on the assistant bench and the chat-honesty test. Defaults change only when a model wins on both. Results are in [MODELS.md](MODELS.md).
+- **Model choice on data.** The Gemini models ran on the assistant bench and the screen bench (results in [MODELS.md](MODELS.md)). Gemini 3.5 Flash-Lite won on speed with equal accuracy, but costs 4× through OpenRouter. So the OpenRouter default stays `openai/gpt-6-luna`, and Flash-Lite becomes the choice on a free Google key (workstream I).
 - *Verify:* unit tests for recipe extraction, matching and privacy (no typed text or email content in recipes); export tests.
+
+### I. Gemini on a free key (added at the user's request)
+- Google's free API keys make Gemini cost nothing. On our benchmark Gemini 3.5 Flash-Lite passed every assistant job about twice as fast as the default planner, so:
+  - **Run tasks on Gemini too:** with quick replies on Google, a Gemini model named for Google's API runs the tasks there as well. OpenRouter keeps routing, the screen check and web searches, and covers for a missing key.
+  - The welcome offers **Google Gemini** as a brain, and the Google preset's planner is Flash-Lite.
+- *Verify:* routing unit tests (key present, key missing, web searches); Settings tests; the bench numbers in [MODELS.md](MODELS.md). Google's own endpoint still needs a real key (the Test button).
 
 ### H. Release
 - Version 0.3.0 everywhere (app, extension 0.3.0). CHANGELOG, README (new controls and features, checklist additions), ARCHITECTURE, ROADMAP.

@@ -5,6 +5,7 @@
 - **v0.2 is done and merged** (milestones 0.1.9 → 0.2.0: routing, research, memory, the selection hotkey, Gmail, Calendar, Contacts, nudges, the morning brief, the Chrome extension, files and Drive, and the assistant bench). The v0.2 plan is in this file's git history.
 - At the start of the pass, 169 Rust tests and the frontend and extension tests passed; at 0.2.9 it's 203 Rust tests and 71 frontend tests. Nothing has run on the Surface yet.
 - **This pass:** nine releases, 0.2.1 → 0.2.9, that revise, adapt, enhance, polish and define Waddle. You test **0.2.9** on the Surface; the fixes from that test become **0.3.0**.
+- **0.3.0 (October 6, 2026)** came from real use instead of the planned Surface pass: three batches of task traces, research and benchmark runs. Its plan, the evidence and what was verified are in [BLUEPRINT-0.3.md](BLUEPRINT-0.3.md).
 - **Status (0.2.9):** all nine releases are built. What each one changed is in [CHANGELOG.md](../CHANGELOG.md). Where the build differs from the plan below, the plan says so in *(as built: …)*.
 
 ## What the assessment found

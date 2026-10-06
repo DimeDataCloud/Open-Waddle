@@ -761,10 +761,18 @@ pub async fn traces_summary(state: State<'_, AppState>) -> CmdResult<TracesSumma
     })
 }
 
-/// Writes train.jsonl (good tasks as fine-tuning examples) into the workspace and returns its path.
+/// Writes train.jsonl (good tasks as fine-tuning examples) and kto.jsonl (every
+/// reply labelled 👍/👎) into the workspace, personal details masked, and says what's in them.
 #[tauri::command]
 pub async fn export_traces(state: State<'_, AppState>) -> CmdResult<String> {
     let out = state.workspace().root().join("training");
-    let (file, n) = state.traces.export(&out, true).map_err(err)?;
-    Ok(format!("{} ({n} examples)", file.display()))
+    let opts = waddle_core::traces::ExportOptions { include_unrated: true, scrub: true };
+    let got = state.traces.export(&out, opts).map_err(err)?;
+    let held = if got.held_back > 0 { format!(", {} left out for claiming what no tool did", got.held_back) } else { String::new() };
+    Ok(format!(
+        "{} ({} examples{held}) and kto.jsonl ({} rated replies); email addresses, phone numbers, user folders and saved facts are masked",
+        got.train.display(),
+        got.examples,
+        got.labelled
+    ))
 }
