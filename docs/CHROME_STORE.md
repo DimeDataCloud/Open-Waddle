@@ -34,7 +34,7 @@ What to enter in the [Chrome Web Store developer console](https://chrome.google.
   - Host permissions (all sites): Works on whichever site the user asks Waddle about. It can't be known in advance.
 - **Remote code:** No. All code is in the package.
 - **Data usage:** tick **Website content** (page text and links, handled only on the user's computer and passed to the Waddle app they installed). Don't tick anything else. Tick all three certifications: no sale of data, no use unrelated to the single purpose, no use for creditworthiness or lending.
-- **Privacy policy URL:** the GitHub link to `PRIVACY.md` once the repository is public.
+- **Privacy policy URL:** `https://github.com/DimeDataCloud/open-waddle/blob/main/PRIVACY.md` once the repository is public. Until then, a public Gist holding the same text works.
 
 ## Distribution
 

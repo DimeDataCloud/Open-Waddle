@@ -129,7 +129,7 @@ Waddle is built and tested first on Windows 11 on ARM (Surface Pro with Snapdrag
 3. Install **Node.js 22 LTS (ARM64)**: <https://nodejs.org>
 4. Then:
    ```powershell
-   git clone https://github.com/DimeDataCloud/Waddle; cd Waddle
+   git clone https://github.com/DimeDataCloud/open-waddle; cd open-waddle
    npm install
    npm run tauri dev            # run it
    npm run tauri build          # make an installer (src-tauri target\release\bundle\nsis)

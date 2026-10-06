@@ -318,7 +318,7 @@ impl OpenAiCompat {
         let mut builder = self
             .http
             .post(&url)
-            .header("HTTP-Referer", "https://github.com/DimeDataCloud/Waddle")
+            .header("HTTP-Referer", "https://github.com/DimeDataCloud/open-waddle")
             .header("X-Title", "Project Waddle")
             .json(&self.body(req));
         if let Some(key) = self.api_key.as_deref().filter(|k| !k.is_empty()) {

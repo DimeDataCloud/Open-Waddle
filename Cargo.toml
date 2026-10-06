@@ -6,7 +6,7 @@ members = ["crates/waddle-core", "src-tauri"]
 version = "0.2.9"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/DimeDataCloud/Waddle"
+repository = "https://github.com/DimeDataCloud/open-waddle"
 
 [workspace.dependencies]
 waddle-core = { path = "crates/waddle-core" }
