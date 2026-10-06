@@ -119,6 +119,31 @@ pub struct Session {
     history: Mutex<Option<Arc<crate::history::History>>>,
     /// Tools from the user's MCP servers.
     mcp: Mutex<Option<Arc<crate::mcp::McpHub>>>,
+    /// How the user stopped the running task, for the message that says so.
+    halted_by: Mutex<Option<HaltBy>>,
+}
+
+/// How the user stopped a task. The stop message names it, so an accidental
+/// stop (an Esc meant for something else) is easy to spot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HaltBy {
+    Escape,
+    StopButton,
+    DoubleClick,
+    Tray,
+    Said,
+}
+
+impl HaltBy {
+    pub fn describe(self) -> &'static str {
+        match self {
+            HaltBy::Escape => "you pressed Esc",
+            HaltBy::StopButton => "you pressed Stop",
+            HaltBy::DoubleClick => "you double-clicked me",
+            HaltBy::Tray => "you chose Stop in the tray menu",
+            HaltBy::Said => "you said stop",
+        }
+    }
 }
 
 /// True when the whole utterance is a request to stop ("stop", "wait!", "please cancel", "stop stop").
@@ -136,6 +161,69 @@ pub fn is_halt_phrase(text: &str) -> bool {
         ["hold", "on"] | ["never", "mind"] => true,
         ws => ws.len() <= 2 && ws.iter().all(|w| HALT.contains(w)),
     }
+}
+
+/// What the chat lane may say about Waddle's connections.
+fn connections(google: bool, chrome: bool) -> String {
+    let g = if google {
+        "Gmail, Google Calendar and Contacts are connected"
+    } else {
+        "Google isn't connected (they can connect it in Settings, Google account)"
+    };
+    let c = if chrome { "your Chrome extension is connected" } else { "your Chrome extension isn't connected" };
+    format!("{g}, and {c}.")
+}
+
+/// Whether a message plainly asks for something to be done on the computer
+/// ("Uh, can you open up YouTube?", "Go to GitHub and check the pull requests").
+/// Those skip the router and the chat lane, which can't act, and start a task.
+/// Spoken messages come with fillers and stray quotes, so those are dropped first.
+pub fn asks_for_action(text: &str) -> bool {
+    const FILLER: &[&str] = &[
+        "uh", "uhh", "um", "umm", "er", "erm", "hmm", "oh", "hey", "ok", "okay", "so", "alright", "right", "now", "then", "and", "also",
+        "please", "waddle", "just", "actually", "well", "first", "yeah", "yes", "sure", "quickly", "kindly",
+    ];
+    const LEADS: &[&[&str]] = &[
+        &["can", "you"], &["could", "you"], &["would", "you"], &["will", "you"], &["can", "u"], &["go", "ahead", "and"], &["i", "want", "you", "to"],
+        &["i", "need", "you", "to"], &["i'd", "like", "you", "to"], &["i", "would", "like", "you", "to"], &["let's"], &["lets"], &["try", "to"],
+    ];
+    const VERBS: &[&str] = &[
+        "open", "launch", "play", "pause", "resume", "click", "tap", "type", "press", "close", "minimize", "minimise", "maximize", "maximise",
+        "snap", "move", "put", "drag", "scroll", "navigate", "switch", "mute", "unmute", "send", "email", "reply", "respond", "forward",
+        "archive", "delete", "trash", "schedule", "remind", "create", "save", "copy", "paste", "download", "skip", "check", "show",
+    ];
+    const OWNED: &[&str] = &["my", "our", "the", "that", "this", "those", "these", "his", "her", "their", "it"];
+    const PLACES: &[&str] = &["youtube", "gmail", "github", "chrome", "google", "amazon", "drive", "inbox", "email", "emails", "files", "folder", "browser", "spotify", "music", "my", "our"];
+    let norm: String = text
+        .to_lowercase()
+        .replace('\u{2019}', "'")
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '\'' || c.is_whitespace() || ".!?;\n".contains(c) { c } else { ' ' })
+        .collect();
+    norm.split(['.', '!', '?', ';', '\n']).any(|sentence| {
+        let mut words: Vec<&str> = sentence.split_whitespace().map(|w| w.trim_matches('\'')).filter(|w| !w.is_empty()).collect();
+        loop {
+            if words.first().is_some_and(|w| FILLER.contains(w)) {
+                words.remove(0);
+            } else if let Some(lead) = LEADS.iter().find(|l| words.starts_with(l)) {
+                words.drain(..lead.len());
+            } else {
+                break;
+            }
+        }
+        let next = words.get(1).copied().unwrap_or("");
+        match words.first().copied() {
+            Some("go") => matches!(next, "to" | "back" | "into" | "over"),
+            Some("pull" | "bring") => next == "up",
+            Some("turn") => matches!(next, "on" | "off" | "up" | "down"),
+            Some("look") => next == "at",
+            Some("find" | "read") => OWNED.contains(&next),
+            Some("search") => words.iter().any(|w| PLACES.contains(w) || *w == "on" || *w == "in"),
+            Some("show") => !(next == "me" && words.get(2) == Some(&"how")),
+            Some(w) => VERBS.contains(&w),
+            None => false,
+        }
+    })
 }
 
 fn new_task_id() -> String {
@@ -158,6 +246,7 @@ impl Session {
             answers: Mutex::default(),
             history: Mutex::default(),
             mcp: Mutex::default(),
+            halted_by: Mutex::default(),
         })
     }
 
@@ -171,7 +260,13 @@ impl Session {
     }
 
     /// Stops the running task. Returns false when nothing was running.
-    pub fn halt(&self) -> bool {
+    pub fn halt(&self, by: HaltBy) -> bool {
+        if !self.is_busy() && self.deciding.lock().unwrap().is_none() {
+            return false;
+        }
+        log::info!("halt: {}", by.describe());
+        let _ = self.audit.append(AuditEntry { kind: "halt_request".into(), detail: Some(by.describe().into()), ..Default::default() });
+        *self.halted_by.lock().unwrap() = Some(by);
         if let Some(d) = self.deciding.lock().unwrap().take() {
             d.task.cancel.cancel();
             d.held.decide(false);
@@ -361,7 +456,7 @@ impl Session {
             return;
         }
         if is_halt_phrase(&text) {
-            let notice = if self.halt() { "Stopping!" } else { "I'm not doing anything right now." };
+            let notice = if self.halt(HaltBy::Said) { "Stopping!" } else { "I'm not doing anything right now." };
             self.host.emit(AgentEvent::Notice { text: notice.into() });
             return;
         }
@@ -388,6 +483,9 @@ impl Session {
             c.decider.clone().filter(|_| c.settings.quick_chat)
         };
         let Some(decider) = decider else { return self.start_task(text) };
+        if asks_for_action(&text) && self.deciding.lock().unwrap().is_none() {
+            return self.start_task(text);
+        }
         let held = {
             let mut d = self.deciding.lock().unwrap();
             if let Some(deciding) = d.as_mut() {
@@ -439,15 +537,21 @@ impl Session {
     /// first when it needs current facts. Returns false when the model says the
     /// message needs the computer after all (or fails), so a task starts.
     async fn chat_reply(self: &Arc<Self>, text: &str, web: bool) -> bool {
-        let (settings, provider) = {
+        let (settings, provider, google) = {
             let c = self.config.read().unwrap();
-            (c.settings.clone(), c.provider.clone())
+            (c.settings.clone(), c.provider.clone(), c.google.as_ref().is_some_and(|g| !g.is_signed_out()))
         };
         let sources = if web { " Use the web results for current facts; don't include links or URLs." } else { "" };
         let system = format!(
             "You are Waddle, a small pixel-art duck who lives on the user's desktop and helps with their computer. \
-Reply to their message in one to three short, friendly sentences.{sources} It's {now}. \
-If it actually asks you to do, check or show something on their computer (apps, the screen, files, email, calendar, reminders), reply with exactly {HAND_OFF} and nothing else.{facts}",
+Reply to their message in one to three short, friendly sentences.{sources}\n\
+You can't act from here: you can't open, click, type, play, search or look at anything, so never say you did. \
+If the message asks you to do, open, play, find, check or show something (on their computer, a website, their email, calendar, files or reminders), \
+reply with exactly {HAND_OFF} and nothing else, and a planner with tools will do it. If you're not sure, reply {HAND_OFF}.\n\
+{about} {connected}\n\
+It's {now}; mention the date or time only when asked.{facts}",
+            about = agent::ABOUT_WADDLE,
+            connected = connections(google, self.host.env().caps.browser),
             now = crate::reminders::now_line(),
             facts = self.facts_section(),
         );
@@ -463,7 +567,7 @@ If it actually asks you to do, check or show something on their computer (apps, 
             web: web.then_some(CHAT_RESULTS),
         };
         let started = std::time::Instant::now();
-        // The reply streams into the bubble as it's written; only a possible "[task]" is held back.
+        // The reply streams into the bubble a sentence at a time; a possible "[task]" or claimed action is held back.
         let host = self.host.clone();
         let mut gate = HandOffGate::default();
         let mut first_word: Option<u128> = None;
@@ -477,10 +581,14 @@ If it actually asks you to do, check or show something on their computer (apps, 
         let result = crate::ledger::scoped(crate::ledger::Purpose::Chat, provider.chat(req, &mut on_event)).await;
         let shown = gate.shown;
         let reply = match result {
-            Ok(r) if !r.text.trim().is_empty() && !r.text.contains(HAND_OFF) => r.text.trim().to_string(),
+            Ok(r) if !r.text.trim().is_empty() && !r.text.contains(HAND_OFF) && !gate.claimed && !crate::agent::claims_action(&r.text) => {
+                r.text.trim().to_string()
+            }
             Ok(_) | Err(_) => {
                 if let Err(e) = &result {
                     log::warn!("chat reply failed: {e:#}");
+                } else if gate.claimed || result.as_ref().is_ok_and(|r| crate::agent::claims_action(&r.text)) {
+                    log::info!("chat reply said something was done; handing the message to a task");
                 }
                 if shown {
                     self.host.emit(AgentEvent::TextDone { task_id: "chat".into(), lane: Lane::Planner });
@@ -626,7 +734,7 @@ Don't write a source list; it's added for you.{facts}",
                 env.caps.selection = false;
             }
             let agent = Agent::new(&deps, task_id.clone(), cancel.clone(), status, &env);
-            let result = match tokio::time::timeout(timeout, agent.run(&goal, &memory, &mut steer_rx)).await {
+            let mut result = match tokio::time::timeout(timeout, agent.run(&goal, &memory, &mut steer_rx)).await {
                 Ok(r) => r,
                 Err(_) => {
                     cancel.cancel();
@@ -636,6 +744,10 @@ Don't write a source list; it's added for you.{facts}",
             if held.as_ref().is_some_and(|h| !h.went()) {
                 // The message was chat or research, or the user halted first: leave no trace.
                 return;
+            }
+            let by = this.halted_by.lock().unwrap().take();
+            if let (Outcome::Halted, Some(by)) = (result.outcome, by) {
+                result.message = format!("Stopped ({}). I'm not touching anything.", by.describe());
             }
 
             // Release the slot first so a message arriving now starts a fresh task.
@@ -837,51 +949,80 @@ impl Host for Held {
     }
 }
 
-/// Lets a chat reply stream into the bubble, holding back only text that could
-/// still turn out to be the "[task]" hand-off.
+/// Lets a chat reply stream into the bubble a sentence at a time, holding back
+/// text that could still turn out to be the "[task]" hand-off. A sentence that
+/// says something was done ("I've opened YouTube") is never shown: the chat
+/// lane can't act, so the message goes to a task instead.
 #[derive(Default)]
 struct HandOffGate {
     held: String,
-    /// None while it could still be the hand-off.
+    /// None while it could still be the hand-off; Some(false) once nothing more is shown.
     show: Option<bool>,
     shown: bool,
+    /// A sentence claimed an action.
+    claimed: bool,
 }
 
 impl HandOffGate {
     /// Returns the text to show now, if any.
     fn push(&mut self, delta: &str) -> Option<String> {
-        match self.show {
-            Some(true) => {
-                self.shown = true;
-                return Some(delta.to_string());
+        if self.show == Some(false) {
+            return None;
+        }
+        self.held.push_str(delta);
+        if self.show.is_none() {
+            let t = self.held.trim_start();
+            if t.is_empty() || (HAND_OFF.starts_with(t) && t.len() < HAND_OFF.len()) {
+                return None;
             }
-            Some(false) => return None,
-            None => self.held.push_str(delta),
+            if t.starts_with(HAND_OFF) {
+                self.show = Some(false);
+                return None;
+            }
+            self.show = Some(true);
         }
-        let t = self.held.trim_start();
-        if t.is_empty() || (HAND_OFF.starts_with(t) && t.len() < HAND_OFF.len()) {
-            return None;
-        }
-        if t.starts_with(HAND_OFF) {
-            self.show = Some(false);
-            return None;
-        }
-        self.show = Some(true);
-        self.shown = true;
-        Some(std::mem::take(&mut self.held))
+        let end = sentence_end(&self.held)?;
+        let ready: String = self.held.drain(..end).collect();
+        self.release(ready)
     }
 
-    /// Whatever was still held when the reply ended (a very short reply).
+    fn release(&mut self, text: String) -> Option<String> {
+        if crate::agent::claims_action(&text) {
+            self.claimed = true;
+            self.show = Some(false);
+            self.held.clear();
+            return None;
+        }
+        self.shown = true;
+        Some(text)
+    }
+
+    /// Whatever was still held when the reply ended.
     fn finish(&mut self) -> Option<String> {
-        if self.show.is_some() {
+        if self.show == Some(false) {
             return None;
         }
         let rest = std::mem::take(&mut self.held);
-        (!rest.trim().is_empty() && !rest.contains(HAND_OFF)).then(|| {
-            self.shown = true;
-            rest
-        })
+        if rest.trim().is_empty() || rest.contains(HAND_OFF) {
+            return None;
+        }
+        self.release(rest)
     }
+}
+
+/// Where the last complete sentence in `text` ends (after its ".", "!", "?" or
+/// line break), if there is one. A full stop counts only once a space follows,
+/// so "3.5" isn't split.
+fn sentence_end(text: &str) -> Option<usize> {
+    let mut end = None;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let next_is_space = chars.peek().is_some_and(|(_, n)| n.is_whitespace());
+        if c == '\n' || (matches!(c, '.' | '!' | '?') && next_is_space) {
+            end = Some(i + c.len_utf8());
+        }
+    }
+    end
 }
 
 /// Streams a research answer's summary to the bubble and holds back what follows
@@ -997,23 +1138,78 @@ mod tests {
     }
 
     #[test]
-    fn chat_streams_unless_it_is_the_hand_off() {
+    fn chat_streams_by_sentence_unless_it_is_the_hand_off() {
         let mut g = HandOffGate::default();
         assert_eq!(g.push(" "), None);
-        assert_eq!(g.push("Hi"), Some(" Hi".into()));
-        assert_eq!(g.push(" there"), Some(" there".into()));
+        assert_eq!(g.push("Hi"), None);
+        assert_eq!(g.push(" there! How"), Some(" Hi there!".into()));
+        assert_eq!(g.push(" are you?"), None);
+        assert_eq!(g.finish(), Some(" How are you?".into()));
         let mut g = HandOffGate::default();
         assert_eq!(g.push("[ta"), None);
         assert_eq!(g.push("sk]"), None);
         assert_eq!(g.finish(), None);
         assert!(!g.shown);
         let mut g = HandOffGate::default();
-        assert_eq!(g.push("[1] is"), Some("[1] is".into()), "a bracket that isn't the hand-off shows");
+        assert_eq!(g.push("[1] is. "), Some("[1] is.".into()), "a bracket that isn't the hand-off shows");
         let mut g = HandOffGate::default();
-        assert_eq!(g.push("Ok"), Some("Ok".into()));
+        assert_eq!(g.push("Version 3."), None);
+        assert_eq!(g.push("5 is out. "), Some("Version 3.5 is out.".into()));
         let mut g = HandOffGate::default();
         assert_eq!(g.push("["), None);
         assert_eq!(g.finish(), Some("[".into()));
+    }
+
+    #[test]
+    fn chat_that_claims_an_action_is_held_back() {
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push("Sure! I\u{2019}ve opened"), Some("Sure!".into()));
+        assert_eq!(g.push(" YouTube in Chrome for you. Anything"), None);
+        assert_eq!(g.push(" else?"), None);
+        assert_eq!(g.finish(), None);
+        assert!(g.claimed && g.shown);
+        let mut g = HandOffGate::default();
+        assert_eq!(g.push("Opened the repository."), None);
+        assert_eq!(g.finish(), None);
+        assert!(g.claimed && !g.shown);
+    }
+
+    #[test]
+    fn plain_requests_for_action_skip_the_chat_lane() {
+        // Real spoken and typed messages, with personal details left out.
+        for t in [
+            "Uh, can you open up YouTube?",
+            "Now, can you open up YouTube in a browser for me?",
+            "Can you go ahead and open up, uh, antigravity IDE?",
+            "Never mind. Umm just go ahead and open up, uh, a Chrome browser? Go to YouTube.",
+            "Go to the cooking channel on YouTube and play their most recent video.",
+            "um play the video by that cooking channel",
+            "Find our Repository called Open Dash Waddle. Sure, go ahead and open it for me.",
+            "\"I want you to actually open it live on my screen.\"",
+            "\u{201c}Open up the.\u{201d} Open the Waddle repository on GitHub.",
+            "check gmail for an email from the bank titled statement",
+            "open that email in chrome",
+            "Put that on the right side of the screen.",
+            "Search for cooking videos on YouTube.",
+            "Pull up my calendar.",
+            "Remind me at 5 to call the bank.",
+        ] {
+            assert!(asks_for_action(t), "{t}");
+        }
+        for t in [
+            "are you connected to my gmail",
+            "Hey, can you hear me?",
+            "How do I use the push to talk feature?",
+            "Thank you.",
+            "give me a live example of some things you can do",
+            "find out who won the game last night",
+            "What's the weather like tomorrow?",
+            "show me how to change my wallpaper",
+            "Go on, tell me a joke.",
+            "Search the best laptops under 1000 dollars",
+        ] {
+            assert!(!asks_for_action(t), "{t}");
+        }
     }
 
     #[test]

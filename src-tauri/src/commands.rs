@@ -7,6 +7,7 @@ use waddle_core::config::{ProviderKind, VoiceBackend};
 use waddle_core::google::gmail::MailDraft;
 use waddle_core::google::{auth, OAuthClient, SCOPES};
 use waddle_core::history::Who;
+use waddle_core::session::HaltBy;
 use waddle_core::Settings;
 
 use crate::bridge::Platform;
@@ -327,10 +328,12 @@ pub fn warm_up(state: State<'_, AppState>) {
     state.session.warm();
 }
 
+/// `how`: "double-click" when the duck was double-clicked; otherwise the Stop button.
 #[tauri::command]
-pub fn halt(state: State<'_, AppState>) -> bool {
+pub fn halt(state: State<'_, AppState>, how: Option<String>) -> bool {
     state.host.speech.stop();
-    state.session.halt()
+    let by = if how.as_deref() == Some("double-click") { HaltBy::DoubleClick } else { HaltBy::StopButton };
+    state.session.halt(by)
 }
 
 #[tauri::command]

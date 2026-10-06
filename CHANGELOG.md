@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **No more "I've opened YouTube" when nothing happened.** In real use, the quick-reply lane and sometimes the planner said they had opened, played or searched things without doing anything, and later replies copied those lines. Now:
+  - Plain requests ("Uh, can you open up YouTube?", "Go to GitHub and check the pull requests") go straight to a task instead of the chat lane. Spoken fillers and stray quotes don't get in the way.
+  - A chat reply that claims an action is held back before it shows and the message becomes a task, so the false line never reaches the bubble or the conversation memory.
+  - A task that claims to have done something without using a tool is told so once and asked to actually do it.
+  - The planner is told that reading an email isn't showing it, and how to open an email in Chrome.
+- **Waddle knows how it works.** "How do I use push-to-talk?" gets the real answer (Ctrl+Alt+Space, the microphone button), and "are you connected to my Gmail?" is answered from the actual connection. Quick replies no longer drop the date and time into answers.
+- **The stop message says what stopped the task:** Esc, the Stop button, a double-click, the tray menu or saying "stop". Esc stops a running task from anywhere, so an Esc meant to close the chat box shows up plainly now.
+- **Chrome actions happen in front of you.** Opening or going to a page brings that tab forward and restores a minimised Chrome window, instead of working in a tab you can't see. (Chrome extension 0.2.1.)
 - **Google's Gemini API next to OpenRouter.** Settings → Brain has a **Google Gemini API** preset, and **Quick replies run on** lets chat, research summaries and the morning brief use Google (or any other OpenAI-compatible service) with its own key while the planner stays on OpenRouter. A **Test** button makes a real tool call first. Web searches still use the planner's service, and the free tier's data use is spelled out in Settings.
 - **Plain error for a bad Google key** instead of raw JSON, and the self-test checks the quick-reply service too.
 - **Download and code signing sections in the README,** ready for the SignPath Foundation application. They say plainly that releases aren't signed yet.

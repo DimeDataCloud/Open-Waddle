@@ -103,7 +103,7 @@ export const api = {
   clearMemory: () => invoke<void>("clear_memory"),
   openLink: (url: string) => invoke<void>("open_link", { url }),
   warmUp: () => invoke<void>("warm_up"),
-  halt: () => invoke<boolean>("halt"),
+  halt: (how: "button" | "double-click" = "button") => invoke<boolean>("halt", { how }),
   answerApproval: (id: string, approved: boolean, draft: MailDraft | null = null) => invoke<void>("answer_approval", { id, approved, draft }),
   undoSend: (id: string) => invoke<void>("undo_send", { id }),
   nudgeAction: (id: string, action: string) => invoke<string | null>("nudge_action", { id, action }),

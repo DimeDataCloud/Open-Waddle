@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use waddle_core::agent::{promises_action, prune_images, writes_tool_call, Agent, AgentDeps, TaskStatus};
+use waddle_core::agent::{claims_action, promises_action, prune_images, writes_tool_call, Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
 use waddle_core::llm::mock::{call, reply, MockProvider};
@@ -19,7 +19,7 @@ use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::decide::{Route, Routing};
 use waddle_core::facts::FactStore;
-use waddle_core::session::Selection;
+use waddle_core::session::{HaltBy, Selection};
 use waddle_core::skills::SkillStore;
 use waddle_core::{AgentEvent, Decision, Host, Lane, Outcome, Session, SessionConfig, Settings};
 
@@ -260,6 +260,68 @@ fn only_replies_that_announce_an_action_count_as_promises() {
     for t in ["Okay, I'll leave it.", "Done! Let me know if you need anything else.", "I clicked the red button.", "I'll be here if you need me."] {
         assert!(!promises_action(t), "{t}");
     }
+}
+
+/// Replies seen in real use where no tool had run (and a few honest ones).
+#[test]
+fn replies_that_say_something_was_done_count_as_claims() {
+    for t in [
+        "I've opened Chrome and navigated to YouTube. Let me know if you need any further assistance!",
+        "I\u{2019}ve opened YouTube in Chrome for you.",
+        "Opened the GitHub repository DimeDataCloud/Open-Waddle.",
+        "Playing the channel\u{2019}s most recent video: \u{201c}A video title\u{201d}",
+        "I've searched for \"cooking videos\" on YouTube.",
+        "YouTube is now open in Chrome. Let me know if you need anything else!",
+        "Done \u{2014} GitHub is snapped to the left and YouTube Music is snapped to the right.",
+        "Sure! I went ahead and opened your inbox.",
+        "Okay, now playing Throwback Hits.",
+        "I have just sent the email.",
+        "All set: I set a reminder for 5 pm.",
+    ] {
+        assert!(claims_action(t), "{t}");
+    }
+    for t in [
+        "Yes, I am connected to your Gmail. I can read, search and send email for you.",
+        "I can't open that app: I couldn't find it on this computer.",
+        "I'll open it for you.",
+        "Press Ctrl+Alt+Space to talk to me, and press it again to send.",
+        "You're welcome! Let me know if there's anything else I can do.",
+        "I can help you find information, open apps and set reminders.",
+        "Should I open it in Chrome?",
+        "There's one open pull request.",
+    ] {
+        assert!(!claims_action(t), "{t}");
+    }
+}
+
+#[tokio::test]
+async fn a_claimed_action_without_any_tool_gets_one_nudge() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("I've opened YouTube in Chrome for you.", vec![]),
+        reply("", vec![call("list_windows", json!({}))]),
+        reply("YouTube is open.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let (outcome, message) = run_agent(&f, host.clone(), provider.clone(), CancellationToken::new()).await;
+
+    let second = provider.requests.lock().unwrap()[1].clone();
+    assert!(second.last().unwrap().text.contains("haven't used a tool"), "{:?}", second.last());
+    assert_eq!(host.gui_calls.lock().unwrap().clone(), vec![GuiAction::ListWindows]);
+    // After a tool has run, a summary of what was done is just the final reply.
+    assert_eq!((outcome, message.as_str(), provider.request_count()), (Outcome::Done, "YouTube is open.", 3));
+}
+
+#[tokio::test]
+async fn a_claim_repeated_after_the_nudge_ends_the_task() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("Opened it.", vec![]),
+        reply("I opened it in an earlier task.", vec![]),
+    ]));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let (outcome, message) = run_agent(&f, host, provider.clone(), CancellationToken::new()).await;
+    assert_eq!((outcome, message.as_str(), provider.request_count()), (Outcome::Done, "I opened it in an earlier task.", 2));
 }
 
 #[test]
@@ -643,11 +705,64 @@ async fn small_talk_gets_a_quick_answer_without_a_task() {
     assert!(provider.requests.lock().unwrap()[0][0].text.contains("pixel-art duck"));
 
     // The check said chat, but the chat model hands it back: it becomes a task.
-    session.user_message("open notepad".into());
+    session.user_message("I need Notepad".into());
     wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
     assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::OpenApp { name: "notepad".into() }));
     let task_req = provider.requests.lock().unwrap()[2].clone();
     assert!(task_req.iter().any(|m| m.text == "Aw, thank you! Quack!"), "the chat is remembered in the task");
+}
+
+#[tokio::test]
+async fn a_plain_request_for_action_skips_the_router_and_the_chat_lane() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("", vec![call("open_app", json!({"name": "chrome"}))]),
+        reply("Chrome is open.", vec![]),
+    ]));
+    // The router would have called it chat.
+    let config = SessionConfig { decider: Some(Arc::new(FixedDecider { screen: None, route: chat(0.99) })), ..session_config(&f, provider.clone()) };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    session.user_message("Uh, can you open up Chrome?".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::OpenApp { name: "chrome".into() }));
+    assert!(!provider.requests.lock().unwrap()[0][0].text.contains("pixel-art duck who lives on the user's desktop and helps"), "the chat lane wasn't asked");
+}
+
+#[tokio::test]
+async fn a_chat_reply_that_claims_an_action_becomes_a_task_and_isnt_remembered() {
+    let f = fixture();
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let provider = Arc::new(MockProvider::scripted(vec![
+        reply("I've opened YouTube in Chrome for you.", vec![]),
+        reply("", vec![call("open_app", json!({"name": "chrome"}))]),
+        reply("Chrome is open on YouTube.", vec![]),
+    ]));
+    let config = SessionConfig { decider: Some(Arc::new(FixedDecider { screen: None, route: chat(0.99) })), ..session_config(&f, provider.clone()) };
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
+    session.user_message("YouTube time".into());
+    wait_until(|| host.events().iter().any(|e| matches!(e, AgentEvent::TaskFinished { .. }))).await;
+    let shown: String = host.events().iter().filter_map(|e| if let AgentEvent::TextDelta { text, .. } = e { Some(text.clone()) } else { None }).collect();
+    assert!(!shown.contains("I've opened"), "the false claim never reached the bubble: {shown}");
+    let task_req = provider.requests.lock().unwrap()[1].clone();
+    assert!(!task_req.iter().any(|m| m.text.contains("I've opened")), "nor the task's memory");
+    assert!(host.gui_calls.lock().unwrap().contains(&GuiAction::OpenApp { name: "chrome".into() }));
+}
+
+#[tokio::test]
+async fn the_stop_message_says_how_the_task_was_stopped() {
+    let f = fixture();
+    let provider = Arc::new(MockProvider::scripted(vec![reply("Thinking hard.", vec![call("list_dir", json!({}))])]).with_delay(Duration::from_secs(5)));
+    let host = FakeHost::new(Box::new(|_| Some(Decision::Approved)));
+    let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), session_config(&f, provider.clone()));
+    assert!(!session.halt(HaltBy::Escape), "nothing to stop yet");
+    session.user_message("do something slow".into());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(session.halt(HaltBy::Escape));
+    wait_until(|| !session.is_busy()).await;
+    let finished = host.events().into_iter().find_map(|e| if let AgentEvent::TaskFinished { message, .. } = e { Some(message) } else { None });
+    assert_eq!(finished.as_deref(), Some("Stopped (you pressed Esc). I'm not touching anything."));
+    assert!(f.audit.recent(20).unwrap().iter().any(|r| r.kind == "halt_request" && r.detail.as_deref() == Some("you pressed Esc")));
 }
 
 fn routed(route: Route, p: f64, web: f64) -> Option<Routing> {
@@ -708,7 +823,7 @@ async fn stop_while_the_router_decides_cancels_everything() {
     let provider = Arc::new(MockProvider::scripted(vec![reply("Never sent.", vec![])]));
     let config = SessionConfig { decider: Some(Arc::new(SlowDecider)), ..session_config(&f, provider.clone()) };
     let session = Session::new(tokio::runtime::Handle::current(), host.clone(), f.audit.clone(), config);
-    session.user_message("open notepad".into());
+    session.user_message("I need Notepad".into());
     tokio::time::sleep(Duration::from_millis(20)).await;
     session.user_message("stop".into());
     assert!(host.events().iter().any(|e| matches!(e, AgentEvent::Notice { text } if text == "Stopping!")));

@@ -335,6 +335,31 @@ async fn routes_chat_research_and_tasks() {
     assert!(h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })), "a question about the screen is a task");
 }
 
+/// Messages from real use where the quick-reply lane used to claim it had done things.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.01)"]
+async fn the_chat_lane_never_claims_to_act() {
+    assert!(openrouter(), "routing needs Jev on OpenRouter");
+    let task = |h: &FakeHost| h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. }));
+    let chat_text = |h: &FakeHost| -> String {
+        if task(h) {
+            return String::new();
+        }
+        h.events().iter().filter_map(|e| if let AgentEvent::TextDelta { text, .. } = e { Some(text.clone()) } else { None }).collect()
+    };
+    let (h, _, _) = route_live("are you connected to my gmail").await;
+    let said = chat_text(&h);
+    assert!(task(&h) || said.to_lowercase().contains("not connected") || said.to_lowercase().contains("isn't connected"), "{said}");
+    let (h, _, _) = route_live("How do I use the push to talk feature?").await;
+    assert!(task(&h) || chat_text(&h).contains("Ctrl+Alt+Space"), "{}", chat_text(&h));
+    let (h, _, _) = route_live("Hey, can you hear me?").await;
+    assert!(!chat_text(&h).contains("20"), "no date or time unless asked: {}", chat_text(&h));
+    for text in ["YouTube please", "Thank you.", "Make a mess."] {
+        let (h, _, _) = route_live(text).await;
+        assert!(!waddle_core::agent::claims_action(&chat_text(&h)), "{text}: {}", chat_text(&h));
+    }
+}
+
 #[tokio::test]
 #[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.0003)"]
 async fn the_screen_check_knows_when_google_is_reachable() {

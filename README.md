@@ -110,7 +110,7 @@ Windows builds are not code-signed yet, so SmartScreen warns on first run: **Mor
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
 - **Screen and file contents are treated as data.** Text from the screen, files and command output is wrapped in tags with an unguessable id. The model is told never to follow instructions inside them.
-- **Stopping:** Escape (registered only while a task runs), the ■ Stop button, double-clicking the duck, the tray menu, or saying "stop".
+- **Stopping:** Escape (registered only while a task runs), the ■ Stop button, double-clicking the duck, the tray menu, or saying "stop". The message says which one stopped it ("Stopped (you pressed Esc).").
 - **Activity log:** every action, decision and result goes to a SQLite log that can only be appended to. Each entry is hash-chained to the previous one, so edits are detectable. Settings → Activity log → *Verify integrity*.
 - **No training on your data:** OpenRouter requests ask for providers that don't keep or train on prompts (`data_collection: deny`). Settings → Memory & privacy turns this off if a model you want needs it.
 - **Honest limits:** commands run in the workspace folder, but this is **not an OS sandbox**. Tier 3 approval is the real gate.

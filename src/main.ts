@@ -309,7 +309,7 @@ canvas.addEventListener("pointerup", (e) => {
 });
 
 canvas.addEventListener("dblclick", (e) => {
-  if (busy && overDuck(e.clientX, e.clientY)) void api.halt();
+  if (busy && overDuck(e.clientX, e.clientY)) void api.halt("double-click");
 });
 
 canvas.addEventListener("contextmenu", (e) => {
