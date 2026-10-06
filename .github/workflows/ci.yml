@@ -16,6 +16,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: No file names that Windows can't check out
+        run: |
+          if git ls-files | grep -nE '[:*?"<>|\\]'; then
+            echo "These file names can't be checked out on Windows. Rename them."
+            exit 1
+          fi
       - name: System libraries
         run: |
           sudo apt-get update

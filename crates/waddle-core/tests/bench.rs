@@ -371,7 +371,7 @@ async fn benchmark_models() {
         let line = format!("{model:45} {tag:8} {passed:3}/{:<3} hit {hits:3} {secs:6.1}s/task (model {model_secs:.1}s) ${:.5}/task {tokens:7.0} tok {steps:4.1} steps", results.len(), cost);
         println!("{line}");
         summary.push(line);
-        let file = bench_dir().join(format!("results/{}{}.json", model.replace('/', "__"), if tag.is_empty() { String::new() } else { format!("@{tag}") }));
+        let file = bench_dir().join(format!("results/{}{}.json", model.replace('/', "__").replace(':', "_"), if tag.is_empty() { String::new() } else { format!("@{tag}") }));
         let rows: Vec<Value> = results
             .iter()
             .map(|r| json!({ "id": r.id, "pass": r.pass, "hit": r.hit, "secs": r.secs, "model_secs": r.model_secs, "cost": r.cost, "tokens": r.tokens, "steps": r.steps, "note": r.note }))
