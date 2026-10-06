@@ -272,7 +272,7 @@ mod tests {
     }
 
     fn tier_of(name: &str, args: serde_json::Value, exists: bool) -> Tier {
-        classify(&ToolCall { id: "x".into(), name: name.into(), arguments: args }, &Ctx(exists)).tier
+        classify(&ToolCall { id: "x".into(), name: name.into(), arguments: args, echo: None }, &Ctx(exists)).tier
     }
 
     #[test]

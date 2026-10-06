@@ -106,7 +106,7 @@
               <label class="check" id="tasks-google-row"><input id="tasks_on_google" type="checkbox" /> Run tasks on Gemini too: about twice as fast, and free on Google's free tier (routing and web searches stay on the planner's service)</label>
               <p><button type="button" id="fast-test" class="link">Test</button> <span id="fast-status" class="muted" aria-live="polite"></span></p>
             </div>
-            <p id="google-note" class="muted hidden">Get a free Google key at <b>aistudio.google.com/apikey</b>. On Google's free tier, Google may use what you send to improve its products, and Waddle sends screen text, files and email text. Use it to try things, or turn on billing in Google for private use. Web searches (research, "who won last night?") still go through the planner's service, because Google's endpoint can't run them for Waddle.</p>
+            <p id="google-note" class="muted hidden">Get a free Google key at <b>aistudio.google.com/apikey</b>. On Google's free tier, Google may use what you send to improve its products, and Waddle sends screen text, files and email text. Use it to try things, or turn on billing in Google for private use. Web searches (research, "who won last night?") still go through the planner's service, because Google's endpoint can't run them for Waddle. The free key has limits (15 requests a minute for Flash-Lite, and a daily allowance per model): with an OpenRouter key too, Waddle then runs the same model there, for a fraction of a cent a step, until the limit lifts.</p>
             <label>Coordinates
               <select id="coord_mode">
                 <option value="auto">Auto (from model name)</option>

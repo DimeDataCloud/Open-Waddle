@@ -110,7 +110,7 @@ pub(crate) fn apply_line(
                 Some(other) => other.clone(),
                 None => json!({}),
             };
-            calls.push(ToolCall { id: super::new_call_id(), name: name.to_string(), arguments });
+            calls.push(ToolCall { id: super::new_call_id(), name: name.to_string(), arguments, echo: None });
         }
     }
     let done = v.get("done").and_then(Value::as_bool).unwrap_or(false);

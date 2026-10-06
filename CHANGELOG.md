@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.1: Gemini on a free key, for real
+
+The first test with a real Google key found that tasks on Google's own API failed at their second step. These fixes were checked against Google's API with a free key.
+
+- **Tasks on Google's API work.**
+  - Gemini 3 signs each tool call it makes and refuses the next request unless the signature comes back. Waddle now keeps it and sends it back, to Google only.
+  - When Gemini made two calls in one reply ("archive both emails"), Google's API sends them separately and Waddle merged them into one broken call. They now stay apart.
+- **Google's limits, handled.**
+  - A free key allows Gemini 3.5 Flash-Lite 15 requests a minute and gives each model a daily allowance (only 20 a day for 3.8 Flash).
+  - With an OpenRouter key too, a request Google turns down goes to the same model on OpenRouter at once (`google/gemini-3.5-flash-lite`, a fraction of a cent a step). The task carries on, and Waddle goes back to the free key when Google said the limit lifts. The spending page and the monthly budget count it as usual.
+  - With only a Google key, Waddle waits out a per-minute limit (Google asks for about 30 seconds) instead of failing. A used-up daily allowance is said plainly, with when it comes back, instead of "try again in a minute".
+  - No AI model is involved: Google's reply says which limit was hit and for how long.
+- **Token counts from Google** reach the spending page (at $0 on the free tier).
+- **Checked with a free Google key:**
+  - All 12 assistant jobs pass on Gemini 3.5 Flash-Lite through Google, about 2–3 seconds each.
+  - The live tasks (a file, clicking from the accessibility list and from a screenshot, a web form) and the chat-lane and routing checks pass, with Flash-Lite on Google next to OpenRouter.
+  - A task on 3.8 Flash after its daily allowance was used up finished on OpenRouter.
+  - The benchmarks and live tests can now run on Google directly (`WADDLE_BENCH_PROVIDER=google`, `WADDLE_LIVE=google`).
+- The assistant benchmark's fake Chrome now knows which page is open, so reading a page after clicking shows the page the click led to.
+
 ## 0.3.0: built from real use
 
 Designed from three batches of the first weeks' task traces, research on desktop agents, and model tests on Waddle's own benchmark. The plan and the evidence are in [docs/BLUEPRINT-0.3.md](docs/BLUEPRINT-0.3.md).

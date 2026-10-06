@@ -192,7 +192,19 @@ Through OpenRouter, with the 0.3.0 prompt and tools (arrange_window, read-in-the
 
 - Every model hit the right target on every screen task. The "passed" count is lower because the fake desktop doesn't change after a click, so a model that checks its work clicks again until it runs out of steps (see [Limits](#the-benchmark-bench)).
 - **Reading:** Flash-Lite is the quickest model that passes everything, and quick is what matters most once a task is right: a model step is most of the wait (the median step in real use was 3.2 s on the default). 3.8 Flash is as accurate but slower and costlier, so it isn't worth it for Waddle's short tasks.
-- **On a free Google key** Flash-Lite costs nothing. Keep OpenRouter's key too: routing (Jev), the screen check and web searches stay there, and if the Google key is missing or rate-limited out, the same model runs through OpenRouter instead (`google/gemini-3.5-flash-lite`). With only a Google key, everything runs on Google (no quick chat lane: every message goes to the planner).
+- **On a free Google key** Flash-Lite costs nothing. Keep OpenRouter's key too: routing (Jev), the screen check and web searches stay there, and if the Google key is missing or over one of Google's limits, the same model runs through OpenRouter instead (`google/gemini-3.5-flash-lite`). With only a Google key, everything runs on Google (no quick chat lane: every message goes to the planner).
+
+### On Google's own API with a free key (0.3.1, October 6, 2026)
+
+The first run with a real Google key failed every task at its second step: Gemini 3 signs its tool calls and Google refuses a conversation that drops the signature (OpenRouter handles this itself). With 0.3.1's fixes:
+
+| Model, on a free Google key | Assistant jobs (12) | Time per job | Screen tasks (21): passed / right target | Time per screen task | Cost |
+|---|---|---|---|---|---|
+| `gemini-3.5-flash-lite` | **12/12** | **2.4 s** | **19 / 21** | **3.1 s** | $0 |
+
+- Times leave out two waits for the free tier's per-minute limit; the screen run was paced to 13 requests a minute.
+- Flash-Lite did better here than through OpenRouter (16/21 screen tasks, 5.0 s). Keeping Gemini's signed calls intact may help it carry its reasoning from step to step; one run each, so treat the difference as a hint.
+- **Free-tier limits measured on a new key:** Flash-Lite allows 15 requests a minute, and Google asks for about 30 seconds after a burst. 3.8 Flash allows only 20 requests a day, a few tasks' worth, so it isn't usable on a free key. Google's reply says which limit was hit, so Waddle moves the request to OpenRouter (or waits, or says the day's allowance is used up) without asking a model.
 - **Not yet checked against Google's own endpoint** (no key in the test environment). Use the **Test** button in Settings after pasting a key.
 - These runs cost about $0.21 in all.
 

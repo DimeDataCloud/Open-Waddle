@@ -1,0 +1,242 @@
+{
+  "cost": 0.0,
+  "hits": 21,
+  "model": "gemini-3.5-flash-lite",
+  "passed": 19,
+  "results": [
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "playlist",
+      "model_secs": 3.359474913,
+      "note": "Done [windows look click(598,612)] I've started playing your Lo-fi Study Mix playlist!",
+      "pass": true,
+      "secs": 3.364531334,
+      "steps": 2,
+      "tokens": 8957
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "search",
+      "model_secs": 4.207068331,
+      "note": "Done [windows look type(\"rubber duck debugging\" @687,26) keys(enter)] I've searched DuckTube for rubber duck debugging.",
+      "pass": true,
+      "secs": 4.211417332,
+      "steps": 3,
+      "tokens": 13483
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "open-email",
+      "model_secs": 6.767208647999997,
+      "note": "StepLimit [windows look click(360,336) look click(360,336) look click(360,335)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 6.7734510259999965,
+      "steps": 6,
+      "tokens": 27633
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "compose",
+      "model_secs": 2.3861497410000005,
+      "note": "Done [windows look click(72,101)] I've opened a new email for you.",
+      "pass": true,
+      "secs": 2.3882702160000004,
+      "steps": 2,
+      "tokens": 8944
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "delete-icon",
+      "model_secs": 2.519182347000001,
+      "note": "Done [windows look click(936,89)] I've deleted the email you were reading.",
+      "pass": true,
+      "secs": 2.522191564,
+      "steps": 2,
+      "tokens": 8932
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "toggle",
+      "model_secs": 6.901004298999997,
+      "note": "StepLimit [windows look click(1339,231) look click(1339,231) look click(1341,231)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 6.907085464999998,
+      "steps": 6,
+      "tokens": 27521
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "nav",
+      "model_secs": 2.8251809219999995,
+      "note": "Done [windows look click(101,241)] Here are your Bluetooth settings!",
+      "pass": true,
+      "secs": 2.828299078999999,
+      "steps": 2,
+      "tokens": 8936
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "bold",
+      "model_secs": 2.6547295369999997,
+      "note": "Done [windows look click(121,120)] I've made the selected text bold.",
+      "pass": true,
+      "secs": 2.6576135470000004,
+      "steps": 2,
+      "tokens": 8937
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "dialog",
+      "model_secs": 2.883503459,
+      "note": "Done [windows look click(734,460)] Closed!",
+      "pass": true,
+      "secs": 2.8863729409999994,
+      "steps": 2,
+      "tokens": 8920
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "file-row",
+      "model_secs": 3.0948939810000002,
+      "note": "Done [windows look click(338,289)] I've opened budget-2026.xlsx for you.",
+      "pass": true,
+      "secs": 3.0981164050000007,
+      "steps": 2,
+      "tokens": 8957
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "sidebar",
+      "model_secs": 1.955035038000001,
+      "note": "Done [windows look click(65,305)] Here is your Downloads folder.",
+      "pass": true,
+      "secs": 1.9576016869999995,
+      "steps": 2,
+      "tokens": 8944
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "form",
+      "model_secs": 3.9205935489999995,
+      "note": "Done [windows look type(\"Ada\" @360,358) click(445,431) look type(\"Ada\" @360,358) click(445,431)] I've subscribed as Ada.",
+      "pass": true,
+      "secs": 3.9268498560000005,
+      "steps": 4,
+      "tokens": 18355
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "just-answer",
+      "model_secs": 1.079486214,
+      "note": "Done [windows look] The subject of the open email is Offsite agenda.",
+      "pass": true,
+      "secs": 1.0807219640000003,
+      "steps": 1,
+      "tokens": 4462
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "write-file",
+      "model_secs": 2.528603800999999,
+      "note": "Done [windows look] I've created hello.txt for you.",
+      "pass": true,
+      "secs": 2.531848718999999,
+      "steps": 2,
+      "tokens": 8961
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "a11y",
+      "model_secs": 2.600405437000001,
+      "note": "Done [windows elements look element(2)] I closed Notepad without saving.",
+      "pass": true,
+      "secs": 2.603697361,
+      "steps": 2,
+      "tokens": 9436
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "where-toggle",
+      "model_secs": 2.5258104160000006,
+      "note": "Done [windows look PointAt { x: 1336.3200000000002, y: 231.35999999999999, label: \"Night light\" }] It's right here!",
+      "pass": true,
+      "secs": 2.527888699,
+      "steps": 2,
+      "tokens": 8956
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "where-compose",
+      "model_secs": 2.4429112359999987,
+      "note": "Done [windows look PointAt { x: 70.56, y: 100.8, label: \"Compose\" }] Click the Compose button on the top left.",
+      "pass": true,
+      "secs": 2.4461084059999987,
+      "steps": 2,
+      "tokens": 8965
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "scroll",
+      "model_secs": 3.220414355000001,
+      "note": "Done [windows look Scroll { dx: 0, dy: 5, at: Some((720.0, 480.0)) }] I've scrolled down for you.",
+      "pass": true,
+      "secs": 3.2226369320000003,
+      "steps": 2,
+      "tokens": 8954
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "drag",
+      "model_secs": 2.366761286000001,
+      "note": "Done [windows look Drag { from: (360.0, 289.92), to: (60.480000000000004, 305.28000000000003) }] I've moved budget-2026.xlsx to the Downloads folder.",
+      "pass": true,
+      "secs": 2.369328856000001,
+      "steps": 2,
+      "tokens": 8981
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "copy",
+      "model_secs": 2.057482394,
+      "note": "Done [windows look WriteClipboard { text: \"Offsite agenda\" }] I've copied the subject to your clipboard.",
+      "pass": true,
+      "secs": 2.0595604960000005,
+      "steps": 2,
+      "tokens": 8950
+    },
+    {
+      "cost": 0.0,
+      "hit": true,
+      "id": "remind",
+      "model_secs": 2.0935732209999998,
+      "note": "Done [windows look] I've set a reminder to stretch in 20 minutes!",
+      "pass": true,
+      "secs": 2.097155542000001,
+      "steps": 2,
+      "tokens": 8969
+    }
+  ],
+  "runs": 21,
+  "secs": 3.0695594012857144,
+  "tag": "google-free"
+}

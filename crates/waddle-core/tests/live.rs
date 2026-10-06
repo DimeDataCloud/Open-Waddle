@@ -8,6 +8,11 @@
 //!
 //!   WADDLE_LIVE=openrouter OPENROUTER_API_KEY=... cargo test -p waddle-core --test live -- --ignored --nocapture
 //!
+//! With quick replies and tasks on Google's Gemini API (a free key from AI Studio;
+//! the router, Jev, still runs on OpenRouter):
+//!
+//!   WADDLE_LIVE=google GEMINI_API_KEY=... OPENROUTER_API_KEY=... cargo test -p waddle-core --test live -- --ignored --nocapture
+//!
 //! WADDLE_LIVE_MODEL and WADDLE_OLLAMA_URL override the model and server.
 
 mod common;
@@ -22,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 use waddle_core::agent::{Agent, AgentDeps, TaskStatus};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
-use waddle_core::llm::{build_provider, ChatRequest, ImageData};
+use waddle_core::llm::{build_fast_provider, build_provider, route, ChatRequest, ImageData, Provider};
 use waddle_core::tools::fs::Workspace;
 use waddle_core::tools::{ElementInfo, GuiAction, WindowInfo};
 use waddle_core::{AgentEvent, Decision, Host, Outcome, Session, SessionConfig, Settings};
@@ -31,7 +36,23 @@ fn openrouter() -> bool {
     std::env::var("WADDLE_LIVE").is_ok_and(|v| v == "openrouter")
 }
 
+/// Quick replies on Google's Gemini API, and tasks too with a Gemini planner, as when the user
+/// ticks "Run tasks on Gemini too".
+fn google() -> bool {
+    std::env::var("WADDLE_LIVE").is_ok_and(|v| v == "google")
+}
+
 fn live_settings() -> Settings {
+    if google() {
+        return Settings {
+            fast_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".into(),
+            model: std::env::var("WADDLE_LIVE_MODEL").unwrap_or_else(|_| "gemini-3.5-flash-lite".into()),
+            fast_model: std::env::var("WADDLE_LIVE_FAST_MODEL").unwrap_or_else(|_| "gemini-3.5-flash-lite".into()),
+            tier2_countdown_ms: 20,
+            max_steps: 6,
+            ..Settings::default()
+        };
+    }
     if openrouter() {
         let defaults = Settings::default();
         return Settings {
@@ -53,6 +74,12 @@ fn live_settings() -> Settings {
     // Use every core here so the run measures the model, not the cap.
     s.ollama.num_thread = std::thread::available_parallelism().ok().map(|n| n.get() as u32);
     s
+}
+
+/// Built the way the app builds it: the planner's service, plus Google's when it's set.
+fn live_provider(settings: &Settings) -> Arc<dyn Provider> {
+    let main = build_provider(settings, std::env::var("OPENROUTER_API_KEY").ok().filter(|_| openrouter() || google()));
+    route(settings, main, build_fast_provider(settings, std::env::var("GEMINI_API_KEY").ok()))
 }
 
 struct Run {
@@ -77,7 +104,7 @@ async fn run_with(goal: &str, setup: impl FnOnce(&FakeHost), warm: bool) -> Run 
     setup(&host);
     let settings = live_settings();
     let deps = AgentDeps {
-        provider: build_provider(&settings, std::env::var("OPENROUTER_API_KEY").ok().filter(|_| openrouter())),
+        provider: live_provider(&settings),
         host: host.clone(),
         audit: Arc::new(AuditLog::open_in_memory().unwrap()),
         workspace: workspace.clone(),
@@ -286,7 +313,7 @@ async fn route_live(text: &str) -> (Arc<FakeHost>, f64, f64) {
     let settings = live_settings();
     let key = std::env::var("OPENROUTER_API_KEY").ok();
     let config = SessionConfig {
-        provider: build_provider(&settings, key.clone()),
+        provider: live_provider(&settings),
         decider: waddle_core::decide::Jev::for_settings(&settings, key.as_deref()).map(|j| Arc::new(j) as Arc<dyn waddle_core::decide::Decider>),
         settings,
         workspace,
@@ -323,7 +350,7 @@ async fn route_live(text: &str) -> (Arc<FakeHost>, f64, f64) {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.02)"]
 async fn routes_chat_research_and_tasks() {
-    assert!(openrouter(), "routing needs Jev on OpenRouter");
+    assert!(openrouter() || google(), "routing needs Jev on OpenRouter");
     let (h, first, _) = route_live("thanks, you're the best!").await;
     assert!(!h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. })), "small talk starts no task");
     assert!(first < 4.0, "chat answered in {first:.1}s");
@@ -340,7 +367,7 @@ async fn routes_chat_research_and_tasks() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.01)"]
 async fn the_chat_lane_never_claims_to_act() {
-    assert!(openrouter(), "routing needs Jev on OpenRouter");
+    assert!(openrouter() || google(), "routing needs Jev on OpenRouter");
     let task = |h: &FakeHost| h.events().iter().any(|e| matches!(e, AgentEvent::TaskStarted { .. }));
     let chat_text = |h: &FakeHost| -> String {
         if task(h) {
@@ -415,7 +442,7 @@ async fn mail_importance_on_the_labelled_set() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs WADDLE_LIVE=openrouter and a key (about $0.01 per fast model)"]
 async fn chat_and_research_with_the_fast_model() {
-    assert!(openrouter(), "needs Jev on OpenRouter");
+    assert!(openrouter() || google(), "needs Jev on OpenRouter");
     println!("fast model: {}", live_settings().fast_model);
     for msg in [
         "thanks, you're a star!",

@@ -15,6 +15,8 @@
 //!
 //! Local models: WADDLE_BENCH_PROVIDER=ollama (WADDLE_OLLAMA_URL, default
 //! http://localhost:11434) runs the tasks one at a time with a longer timeout.
+//! Google's Gemini API: WADDLE_BENCH_PROVIDER=google with GEMINI_API_KEY (model
+//! names without "google/"; a free key needs WADDLE_BENCH_RPM).
 
 mod common;
 
@@ -210,6 +212,9 @@ async fn run_task(model: &str, task: &Value, suite: &Suite, key: &str) -> TaskRe
     }
 
     let mut settings = Settings { model: model.into(), tier2_countdown_ms: 10, max_steps: 6, ..Settings::default() };
+    if google() {
+        settings.base_url = "https://generativelanguage.googleapis.com/v1beta/openai/".into();
+    }
     if local() {
         settings.provider = ProviderKind::Ollama;
         settings.base_url = std::env::var("WADDLE_OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".into());
@@ -322,10 +327,21 @@ fn local() -> bool {
     std::env::var("WADDLE_BENCH_PROVIDER").is_ok_and(|v| v == "ollama")
 }
 
+/// Gemini models on Google's own API (GEMINI_API_KEY; names without "google/").
+fn google() -> bool {
+    std::env::var("WADDLE_BENCH_PROVIDER").is_ok_and(|v| v == "google")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore = "spends money: needs OPENROUTER_API_KEY and WADDLE_BENCH_MODELS"]
 async fn benchmark_models() {
-    let key = if local() { String::new() } else { std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY") };
+    let key = if local() {
+        String::new()
+    } else if google() {
+        std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY")
+    } else {
+        std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY")
+    };
     let models: Vec<String> = std::env::var("WADDLE_BENCH_MODELS").expect("WADDLE_BENCH_MODELS").split(',').map(|s| s.trim().to_string()).collect();
     let repeat: usize = std::env::var("WADDLE_BENCH_REPEAT").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
     let suite = Arc::new(load());

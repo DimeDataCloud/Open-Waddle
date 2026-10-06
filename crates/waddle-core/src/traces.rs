@@ -314,7 +314,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = TraceStore::new(dir.path().join("traces"));
         let png = base64::engine::general_purpose::STANDARD.encode([137u8, 80, 78, 71]);
-        let call = ToolCall { id: "c1".into(), name: "click".into(), arguments: json!({"x": 1, "y": 2}) };
+        let call = ToolCall { id: "c1".into(), name: "click".into(), arguments: json!({"x": 1, "y": 2}), echo: None };
         let messages = vec![
             Message::system("sys"),
             Message::user_with_image("play my playlist", ImageData { mime: "image/png".into(), base64: png }),
@@ -350,7 +350,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = TraceStore::new(dir.path().join("traces"));
         let usage = Usage::default();
-        let call = ToolCall { id: "c1".into(), name: "open_app".into(), arguments: json!({"name": "chrome"}) };
+        let call = ToolCall { id: "c1".into(), name: "open_app".into(), arguments: json!({"name": "chrome"}), echo: None };
         let memory_then = |goal: &str, rest: Vec<Message>| {
             let mut m = vec![Message::system("sys"), Message::user("earlier"), Message::assistant("I've opened YouTube in Chrome for you.", vec![]), Message::user(goal)];
             m.extend(rest);

@@ -704,7 +704,7 @@ mod tests {
     #[test]
     fn duck_tricks_and_window_arranging_parse() {
         let c = coords(CoordMode::Norm1000);
-        let t = |name: &str, args: Value| parse_gui_action(&ToolCall { id: "1".into(), name: name.into(), arguments: args }, &c);
+        let t = |name: &str, args: Value| parse_gui_action(&ToolCall { id: "1".into(), name: name.into(), arguments: args, echo: None }, &c);
         assert_eq!(t("duck", json!({"trick": "make a mess"})).unwrap(), GuiAction::Duck { trick: "mess".into() });
         assert_eq!(t("duck", json!({"trick": "fly_around"})).unwrap(), GuiAction::Duck { trick: "fly_around".into() });
         assert!(t("duck", json!({"trick": "explode"})).is_err());
@@ -728,7 +728,7 @@ mod tests {
     }
 
     fn call(name: &str, args: Value) -> ToolCall {
-        ToolCall { id: "1".into(), name: name.into(), arguments: args }
+        ToolCall { id: "1".into(), name: name.into(), arguments: args, echo: None }
     }
 
     #[test]

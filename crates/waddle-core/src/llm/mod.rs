@@ -32,6 +32,10 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: Value,
+    /// What the service wants back with this call on the next request, unchanged: Gemini 3
+    /// on Google's own API signs its calls and refuses a conversation that drops the signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub echo: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,6 +145,25 @@ impl std::fmt::Display for Usage {
     }
 }
 
+/// A free tier said no: a per-minute limit that lifts soon, or a day's allowance used up.
+/// `Routed` reads it to send the request to the same model on OpenRouter instead.
+#[derive(Debug)]
+pub struct QuotaError {
+    pub per_day: bool,
+    /// How long the service says to wait.
+    pub retry: Option<std::time::Duration>,
+    /// What to tell the user.
+    pub message: String,
+}
+
+impl std::fmt::Display for QuotaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for QuotaError {}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StreamEvent {
     TextDelta(String),
@@ -180,6 +203,10 @@ pub struct Routed {
     google: bool,
     /// What the planner's service runs instead when the second service can't take a request.
     fallback: String,
+    /// The planner's service is OpenRouter, which has every Gemini model too ("google/…").
+    main_is_openrouter: bool,
+    /// Until when Google's free key is left alone after one of its limits.
+    resting_until: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 /// A model name for Google's own API ("gemini-3.5-flash-lite"), not OpenRouter's ("google/…").
@@ -197,6 +224,8 @@ impl Routed {
             fast_has_web,
             google: false,
             fallback: main_model.to_string(),
+            main_is_openrouter: false,
+            resting_until: std::sync::Mutex::new(None),
         }
     }
 
@@ -205,10 +234,31 @@ impl Routed {
     /// OpenRouter (`main_is_openrouter`), or as the planner's model elsewhere.
     pub fn with_google(mut self, main_is_openrouter: bool) -> Self {
         self.google = true;
+        self.main_is_openrouter = main_is_openrouter;
         if main_is_openrouter && is_google_name(&self.main_model) {
             self.fallback = format!("google/{}", self.main_model);
         }
         self
+    }
+
+    /// The same model on OpenRouter (paid), for when Google's free key is over a limit.
+    fn paid_twin(&self, model: &str) -> Option<String> {
+        (self.google && self.main_is_openrouter && is_google_name(model)).then(|| format!("google/{model}"))
+    }
+
+    fn google_resting(&self) -> bool {
+        self.resting_until.lock().unwrap().is_some_and(|until| std::time::Instant::now() < until)
+    }
+
+    /// Leaves the free key alone until Google said to come back (a minute, or an hour for a
+    /// day's allowance, when it doesn't say).
+    fn rest_google(&self, q: &QuotaError) {
+        let wait = q.retry.unwrap_or(std::time::Duration::from_secs(if q.per_day { 3600 } else { 60 }));
+        *self.resting_until.lock().unwrap() = Some(std::time::Instant::now() + wait);
+    }
+
+    fn goes_to_google(&self, provider: &Arc<dyn Provider>) -> bool {
+        self.google && self.fast.as_ref().is_some_and(|f| Arc::ptr_eq(f, provider))
     }
 
     /// Where `req` goes, and the request to send there.
@@ -229,8 +279,25 @@ impl Routed {
 #[async_trait]
 impl Provider for Routed {
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
-        let (provider, req) = self.pick(req);
-        provider.chat(req, on_event).await
+        let (provider, routed) = self.pick(req);
+        let twin = self.paid_twin(req.model).filter(|_| self.goes_to_google(provider));
+        let Some(twin) = twin else { return provider.chat(routed, on_event).await };
+        // Over one of the free key's limits: the same model on OpenRouter carries on with the
+        // same conversation (it accepts Google's calls), and Google gets it back afterwards.
+        if self.google_resting() {
+            return self.main.chat(ChatRequest { model: &twin, ..req }, on_event).await;
+        }
+        match provider.chat(routed, on_event).await {
+            Err(e) => match e.downcast_ref::<QuotaError>() {
+                Some(q) => {
+                    log::warn!("{q}; {twin} on OpenRouter answers until it lifts");
+                    self.rest_google(q);
+                    self.main.chat(ChatRequest { model: &twin, ..req }, on_event).await
+                }
+                None => Err(e),
+            },
+            ok => ok,
+        }
     }
 
     async fn warm(&self, req: ChatRequest<'_>) {
@@ -239,13 +306,29 @@ impl Provider for Routed {
     }
 }
 
+/// The planner's service, joined by the quick-reply service when `settings` names one of its
+/// own (see `Routed`). `fast` is None while that service has no key yet.
+pub fn route(settings: &Settings, main: Arc<dyn Provider>, fast: Option<Arc<dyn Provider>>) -> Arc<dyn Provider> {
+    if !settings.has_fast_endpoint() {
+        return main;
+    }
+    let mut routed = Routed::new(main, fast, &settings.model, settings.fast_model(), settings.fast_base_url.contains("openrouter.ai"));
+    if openai_compat::is_google(&settings.fast_base_url) {
+        // A Gemini planner model then runs on the free Google key too.
+        routed = routed.with_google(settings.is_openrouter());
+    }
+    Arc::new(routed)
+}
+
 /// The quick-reply service when `settings` names one of its own (`fast_base_url`).
 pub fn build_fast_provider(settings: &Settings, api_key: Option<String>) -> Option<Arc<dyn Provider>> {
     settings.has_fast_endpoint().then(|| {
-        Arc::new(
-            openai_compat::OpenAiCompat::new(settings.fast_base_url.trim().to_string(), api_key)
-                .with_stall_timeout(std::time::Duration::from_secs(if settings.fast_is_local() { 300 } else { 60 })),
-        ) as Arc<dyn Provider>
+        let fast = openai_compat::OpenAiCompat::new(settings.fast_base_url.trim().to_string(), api_key)
+            .with_stall_timeout(std::time::Duration::from_secs(if settings.fast_is_local() { 300 } else { 60 }));
+        // Next to OpenRouter, a Google limit moves the request there at once (see `Routed`)
+        // instead of waiting for the limit to lift.
+        let fast = if settings.is_openrouter() { fast.without_quota_wait() } else { fast };
+        Arc::new(fast) as Arc<dyn Provider>
     })
 }
 
@@ -327,6 +410,53 @@ mod routed_tests {
         let r = Routed::new(main.clone(), None, "openai/gpt-6-luna", "gemini-3.5-flash-lite", false);
         ask(&r, "gemini-3.5-flash-lite", None).await;
         assert_eq!(*main.models.lock().unwrap(), ["openai/gpt-6-luna"]);
+    }
+
+    /// Google's free key, over one of its limits.
+    struct OverLimit {
+        per_day: bool,
+        asked: std::sync::Mutex<usize>,
+    }
+
+    #[async_trait]
+    impl Provider for OverLimit {
+        async fn chat(&self, _req: ChatRequest<'_>, _on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
+            *self.asked.lock().unwrap() += 1;
+            Err(anyhow::Error::new(QuotaError { per_day: self.per_day, retry: Some(std::time::Duration::from_secs(30)), message: "over the limit".into() }).context("Google"))
+        }
+    }
+
+    #[tokio::test]
+    async fn over_a_google_limit_the_same_model_carries_on_on_openrouter() {
+        let (main, _) = pair();
+        let google = Arc::new(OverLimit { per_day: false, asked: Default::default() });
+        let r = Routed::new(main.clone(), Some(google.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(true);
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-3.5-flash-lite"], "answered at once on OpenRouter");
+        // Until Google said to come back, the free key isn't asked again.
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*google.asked.lock().unwrap(), 1);
+        assert_eq!(main.models.lock().unwrap().len(), 2);
+        // Afterwards it is.
+        *r.resting_until.lock().unwrap() = Some(std::time::Instant::now());
+        ask(&r, "gemini-3.5-flash-lite", None).await;
+        assert_eq!(*google.asked.lock().unwrap(), 2);
+        // The planner's own OpenRouter model never touches Google.
+        ask(&r, "openai/gpt-6-luna", None).await;
+        assert_eq!(main.models.lock().unwrap().last().unwrap(), "openai/gpt-6-luna");
+    }
+
+    #[tokio::test]
+    async fn with_no_openrouter_to_fall_back_on_the_limit_is_reported() {
+        let (main, _) = pair();
+        let google = Arc::new(OverLimit { per_day: true, asked: Default::default() });
+        // The planner's service isn't OpenRouter (a local server, say): no paid twin to move to.
+        let r = Routed::new(main.clone(), Some(google.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(false);
+        let msgs = [Message::user("hi")];
+        let req = ChatRequest { model: "gemini-3.5-flash-lite", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: None };
+        let err = r.chat(req, &mut |_| {}).await.unwrap_err();
+        assert!(err.downcast_ref::<QuotaError>().is_some(), "{err:#}");
+        assert!(main.models.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
