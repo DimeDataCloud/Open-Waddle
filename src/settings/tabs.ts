@@ -102,6 +102,9 @@ export class Tabs {
       b.tabIndex = selected || (q && b.dataset.tab === TABS[0].id) ? 0 : -1;
     }
     this.noMatch.classList.toggle("hidden", !q || shown > 0);
-    this.saveBar?.classList.toggle("hidden", !q && this.current === "diagnostics");
+    // Save only where something saveable shows: the sections in Save's own form.
+    const form = this.saveBar?.closest("form");
+    const saveable = form ? this.sections.some((s) => !s.classList.contains("hidden") && form.contains(s)) : this.current !== "diagnostics";
+    this.saveBar?.classList.toggle("hidden", !saveable);
   }
 }

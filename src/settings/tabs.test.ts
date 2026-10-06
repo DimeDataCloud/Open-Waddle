@@ -46,6 +46,10 @@ describe("Tabs", () => {
     search.value = "key";
     search.dispatchEvent(new Event("input"));
     expect(visible()).toEqual(["Brain"]);
+    search.value = "activity log";
+    search.dispatchEvent(new Event("input"));
+    expect(visible()).toEqual(["Activity log"]);
+    expect($("save").classList.contains("hidden")).toBe(true);
     search.value = "zebra";
     search.dispatchEvent(new Event("input"));
     expect(visible()).toEqual([]);

@@ -31,7 +31,7 @@ pub fn plain(e: &anyhow::Error) -> String {
 /// Self-test: the default microphone's name, without recording anything.
 pub fn probe() -> anyhow::Result<String> {
     let device = cpal::default_host().default_input_device().ok_or_else(|| anyhow!("no microphone found"))?;
-    device.default_input_config().context("microphone config")?;
+    device.default_input_config().context("the microphone can't be opened")?;
     Ok(device.to_string())
 }
 
@@ -43,7 +43,7 @@ pub fn start() -> anyhow::Result<Recording> {
     let thread = std::thread::Builder::new().name("waddle-mic".into()).spawn(move || {
         let setup = || -> anyhow::Result<(cpal::Stream, u32)> {
             let device = cpal::default_host().default_input_device().ok_or_else(|| anyhow!("no microphone found"))?;
-            let config = device.default_input_config().context("microphone config")?;
+            let config = device.default_input_config().context("the microphone can't be opened")?;
             let rate = config.sample_rate();
             let stream_config: cpal::StreamConfig = config.into();
             let channels = config.channels() as usize;

@@ -756,6 +756,35 @@ $("vo-test").addEventListener("click", async () => {
   }
 });
 $("open-ws").addEventListener("click", () => void invoke("open_workspace"));
+$("update-check").addEventListener("click", async () => {
+  const status = $("update-status");
+  $("update-install").classList.add("hidden");
+  status.textContent = "Checking…";
+  try {
+    const u = await invoke<{ current: string; version: string | null; notes: string | null }>("update_check");
+    if (u.version) {
+      status.textContent = `Version ${u.version} is available (you have ${u.current}).${u.notes ? ` ${u.notes.split("\n")[0]}` : ""}`;
+      $("update-install").classList.remove("hidden");
+    } else {
+      status.textContent = `You're on the latest version (${u.current}).`;
+    }
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
+
+$("update-install").addEventListener("click", async () => {
+  const status = $("update-status");
+  $("update-install").classList.add("hidden");
+  status.textContent = "Downloading and checking the update… Waddle will restart.";
+  try {
+    await invoke("update_install");
+  } catch (err) {
+    status.textContent = String(err);
+    $("update-install").classList.remove("hidden");
+  }
+});
+
 $("verify").addEventListener("click", async () => {
   const r = await invoke<{ ok: boolean; entries: number; first_bad_id: number | null }>("audit_verify");
   $("verify-result").textContent = r.ok
@@ -908,7 +937,23 @@ $("w-detect").addEventListener("click", async () => {
   }
 });
 
-async function finishWelcome(skip: boolean): Promise<void> {
+/** Ticks the optional steps that are already done (e.g. Google connected before). */
+async function welcomeTicks(): Promise<void> {
+  const tick = (id: string, done: boolean) => {
+    $(id).textContent = done ? "✓" : "○";
+    $(id).classList.toggle("done", done);
+    $(id).setAttribute("aria-label", done ? "done" : "not set up");
+  };
+  try {
+    tick("w-google-tick", (await invoke<GoogleStatus>("google_status")).connected);
+    tick("w-chrome-tick", (await invoke<BrowserStatus>("browser_status")).connected);
+  } catch {
+    // The ticks are a nicety.
+  }
+}
+
+/** Finishes the welcome; `then` is a section to open afterwards (Google or Chrome setup). */
+async function finishWelcome(skip: boolean, then?: string): Promise<void> {
   const status = $("w-status");
   let settings: Settings = { ...current, first_run_done: true };
   let apiKey: string | null = null;
@@ -935,9 +980,19 @@ async function finishWelcome(skip: boolean): Promise<void> {
     const view = await invoke<SettingsView>("save_settings", { settings, apiKey, sttKey: null, mcpEnv: {} });
     fill(view);
     showWelcome(false);
+    if (then) {
+      tabs.reveal($(then));
+      // Below the sticky header, not under it.
+      const header = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
+      window.scrollTo({ top: $(then).getBoundingClientRect().top + window.scrollY - header - 8 });
+    }
   } catch (err) {
     status.textContent = `Couldn't save: ${err}`;
   }
+}
+
+for (const b of document.querySelectorAll<HTMLButtonElement>("#welcome [data-setup]")) {
+  b.addEventListener("click", () => void finishWelcome(false, b.dataset.setup));
 }
 
 $("w-done").addEventListener("click", () => void finishWelcome(false));
@@ -948,6 +1003,7 @@ void invoke<SettingsView>("get_settings").then((view) => {
   if (view.demo && !view.settings.first_run_done) {
     $("w_color").value = view.settings.character.color;
     showWelcome(true);
+    void welcomeTicks();
   }
 });
 void loadTraces();

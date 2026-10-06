@@ -471,3 +471,39 @@ button.primary {
 .color-row {
   white-space: nowrap;
 }
+
+.extras {
+  margin: 12px 0;
+}
+.extra {
+  margin: 6px 0;
+}
+.tick {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+}
+.tick.done {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+/* Windows contrast themes: system colours, with borders where colour alone told things apart. */
+@media (forced-colors: active) {
+  fieldset,
+  .choice,
+  #tabs button,
+  button,
+  input,
+  select,
+  textarea {
+    border: 1px solid CanvasText;
+  }
+  #tabs button[aria-selected="true"],
+  .choice:has(input:checked) {
+    border: 2px solid Highlight;
+  }
+  .tick.done {
+    color: Highlight;
+  }
+}

@@ -1,12 +1,14 @@
 {
   "name": "waddle",
   "private": true,
-  "version": "0.2.8",
+  "license": "MIT",
+  "version": "0.2.9",
   "description": "Project Waddle: an embodied desktop AI agent that walks to what it acts on.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && vite build && npm run build:extension",
+    "pack:extension": "node scripts/pack-extension.mjs",
     "build:extension": "tsc -p extension/tsconfig.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p extension/tsconfig.json",
     "test": "vitest run",

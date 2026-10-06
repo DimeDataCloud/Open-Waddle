@@ -98,6 +98,44 @@ pub async fn detect_ollama(base_url: Option<String>) -> CmdResult<(Vec<String>, 
     Ok((models, pick))
 }
 
+#[derive(Serialize)]
+pub struct UpdateInfo {
+    pub current: String,
+    pub version: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Settings → "Check for updates": asks the release page whether a newer, signed
+/// build exists. Only ever started by the user's click; no model tool reaches it.
+#[tauri::command]
+pub async fn update_check(app: tauri::AppHandle) -> CmdResult<UpdateInfo> {
+    use tauri_plugin_updater::UpdaterExt;
+    let current = app.package_info().version.to_string();
+    let updater = app.updater().map_err(|e| format!("Updates aren't set up in this build ({e})"))?;
+    match updater.check().await {
+        Ok(Some(u)) => Ok(UpdateInfo { current, version: Some(u.version), notes: u.body }),
+        Ok(None) => Ok(UpdateInfo { current, version: None, notes: None }),
+        Err(e) => Err(format!("Couldn't check for updates: {e}")),
+    }
+}
+
+/// Downloads the update found by `update_check`, checks its signature against the key
+/// built into this app, and installs it. Refuses while a task is running.
+#[tauri::command]
+pub async fn update_install(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    use tauri_plugin_updater::UpdaterExt;
+    if state.session.is_busy() {
+        return Err("Waddle is in the middle of a task. Try again when it's done.".into());
+    }
+    let updater = app.updater().map_err(err)?;
+    let Some(update) = updater.check().await.map_err(|e| format!("Couldn't check for updates: {e}"))? else {
+        return Err("You're already on the latest version.".into());
+    };
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| format!("The update didn't install: {e}"))?;
+    // On Windows the installer closes Waddle itself; elsewhere restart into the new build.
+    app.restart();
+}
+
 /// The voices that can read replies aloud (empty: only the system's default).
 #[tauri::command]
 pub async fn speech_voices() -> CmdResult<Vec<String>> {

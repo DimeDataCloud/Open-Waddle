@@ -151,6 +151,8 @@ The 12 jobs:
 
 New accounts are limited to 20 requests a minute per model, so the bench retries after a 429. Times above leave those waits out. The whole bake-off, with reruns, cost about $0.2.
 
+**Release candidate check (0.2.9, October 6, 2026):** `openai/gpt-6-luna` passed all 12 jobs again, at about 5 s and $0.0005 a task, after one fix: a Gmail search for "newsletter" found nothing (Gmail matches words literally), and the model gave up on *archiving*. An empty search now tells it to look through the inbox and judge by sender and subject; *archiving* then passed 4 of 4. Runs that hit the 20-a-minute limit were re-run. Jev's routing, screen check and mail importance (29 of 30) were unchanged.
+
 **Chat and research models (one pass each):**
 - `google/gemini-2.5-flash-lite`:
   - small talk and a knowledge question: 1.0–1.6 s

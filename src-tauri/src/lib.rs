@@ -602,6 +602,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(shortcuts::handle).build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             setup(app).map_err(|e| {
@@ -630,6 +631,8 @@ pub fn run() {
             commands::speech_voices,
             commands::test_key,
             commands::detect_ollama,
+            commands::update_check,
+            commands::update_install,
             commands::mcp_status,
             commands::routines_list,
             commands::routine_add,

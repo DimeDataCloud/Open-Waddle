@@ -625,3 +625,32 @@ body {
   gap: 4px;
   margin-top: 4px;
 }
+
+/* Windows contrast themes: system colours, with borders where colour alone told things apart. */
+@media (forced-colors: active) {
+  .bubble,
+  .chat,
+  .card,
+  .drawer {
+    border: 2px solid CanvasText;
+    forced-color-adjust: auto;
+  }
+  .card.tier3 {
+    border: 3px double Highlight;
+  }
+  .card button,
+  .chat button,
+  .bubble button,
+  .stop {
+    border: 1px solid ButtonText;
+  }
+  .card button.approve {
+    border-width: 2px;
+  }
+  .card .bar > div {
+    background: Highlight;
+  }
+  .bubble::after {
+    display: none;
+  }
+}

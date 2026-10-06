@@ -129,6 +129,10 @@ This maps the Technical Blueprint and Competitor Analysis onto what is built. It
 - **Audit log:** SQLite, append-only (triggers reject UPDATE/DELETE), each row a SHA-256 hash covering the previous row; `verify()` locates the first altered row.
 - **API keys:** stored in the OS keychain (`keyring` 4); environment variables override for development; a file readable only by the user is the fallback on headless Linux.
 
+### Updates
+
+`tauri-plugin-updater` with a minisign public key in `tauri.conf.json`. Two commands, `update_check` and `update_install`, are called only from Settings buttons; no model tool reaches them, and installing is refused while a task runs. The endpoint is `releases/latest/download/latest.json`, which the release workflow builds (`scripts/make-latest-json.mjs`) from the signed installers. Local and CI test builds don't make update files: `createUpdaterArtifacts` is switched on only by `src-tauri/tauri.release.conf.json`, which the release workflow passes.
+
 ### Settings and first run
 
 - **Welcome:** on first start in demo mode (no brain set up, `first_run_done` unset) Settings opens on a short welcome: paste an OpenRouter key and **Test** it (`test_key`: one tiny call, metered like any other), find a local Ollama (`detect_ollama`: `GET /api/tags`, picks the tested Qwen model if it's there), or stay in the demo; then pick a colour. Saving or skipping sets `first_run_done`, so it shows once.

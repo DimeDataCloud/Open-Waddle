@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.9: release candidate
+
+- **Ready to open source.** MIT license file, a contributing guide (what CI checks, ground rules for safety tiers and untrusted text) and a security policy with private reporting.
+- **Updates from inside Waddle.** Settings → Diagnostics → **Check for updates** looks on the GitHub releases page, and **Install and restart** downloads the new version and checks its signature against a key built into the app before installing. It only happens when you press the buttons: nothing is checked in the background, and Waddle can't start it by itself. Release builds sign the update files and publish `latest.json` beside the installers.
+- **Ready for the Chrome Web Store.** A privacy policy (`PRIVACY.md`), the listing text and permission justifications (`docs/CHROME_STORE.md`), and `npm run pack:extension`, which zips the extension without its development key.
+- **Installers for x64 too.** Pushing a version tag builds Windows installers for ARM64 (Snapdragon) and x64 (Intel and AMD) and attaches them to a draft GitHub release.
+- **The welcome offers Google and Chrome.** Optional "Set up…" links, ticked when already done, finish the welcome and open that section of Settings.
+- **High contrast.** With a Windows contrast theme on, the bubble, chat box, cards, history and Settings use the theme's colours, with borders where colour alone told things apart.
+- **Settings search** hides Save when only Diagnostics matches.
+- **Self-test covers more.** It now reports how many monitors there are and spending against the monthly budget, alongside MCP servers, routines and voices. A microphone that can't be opened says so in words.
+- **Finds "the newsletters".** Gmail search matches words literally, so a search for "newsletter" often finds nothing. Waddle is now told to look through the inbox and judge by sender and subject instead of giving up.
+- **README rewritten around what Waddle does,** with an on-device checklist of 43 steps grouped by area (first run, the duck, tasks and safety, conversation and voice, spending, Google, Chrome, files, routines and MCP).
+- **Checked:** all unit and integration tests; all 12 assistant benchmark tasks (mail, calendar, files, documents, Chrome, memory, delete guard) with the default model, at about $0.0005 and 5 s per task (tasks that hit OpenRouter's rate limit were re-run); routing, the screen check and mail importance (29 of 30) with the decision model; Windows ARM64 and x64 builds; no known vulnerabilities in npm or Rust dependencies.
+
 ## 0.2.8: polish
 
 - **A welcome on first run.** With no brain set up yet, Waddle opens a short welcome.

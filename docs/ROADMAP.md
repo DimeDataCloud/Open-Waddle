@@ -3,8 +3,9 @@
 ## Where things stand
 
 - **v0.2 is done and merged** (milestones 0.1.9 → 0.2.0: routing, research, memory, the selection hotkey, Gmail, Calendar, Contacts, nudges, the morning brief, the Chrome extension, files and Drive, and the assistant bench). The v0.2 plan is in this file's git history.
-- 169 Rust tests and the frontend and extension tests pass. Nothing has run on the Surface yet.
+- At the start of the pass, 169 Rust tests and the frontend and extension tests passed; at 0.2.9 it's 203 Rust tests and 71 frontend tests. Nothing has run on the Surface yet.
 - **This pass:** nine releases, 0.2.1 → 0.2.9, that revise, adapt, enhance, polish and define Waddle. You test **0.2.9** on the Surface; the fixes from that test become **0.3.0**.
+- **Status (0.2.9):** all nine releases are built. What each one changed is in [CHANGELOG.md](../CHANGELOG.md). Where the build differs from the plan below, the plan says so in *(as built: …)*.
 
 ## What the assessment found
 
@@ -129,7 +130,7 @@ Each release is tested, committed and pushed with its version bump. They're deli
   1. Choose a brain: paste an OpenRouter key and Waddle tests it live, detect Ollama, or stay in the demo.
   2. Optional: connect Google and set up Chrome, each with a status tick.
   3. Pick the duck's colour.
-- **Settings reorganised into tabs:** Brain, Assistant (Google, Chrome, files), Nudges & routines, Tools, Voice, Memory & privacy, Safety, Character, Diagnostics. There's a search box, and spending sits at the top.
+- **Settings reorganised into tabs:** Brain, Assistant (Google, Chrome, files), Nudges & routines, Tools, Voice, Memory & privacy, Safety, Character, Diagnostics. There's a search box, and spending sits at the top. *(as built: seven tabs; Tools sits in Assistant and Safety in Brain, beside spending.)*
 - **Effects layer**, drawn from the duck's palette and turned off with reduced motion:
   - dust when it lands
   - "Zzz" while it naps
@@ -138,7 +139,7 @@ Each release is tested, committed and pushed with its version bump. They're deli
   - "?" when it asks
   - a heart when you say thanks
 - **Errors in plain words.** For example, "OpenRouter says the key has no credit left: add some at openrouter.ai/credits". The common failures each get a next step.
-- **Accessibility.** Keyboard focus rings and Tab order on cards and the drawer, Enter/Esc on approval cards, and high-contrast support.
+- **Accessibility.** Keyboard focus rings and Tab order on cards and the drawer, Enter/Esc on approval cards, and high-contrast support. *(as built: Esc denies; deliberately no Enter shortcut to approve, so typing elsewhere can't approve anything.)*
 
 ### 0.2.9 Define: release candidate
 - **Regression.**
@@ -151,7 +152,7 @@ Each release is tested, committed and pushed with its version bump. They're deli
   - ARCHITECTURE and MODELS updated (a fresh look at the cheapest planner)
   - a new CHANGELOG
   - **on-device checklist v2:** the 27 checks plus the new features, grouped, each with what you should see
-- **Installer** `Waddle_0.2.9_arm64-setup.exe` → **you test on the Surface.**
+- **Installer** `Waddle_0.2.9_arm64-setup.exe` → **you test on the Surface.** *(as built: also a tag-triggered release workflow that builds ARM64 and x64 installers into a draft GitHub release, plus LICENSE, CONTRIBUTING and SECURITY for open-sourcing.)*
 
 ### 0.3.0
 - Fixes from your 0.2.9 test, docs brought up to date, and the final installer.

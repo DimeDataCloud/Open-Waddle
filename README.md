@@ -2,14 +2,14 @@
 
 Project Waddle is a desktop AI agent you can watch. Waddle is a 16×14 pixel-art duck who lives on a transparent overlay above your windows. It walks along title bars to whatever it's about to touch. It says what it's doing in a speech bubble as it works, and it asks before anything risky. You can talk to it, by typing or by voice, while it's working.
 
-Version 0.2 makes it a real assistant:
-- It works with your Gmail, Google Calendar, Contacts and Drive.
-- It taps you on the shoulder before meetings and when important mail arrives.
-- It reads and acts on web pages in Chrome through its extension.
-- It finds and reads your documents.
-- It sorts each message into a quick chat, a cited research answer or a task.
+What it does:
+- It works with your Gmail, Google Calendar, Contacts and Drive, and taps you on the shoulder before meetings and when important mail arrives.
+- It reads and acts on web pages in Chrome through its extension, and finds and reads your documents.
+- It sorts each message into a quick chat, a cited research answer or a task, and can read its answers aloud.
+- It runs routines on a schedule ("every weekday at 8:45, summarise my unread email") and uses other apps' tools through MCP.
+- It keeps to a monthly budget you set, and shows what it spent on what.
 
-It runs on your own machine. Apart from cheap cloud model calls (optional; a busy day costs a few cents), it costs nothing.
+It runs on your own machine and is free and open source (MIT). Apart from cheap cloud model calls (optional; a busy day costs a few cents, or nothing with a local model), it costs nothing.
 
 ```
             ┌──────────────────────────── Brain (waddle-core) ───────────────────────────┐
@@ -33,6 +33,8 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - Waddle walks on the top edges of your windows and the bottom of the screen, rides windows you drag, and falls when its window disappears.
   - It wanders when idle and falls asleep after two quiet minutes.
   - Drag the duck to carry it. Click it to chat. Right-click it for Settings.
+  - With more than one monitor, it follows you to the one you're working on (never mid-task), and re-places itself when you rotate, dock or change the scale.
+  - Only one Waddle runs at a time; on battery it checks the screen less often.
   - Little effects say how things went: a sparkle when a task is done, a sweat drop when one fails, a "?" when it asks you something, a heart when you say thanks (still symbols only with reduce motion on).
 - **Real-time conversation.**
   - Replies stream into the bubble as they're generated.
@@ -77,9 +79,10 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
   - "Search for…" goes straight to Google's results and reads them.
   - Without the extension, Waddle still drives Chrome from the screen.
 - **Routines.** "Every weekday at 8:45, summarise my unread email" or "every Friday at 4pm, list what I worked on this week": Waddle does it on its own at that time and shows the result. Routines work without the screen (email, calendar, files, connected tools), ask before changing anything, and are skipped (not run late) if Waddle wasn't running. Setting one up through chat needs your click; manage them in Settings → Nudges & routines.
-- **Use more apps through MCP.** Add the MCP servers of apps you use (GitHub, Notion, your notes, a database…) in Settings → Tools, by typing the command or pasting the JSON block their instructions show, and Waddle can use their tools. Untrusted servers wait for your click; what tools return is treated as untrusted text. See [docs/MCP.md](docs/MCP.md).
+- **Use more apps through MCP.** Add the MCP servers of apps you use (GitHub, Notion, your notes, a database…) in Settings → Assistant → Tools (MCP), by typing the command or pasting the JSON block their instructions show, and Waddle can use their tools. Untrusted servers wait for your click; what tools return is treated as untrusted text. See [docs/MCP.md](docs/MCP.md).
 - **Work on what you selected.** Select text anywhere and press **Ctrl+Alt+A**: the chat opens with the selection attached ("make this friendlier", "translate to French"). Waddle puts the result on your clipboard or, after a 2 s notice, replaces the selection.
 - **Remember what matters.** "Remember that I take my coffee black" or "my manager is Sam" go into a short list of facts (2 KB at most) that every later task can see. Waddle may save useful facts on its own, never from the screen, files or web pages. See and edit the list in Settings → Memory & privacy.
+- **Keep to a budget.** Settings → Brain shows what Waddle spent today and this month, by day and by purpose (tasks, chat, research, decisions). The monthly limit (default $5) warns once at 80% and pauses paid model calls at 100% until the 1st; local models are never counted or paused.
 - **Feel alive, cheaply.** Between tasks a tiny decision model picks what the duck does from the app you're in and whether you're idle (never window titles): perch on your window, explore its edges, watch your cursor, nap when you're away, or keep out of the way when you're in full screen. Each decision costs about $0.00002.
 - **Assist.**
   - "Where's the export button?" or "how do I turn on Night light?": Waddle walks over and circles the spot with a label instead of clicking, so you learn where it is.
@@ -106,20 +109,22 @@ It runs on your own machine. Apart from cheap cloud model calls (optional; a bus
 - **No training on your data:** OpenRouter requests ask for providers that don't keep or train on prompts (`data_collection: deny`). Settings → Memory & privacy turns this off if a model you want needs it.
 - **Honest limits:** commands run in the workspace folder, but this is **not an OS sandbox**. Tier 3 approval is the real gate.
 
-## Quick start (Windows 11 on ARM, e.g. Surface Pro with Snapdragon)
+## Quick start (Windows 11)
+
+Waddle is built and tested first on Windows 11 on ARM (Surface Pro with Snapdragon). x64 PCs get a build too. macOS and Linux run from source, with fewer features (no UI Automation or built-in voice typing; spoken replies use the system's voices).
 
 ### Option A: install a build
 
-1. Download `Waddle_<version>_arm64-setup.exe` from the latest CI run's artifacts (or the file shared with you).
+1. Download the installer from the [Releases](../../releases) page: `Waddle_<version>_arm64-setup.exe` for Snapdragon PCs, `Waddle_<version>_x64-setup.exe` for Intel and AMD.
 2. It isn't code-signed yet, so Windows SmartScreen will warn you. Click **More info → Run anyway**.
 3. Waddle appears at the bottom of your screen with a short **welcome**: paste an OpenRouter key (and press Test), let it find Ollama, or just look around in demo mode.
 
 ### Option B: build from source
 
-1. Install **Rust**: <https://rustup.rs> (choose the default `aarch64-pc-windows-msvc` host).
+1. Install **Rust**: <https://rustup.rs> (keep the default host: `aarch64-pc-windows-msvc` on ARM, `x86_64-pc-windows-msvc` on Intel and AMD).
 2. Install **Visual Studio 2022 Build Tools** with:
    - "Desktop development with C++"
-   - **MSVC ARM64 build tools**
+   - **MSVC ARM64 build tools** (on ARM PCs)
    - a Windows 11 SDK
 3. Install **Node.js 22 LTS (ARM64)**: <https://nodejs.org>
 4. Then:
@@ -152,38 +157,81 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 
 ## Try it: on-device checklist
 
-1. The duck appears, drops onto a window's title bar or the taskbar edge, and wanders.
-2. Clicks pass through everywhere except on the duck and its bubbles.
-3. Drag the duck and drop it: it falls and lands on a window.
-4. "Create hello.txt that says hi" → a Tier 2 countdown appears, then `Documents\Waddle\hello.txt` exists.
-5. "Delete hello.txt" → the duck turns red and an approval card waits.
-6. "Open Notepad and type hello" → Waddle opens Notepad, walks to it, and types.
-7. While it's working, say "actually type goodbye instead" → you get an instant reply in blue, and the task adapts.
-8. Press **Escape** mid-task → it stops.
-9. Settings → Activity log shows each step; *Verify integrity* reports the log intact.
-10. "Research the best houseplants for low light" → a short summary with sources in brackets, then **Full answer** opens a Markdown file from `Documents\Waddle\research\`.
-11. Select a sentence in Notepad, press **Ctrl+Alt+A**, type "make this more formal" → a 2 s notice, then the sentence is replaced.
-12. "Remember that my dog is called Biscuit" → Settings → Memory & privacy lists it; a later "what's my dog called?" knows.
-13. Connect Google (Settings → Google account, then [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md)) → "Connected as you@…".
-14. "What's my next meeting?" → the answer comes in under 5 seconds, with the Meet link if there is one.
-15. "Reply to <someone>'s last email saying thanks" → the send card shows the whole reply; **Edit** a word, **Send**, then press **Undo** within 10 s → nothing is sent. Do it again without Undo → the reply shows up in the thread in Gmail.
-16. "Find 30 minutes with <a contact> next week and send an invite with a Meet link" → three free slots inside 9–17, then a 2 s notice, then the event and the invite.
-17. Put a meeting with a Meet link in your calendar 6 minutes from now → about 5 minutes before, the duck says "📅 … starts in 5 min." with **Join** (opens Meet) and **Snooze** (back in 2 minutes).
-18. Send yourself an email from another account with the subject "Can you call me today?" → within about 2 minutes a ✉️ nudge; **Mute sender** stops further ones (Settings → Nudges lists them).
-19. Start a full-screen video, then repeat step 17 → a red "!" over the duck instead of the bubble; leave full screen → the full nudge.
-20. Restart Windows → Waddle starts on its own. The next morning, the first time you use the computer → "☀️ Good morning! Want a quick brief of today?"
-21. Settings → Chrome → **Set up Chrome extension**, then follow the three steps → "Connected (extension 0.1.12)".
-22. On any sign-up or search page: "fill in the search box with rubber ducks and press search" → the duck walks to the field and button on screen and the page reacts as if you'd clicked.
-23. "Search for the weather in Paris and tell me tomorrow's forecast" → Google's results open in Chrome and Waddle answers from them.
-24. Download any PDF, then ask "what's the PDF I just downloaded about?" → Waddle finds it in Downloads and summarises it, with no approval needed.
-25. "Make a spreadsheet of my last three electricity bills" (with the bills in Documents) → a 2 s notice, then an .xlsx in `Documents\Waddle` that opens in Excel.
-26. Settings → Files: add a folder to the "create, change" list, then "move the receipts from my workspace into <that folder>" → notices, and the files move. "Delete the old one" → a red card; after you approve, the file is in the Recycle Bin.
-27. With Google connected (press **Connect** again after this update, to allow Drive), "what does my Drive say about the budget?" → it finds and reads Docs and Sheets.
+Each step says what to do → what you should see. Steps marked (G) need Google connected, (C) the Chrome extension, (2M) a second monitor. Settings has tabs and a search box: type a section's name (Files, Chrome, Tools, Spending…) to find it.
+
+**First run and the duck**
+
+1. Install and start Waddle with no settings yet → Settings opens on a short welcome. Paste an OpenRouter key and press **Test** → "It works: …". (Or press **Look for Ollama**, or pick the demo.) Pick a colour, **Let's go** → the duck takes that colour; restarting doesn't show the welcome again.
+2. Start Waddle a second time from the Start menu → no second duck; the running one stays.
+3. The duck appears, drops onto a window's title bar or the taskbar edge, and wanders.
+4. Clicks pass through everywhere except on the duck and its bubbles.
+5. Drag the duck high and drop it → it falls, lands on a window with a puff of dust.
+6. Rotate the Surface, or dock and undock it → within 2 s the duck is back on screen, on the new work area.
+7. (2M) Focus a window on the other monitor for a few seconds → the duck walks in from that side of the other screen. Settings → Character → "Follow me across monitors" off → it goes back to the main monitor.
+8. Unplug the charger → the duck still walks smoothly; Task Manager shows Waddle using less CPU while idle.
+
+**Tasks and safety**
+
+9. "Create hello.txt that says hi" → a Tier 2 countdown appears, then `Documents\Waddle\hello.txt` exists and a sparkle shows by the duck.
+10. "Delete hello.txt" → the duck turns red and an approval card waits. Press Tab to reach it and **Esc** → it's denied. Enter typed in the chat box never approves it.
+11. "Open Notepad and type hello" → Waddle opens Notepad, walks to it, and types.
+12. While it's working, say "actually type goodbye instead" → you get an instant reply in blue, and the task adapts.
+13. Press **Escape** mid-task → it stops.
+14. Settings → Activity log shows each step; *Verify integrity* reports the log intact.
+
+**Conversation and voice**
+
+15. "Research the best houseplants for low light" → a short summary with sources in brackets, then **Full answer** opens a Markdown file from `Documents\Waddle\research\`.
+16. Ask something with a long answer → the bubble shows its start and **More…**; **Ctrl+Alt+H** opens the history beside the duck with links and copy buttons. ↑ in the chat box brings back your last message.
+17. Say "thanks!" → a little heart by the duck. Say "help me write an email" → when the reply ends with a question for you, a "?" shows by the duck.
+18. Select a sentence in Notepad, press **Ctrl+Alt+A**, type "make this more formal" → a 2 s notice, then the sentence is replaced.
+19. "Remember that my dog is called Biscuit" → Settings → Memory & privacy lists it; a later "what's my dog called?" knows. **Forget conversation** clears the history too.
+20. Press **Ctrl+Alt+Space** and say "what's 12 times 7?" → your words appear as you speak, then the answer.
+21. Settings → Voice → **Spoken replies** on, pick a voice, **Save**. Ask a question → the answer is read aloud. Open the chat box while it speaks → it stops. Turn on **Talk mode**, ask by voice → after the answer the mic listens again for 6 s.
+22. Start a full-screen video and ask by voice → the answer shows but isn't read aloud.
+
+**Spending**
+
+23. Settings → Brain → Spending shows today's and this month's cost, by day and purpose, after a few tasks.
+24. Set the monthly budget to $0.01 and run a couple of tasks → a warning at 80%, then "paid model calls are paused until the 1st". Set it back → tasks run again.
+
+**Google (G)**
+
+25. Connect Google (Settings → Google account, then [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md)) → "Connected as you@…". If you connected before 0.1.13, press **Connect** again to allow Drive.
+26. "What's my next meeting?" → the answer comes in under 5 seconds, with the Meet link if there is one.
+27. "Reply to <someone>'s last email saying thanks" → the send card shows the whole reply; **Edit** a word, **Send**, then press **Undo** within 10 s → nothing is sent. Do it again without Undo → the reply shows up in the thread in Gmail.
+28. "Find 30 minutes with <a contact> next week and send an invite with a Meet link" → three free slots inside 9–17, then a 2 s notice, then the event and the invite.
+29. Put a meeting with a Meet link in your calendar 6 minutes from now → about 5 minutes before, the duck says "📅 … starts in 5 min." with **Join** (opens Meet) and **Snooze** (back in 2 minutes).
+30. Send yourself an email from another account with the subject "Can you call me today?" → within about 2 minutes a ✉️ nudge; **Mute sender** stops further ones (Settings → Nudges & routines lists them).
+31. Start a full-screen video, then repeat step 29 → a red "!" over the duck instead of the bubble; leave full screen → the full nudge.
+32. Restart Windows → Waddle starts on its own. The next morning, the first time you use the computer → "☀️ Good morning! Want a quick brief of today?"
+33. "What does my Drive say about the budget?" → it finds and reads Docs and Sheets.
+
+**Chrome (C)**
+
+34. Settings → Chrome → **Set up Chrome extension**, then follow the three steps → "Connected (extension …)".
+35. On any search page: "fill in the search box with rubber ducks and press search" → the duck walks to the field and button on screen and the page reacts as if you'd clicked.
+36. "Search for the weather in Paris and tell me tomorrow's forecast" → Google's results open in Chrome and Waddle answers from them.
+
+**Files**
+
+37. Download any PDF, then ask "what's the PDF I just downloaded about?" → Waddle finds it in Downloads and summarises it, with no approval needed.
+38. "Make a spreadsheet of my last three electricity bills" (with the bills in Documents) → a 2 s notice, then an .xlsx in `Documents\Waddle` that opens in Excel.
+39. Settings → Files: add a folder to the "create, change" list, then "move the receipts from my workspace into <that folder>" → notices, and the files move. "Delete the old one" → a red card; after you approve, the file is in the Recycle Bin.
+
+**Routines and MCP**
+
+40. "Every day at <two minutes from now>, tell me a fun fact about ducks" → a red card asks first; approve → Settings → Nudges & routines lists it. At that minute → "🔁 Routine …" and the fact in the bubble and history; the list shows "Done". Pause and delete it there.
+41. Quit Waddle, wait past a routine's time, start it → "I missed your routine …", and it doesn't run late.
+42. Settings → Assistant → Tools (MCP) → add an MCP server (for example the filesystem server from [docs/MCP.md](docs/MCP.md)) → **Test** lists its tools. Ask Waddle to use one → untrusted servers wait for your click.
+43. Settings → Diagnostics → **Run self-test** → every line is Pass or Skip (Warn only where it says why), and a report file is saved.
+
+**Updating:** Settings → Diagnostics → **Check for updates**. It checks the releases page when you ask, verifies the download's signature, and installs when you press **Install and restart**. Or download the new installer and run it; your settings and history stay.
 
 ## Something not working?
 
 Right-click the duck → **Settings** → **Diagnostics** → **Run self-test**.
-- It checks the display, window tracking, accessibility, screenshots, mouse and keyboard, key storage, the workspace, commands, the activity log, the talk shortcut, the microphone, and the model (one small call).
+- It checks the display and monitors, window tracking, accessibility, screenshots, mouse and keyboard, key storage, the workspace, commands, the activity log, the talk shortcut, the microphone, MCP servers (each lists its tools), routines, voices for spoken replies, spending against the budget, and the model (one small call).
 - It saves `waddle-report-<time>.txt` in your workspace folder. Send that file. It leaves out keys, file contents, window titles and what you've typed.
 - Waddle also keeps a log at `%LOCALAPPDATA%\dev.waddle.app\logs\waddle.log` (macOS: `~/Library/Logs/dev.waddle.app/`, Linux: `~/.local/share/dev.waddle.app/logs/`). The report includes its last lines.
 
@@ -226,4 +274,8 @@ Linux build dependencies: `libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatan
 
 ## Roadmap
 
-v0.2 (Gmail, Calendar, Chrome, files, nudges, memory) is done. The v0.3 production pass is planned in [docs/ROADMAP.md](docs/ROADMAP.md): reliability fixes, a spending meter and budget, multiple monitors, a conversation panel, spoken replies, MCP tools, routines, a first-run guide and visual effects, released as 0.2.1 → 0.2.9 for on-device testing, then 0.3.0.
+v0.2 (Gmail, Calendar, Chrome, files, nudges, memory) is done, and so is the v0.3 production pass in [docs/ROADMAP.md](docs/ROADMAP.md): reliability fixes, a spending meter and budget, multiple monitors, a conversation panel, spoken replies, MCP tools, routines, a first-run welcome and visual effects (0.2.1 → 0.2.9). 0.2.9 is the release candidate; fixes from on-device testing become 0.3.0. What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
+
+## Contributing and license
+
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem privately, see [SECURITY.md](SECURITY.md). Waddle is released under the [MIT license](LICENSE).

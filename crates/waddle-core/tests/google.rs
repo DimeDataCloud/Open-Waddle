@@ -207,6 +207,20 @@ async fn the_next_meeting_comes_from_the_calendar_without_touching_the_screen() 
 }
 
 #[tokio::test]
+async fn a_search_that_finds_nothing_suggests_looking_through_the_inbox() {
+    let f = fixture(
+        vec![reply("", vec![call("mail_search", json!({"query": "in:inbox newsletter"}))]), reply("I found none.", vec![])],
+        Box::new(|_| Some(Decision::Approved)),
+    )
+    .await;
+    f.fg.add_message("m1", "Medium Daily Digest <noreply@medium.com>", "10 Python tricks", "Today's highlights", &["INBOX"], now_ms());
+    run(&f, "archive the newsletters").await;
+    let results = tool_results(&f).join("\n");
+    assert!(results.contains("No emails match \"in:inbox newsletter\". Gmail matches words exactly"), "{results}");
+    assert!(results.contains("search \"in:inbox\" and judge by sender and subject"), "{results}");
+}
+
+#[tokio::test]
 async fn the_send_card_shows_the_whole_reply_and_sends_the_users_edits() {
     let f = fixture(
         vec![

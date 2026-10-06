@@ -31,7 +31,12 @@
         <label class="choice"><input type="radio" name="brain" value="demo" /> <span><b>Just look around</b>: demo mode, nothing real happens</span></label>
       </div>
       <label class="color-row">My colour <input id="w_color" type="color" value="#FFD23F" /></label>
-      <p class="muted">Later, in Settings: connect Google (mail, calendar, Drive), set up the Chrome extension, add tools from other apps (MCP), routines, and spoken replies.</p>
+      <div class="extras" aria-label="Optional">
+        <p class="muted">Optional, now or any time later:</p>
+        <p class="extra"><span id="w-google-tick" class="tick">○</span> <b>Google</b>: your mail, calendar, contacts and Drive <button type="button" class="link" data-setup="google-box">Set up…</button></p>
+        <p class="extra"><span id="w-chrome-tick" class="tick">○</span> <b>Chrome</b>: read and use web pages properly <button type="button" class="link" data-setup="chrome-box">Set up…</button></p>
+        <p class="muted">Also in Settings: tools from other apps (MCP), routines and spoken replies.</p>
+      </div>
       <div class="welcome-actions">
         <button type="button" id="w-skip" class="link">Skip for now</button>
         <button type="button" id="w-done" class="primary">Let's go</button>
@@ -118,7 +123,7 @@
           <ul id="skills" class="skills"></ul>
         </fieldset>
 
-        <fieldset data-tab="assistant">
+        <fieldset id="google-box" data-tab="assistant">
           <legend>Google account</legend>
           <p class="muted">Lets Waddle read and tidy your Gmail, check and book your Google Calendar, and look up your contacts. Sending, binning and deleting always wait for your click. Setup takes about 5 minutes: see <code>docs/GOOGLE_SETUP.md</code>.</p>
           <label>OAuth client ID <input id="google_client_id" placeholder="….apps.googleusercontent.com" autocomplete="off" /></label>
@@ -151,7 +156,7 @@
           </label>
         </fieldset>
 
-        <fieldset data-tab="assistant">
+        <fieldset id="chrome-box" data-tab="assistant">
           <legend>Chrome</legend>
           <p class="muted">With Waddle's extension, Waddle reads web pages and clicks links and buttons by name instead of guessing from screenshots: faster and more reliable. It only acts when you've asked it to do something.</p>
           <p id="browser-status" class="muted"></p>
@@ -294,6 +299,13 @@
         <p class="muted">Checks each part of Waddle on this computer (including one small model call) and saves a report to your workspace folder. If something isn't working, send that file. It leaves out keys, file contents, window titles and what you've typed.</p>
         <ul id="checks" class="checks"></ul>
         <p id="selftest-result" class="muted"></p>
+      </section>
+
+      <section data-tab="diagnostics">
+        <h2>Updates <button type="button" id="update-check" class="link">Check for updates</button></h2>
+        <p class="muted">Looks on Waddle's GitHub releases page for a newer version. Updates are checked against a signature built into this app, and install only when you press the button. Nothing is checked in the background.</p>
+        <p id="update-status" class="muted" aria-live="polite"></p>
+        <button type="button" id="update-install" class="link hidden">Install and restart</button>
       </section>
 
       <section data-tab="diagnostics">
