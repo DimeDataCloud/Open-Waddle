@@ -282,7 +282,7 @@ async fn assistant_tasks() {
         });
         // A partial run (WADDLE_BENCH_ONLY) mustn't overwrite the full results.
         let suffix = if only.is_some() { "assist-partial" } else { "assist" };
-        let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../bench/results")).join(format!("{}@{suffix}.json", model.replace('/', "__")));
+        let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../bench/results")).join(format!("{}@{suffix}.json", model.replace('/', "__").replace(':', "_")));
         let _ = std::fs::write(path, serde_json::to_string_pretty(&out).unwrap());
     }
 }
