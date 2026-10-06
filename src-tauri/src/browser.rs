@@ -15,8 +15,11 @@ use tokio::sync::{mpsc, oneshot};
 
 /// The native-messaging host name the extension connects to.
 pub const HOST_NAME: &str = "dev.waddle.app";
-/// Fixed by the public key in extension/manifest.json, so it's the same on every computer.
-pub const EXTENSION_ID: &str = "bjpppaeapoinfgpfgdgejapeckaflici";
+/// The extension loaded from a folder (Developer mode). Fixed by the public key in
+/// extension/manifest.json, so it's the same on every computer.
+pub const DEV_EXTENSION_ID: &str = "bjpppaeapoinfgpfgdgejapeckaflici";
+/// The extension installed from the Chrome Web Store, which assigns its own ID.
+pub const STORE_EXTENSION_ID: &str = "pdfkecmhiebhepheejpjmaejkhhgbffn";
 /// Chrome's limit for a message to the extension is 1 MB; pages are far smaller.
 const MAX_FRAME: usize = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -235,12 +238,13 @@ where
 
 /// The host manifest Chrome reads to find and trust the relay.
 pub fn host_manifest(exe: &Path) -> Value {
+    let origins = [DEV_EXTENSION_ID, STORE_EXTENSION_ID].map(|id| format!("chrome-extension://{id}/"));
     json!({
         "name": HOST_NAME,
         "description": "Waddle desktop app",
         "path": exe,
         "type": "stdio",
-        "allowed_origins": [format!("chrome-extension://{EXTENSION_ID}/")]
+        "allowed_origins": origins
     })
 }
 
@@ -346,7 +350,11 @@ mod tests {
     #[test]
     fn the_manifest_trusts_only_waddles_extension() {
         let m = host_manifest(Path::new("/opt/waddle/waddle"));
-        assert_eq!(m["allowed_origins"], json!(["chrome-extension://bjpppaeapoinfgpfgdgejapeckaflici/"]));
+        assert_eq!(
+            m["allowed_origins"],
+            json!(["chrome-extension://bjpppaeapoinfgpfgdgejapeckaflici/", "chrome-extension://pdfkecmhiebhepheejpjmaejkhhgbffn/"]),
+            "the folder-loaded extension and the Web Store one, and nothing else"
+        );
         assert_eq!(m["type"], "stdio");
         let manifest: Value = serde_json::from_str(include_str!("../../extension/manifest.json")).unwrap();
         assert!(manifest["key"].as_str().is_some_and(|k| k.len() > 300), "the fixed key keeps the extension id stable");

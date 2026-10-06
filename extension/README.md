@@ -2,7 +2,7 @@
 
 The extension lets Waddle read web pages and act on them by element instead of guessing from screenshots. It does nothing on its own: it only answers the Waddle desktop app, and the app only asks while it's doing a task you gave it.
 
-- **Install:** Waddle → Settings → Chrome → **Set up Chrome extension**. Then in Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → the folder that opened.
+- **Install:** Waddle → Settings → Assistant → Chrome → **Get Waddle for Chrome** (opens the Chrome Web Store). Or **Install from a file**, then in Chrome: `chrome://extensions` → **Developer mode** → **Load unpacked** → the folder that opened.
 - **How it talks to the app:** native messaging. Chrome starts `waddle.exe` as a relay, and the relay passes messages to the running app over a named pipe (a Unix socket on Linux and macOS). No network port is opened. The app registers the relay for this extension's id only (`bjpppaeapoinfgpfgdgejapeckaflici`, fixed by the key in `manifest.json`).
 - **What the app can ask:**
   - list, switch, open or close tabs
