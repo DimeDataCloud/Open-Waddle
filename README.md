@@ -150,8 +150,11 @@ Right-click the duck → **Settings**:
 | Preset | Cost | Notes |
 |---|---|---|
 | **OpenRouter** (default) | ~$0.0005–0.001 per task (measured, [docs/MODELS.md](docs/MODELS.md)) | Create a key at <https://openrouter.ai/keys>, add $5 credit, paste the key. Defaults: `openai/gpt-6-luna` plans; `google/gemini-2.5-flash-lite` chats and researches; TypeSafe's Jev makes the split-second decisions. Your PC does almost no work. |
+| **Google Gemini API** | Free tier, or pennies | Get a key at <https://aistudio.google.com/apikey>. Planner `gemini-3.8-flash`, quick replies `gemini-3.5-flash-lite`. **On the free tier Google may use what you send to improve its products**, so use it to try Waddle, or turn on billing for private use. Web searches (research answers, "who won last night?") need OpenRouter. |
 | **Ollama** (local) | Free | Install <https://ollama.com> (0.17.6 or newer), run `ollama pull qwen3.5:4b`. Waddle turns off the model's hidden "thinking", caps it to a third of your CPU cores and unloads it 30 s after each task. On Snapdragon it runs on the CPU only, so it's slow and keeps the machine busy while it thinks. `qwen3.5:2b` is faster; `qwen3.5:9b` is smarter if you have 32 GB of RAM. |
 | LM Studio / Foundry Local / custom | Free | Any OpenAI-compatible endpoint. LM Studio (`qwen3.5-4b`) runs Qwen3.5 faster than Ollama does. Foundry Local can use the Snapdragon NPU (text models only). |
+
+**Use both:** Settings → Brain → **Quick replies run on** lets the quick-reply model (chat, research summaries, the morning brief) use a different service from the planner, with its own key. For example, the planner on OpenRouter and quick replies on Google's free Gemini API. Web searches still go through the planner's service, because only OpenRouter can run them for Waddle. The **Test** button there makes a real tool call, so you know it works before you rely on it.
 
 API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Secret Service), not in files. For development, `OPENROUTER_API_KEY` or `WADDLE_API_KEY` env vars also work. `WADDLE_PROVIDER=mock` forces demo mode.
 

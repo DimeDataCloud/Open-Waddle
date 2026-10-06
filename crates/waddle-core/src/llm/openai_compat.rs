@@ -58,10 +58,21 @@ fn retryable_status(status: u16) -> bool {
     matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 520..=529)
 }
 
+/// Google's Gemini API (its OpenAI-compatible endpoint).
+pub(crate) fn is_google(base_url: &str) -> bool {
+    base_url.contains("generativelanguage.googleapis.com")
+}
+
 /// "OpenRouter" for openrouter.ai, else the host name, for error messages.
 fn service_name(base_url: &str) -> String {
     let host = base_url.split("://").nth(1).unwrap_or(base_url).split(['/', ':']).next().unwrap_or(base_url);
-    if host.ends_with("openrouter.ai") { "OpenRouter".into() } else { host.to_string() }
+    if host.ends_with("openrouter.ai") {
+        "OpenRouter".into()
+    } else if host.ends_with("googleapis.com") {
+        "Google".into()
+    } else {
+        host.to_string()
+    }
 }
 
 /// What a failed request means for the user, in plain words.
@@ -70,7 +81,10 @@ pub(crate) fn describe_status(status: u16, detail: &str, service: &str) -> Strin
     let tail = if detail.is_empty() { String::new() } else { format!(" ({})", detail.chars().take(300).collect::<String>()) };
     match status {
         401 => format!("{service} didn't accept the API key. Check it in Settings{tail}"),
-        402 => format!("the {service} account is out of credit. Add some at openrouter.ai/credits, then try again{tail}"),
+        // Google answers a bad key with 400 and the words "API key" in the body.
+        400 if detail.to_lowercase().contains("api key") => format!("{service} didn't accept the API key. Check it in Settings"),
+        402 if service == "OpenRouter" => format!("the {service} account is out of credit. Add some at openrouter.ai/credits, then try again{tail}"),
+        402 => format!("the {service} account needs billing or credit before it will answer{tail}"),
         403 => format!("{service} refused this request{tail}"),
         404 => format!("{service} doesn't know that model. Check the model name in Settings{tail}"),
         408 | 504 => format!("the model took too long to answer. Try again in a moment{tail}"),
@@ -117,6 +131,14 @@ impl OpenAiCompat {
         let mut body = request_body(req, self.reasoning);
         if self.no_training {
             body["provider"] = json!({ "data_collection": "deny" });
+        }
+        if is_google(&self.base_url) {
+            // OpenRouter's extras (hidden-thinking effort, the web-search plugin): Google's
+            // endpoint rejects fields it doesn't know instead of ignoring them.
+            if let Some(o) = body.as_object_mut() {
+                o.remove("reasoning");
+                o.remove("plugins");
+            }
         }
         body
     }
@@ -495,6 +517,21 @@ mod tests {
         assert!(open.body(&req).get("provider").is_none());
     }
 
+    #[test]
+    fn google_gets_only_fields_it_knows() {
+        let msgs = vec![Message::user("who won?")];
+        let req = ChatRequest { model: "gemini-3.5-flash-lite", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: Some(3) };
+        let google = OpenAiCompat::new("https://generativelanguage.googleapis.com/v1beta/openai".into(), None).with_reasoning(Some("none"));
+        let body = google.body(&req);
+        assert!(body.get("plugins").is_none() && body.get("reasoning").is_none() && body.get("provider").is_none(), "{body}");
+        assert_eq!(body["model"], "gemini-3.5-flash-lite");
+        assert_eq!(body["messages"][0]["content"], "who won?");
+        // Everything else still sends them, as before.
+        let other = OpenAiCompat::new("http://localhost:1234/v1".into(), None).with_reasoning(Some("none"));
+        assert_eq!(other.body(&req)["reasoning"]["effort"], "none");
+        assert_eq!(other.body(&req)["plugins"][0]["id"], "web");
+    }
+
     /// What the scripted server does with one connection.
     enum Reply {
         Raw(&'static str),
@@ -608,6 +645,11 @@ mod tests {
         assert!(describe_status(429, "", "OpenRouter").starts_with("OpenRouter is rate-limiting"));
         assert_eq!(service_name("https://openrouter.ai/api/v1"), "OpenRouter");
         assert_eq!(service_name("http://localhost:1234/v1"), "localhost");
+        assert_eq!(service_name("https://generativelanguage.googleapis.com/v1beta/openai/"), "Google");
+        assert!(!describe_status(402, "", "Google").contains("openrouter.ai"));
+        let bad_key = describe_status(400, r#"[{"error":{"code":400,"message":"Please pass a valid API key.","status":"INVALID_ARGUMENT"}}]"#, "Google");
+        assert_eq!(bad_key, "Google didn't accept the API key. Check it in Settings");
+        assert!(describe_status(400, "bad request", "Google").contains("400"), "other 400s keep their detail");
         assert!(retryable_status(503) && retryable_status(429) && !retryable_status(400) && !retryable_status(402));
     }
 

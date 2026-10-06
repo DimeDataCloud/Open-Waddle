@@ -160,6 +160,22 @@ New accounts are limited to 20 requests a minute per model, so the bench retries
   - a research summary: first words in 2.0 s, done in 4.5 s
 - `inception/mercury-2.5`: 4.9 s for a "thanks", and it handed small talk off to a task. Not used.
 
+## Google's Gemini API directly (October 2026)
+
+Waddle can use Google's own endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`, OpenAI-compatible) for the planner, for the quick-reply model, or for both next to OpenRouter (Settings → Brain → **Quick replies run on**).
+
+| | Model name on Google | Name on OpenRouter | Google free tier | OpenRouter price per M tokens |
+|---|---|---|---|---|
+| Newest Flash | `gemini-3.8-flash` | `google/gemini-3.8-flash` | free | $0.75 in / $3.75 out (doubles on 1 Jan 2027) |
+| Newest Flash-Lite | `gemini-3.5-flash-lite` | `google/gemini-3.5-flash-lite` | free | $0.30 in / $2.50 out |
+| Old default | (restricted to existing projects) | `google/gemini-2.5-flash-lite` | n/a | $0.10 in / $0.40 out |
+
+- **Privacy:** on the free tier Google says content is used to improve its products. Waddle sends screen text, files and email text, so treat the free tier as a way to try things, and turn on billing for private use. OpenRouter requests ask providers not to train on prompts.
+- **Rate limits** aren't published; Google shows them per account in AI Studio.
+- **What differs:** Google's endpoint rejects OpenRouter's extra request fields, so Waddle leaves them out for it (hidden-thinking effort and the web-search plugin). Searches for current facts and research therefore go through the planner's service even when quick replies are on Google.
+- **Metering:** only OpenRouter reports a dollar cost, so calls to Google show as calls in the spending meter without a cost, even on a paid Google plan.
+- **Not yet benchmarked** in Waddle's assistant tasks; the quick-reply model's job is chat and short summaries, so run the bench before using either as the planner.
+
 ## Jev and Laya (decision models)
 
 These are "System One" models: one quick pass that returns a yes/no probability, a choice or a score, not text. They suit small decisions around the main model, not acting.

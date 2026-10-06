@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Google's Gemini API next to OpenRouter.** Settings → Brain has a **Google Gemini API** preset, and **Quick replies run on** lets chat, research summaries and the morning brief use Google (or any other OpenAI-compatible service) with its own key while the planner stays on OpenRouter. A **Test** button makes a real tool call first. Web searches still use the planner's service, and the free tier's data use is spelled out in Settings.
+- **Plain error for a bad Google key** instead of raw JSON, and the self-test checks the quick-reply service too.
 - **Download and code signing sections in the README,** ready for the SignPath Foundation application. They say plainly that releases aren't signed yet.
 - **Chrome extension from the Web Store.** Settings → Assistant → Chrome → **Get Waddle for Chrome** opens the extension's Chrome Web Store page. The app now trusts both the store version and the folder-loaded one, so either connects. **Install from a file** still shows the Developer-mode steps for anyone who can't use the store.
 

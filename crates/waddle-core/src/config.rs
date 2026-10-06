@@ -208,6 +208,9 @@ pub struct Settings {
     pub model: String,
     /// Quick-reply model (System 1 lane): answers while a task is running. Empty = same as `model`.
     pub fast_model: String,
+    /// A second service for the quick-reply model (for example Google's Gemini API next to
+    /// OpenRouter for the planner). Empty = the same service as `base_url`. User-only.
+    pub fast_base_url: String,
     pub coord_mode: CoordMode,
     /// Hidden thinking for hosted models (OpenAI-compatible endpoints only).
     pub reasoning: Reasoning,
@@ -287,6 +290,7 @@ impl Default for Settings {
             base_url: "https://openrouter.ai/api/v1".into(),
             model: "openai/gpt-6-luna".into(),
             fast_model: "google/gemini-2.5-flash-lite".into(),
+            fast_base_url: String::new(),
             coord_mode: CoordMode::Auto,
             reasoning: Reasoning::Default,
             look_first: true,
@@ -348,6 +352,16 @@ impl Settings {
 
     pub fn is_openrouter(&self) -> bool {
         self.provider == ProviderKind::OpenaiCompat && self.base_url.contains("openrouter.ai")
+    }
+
+    /// Quick replies use their own service, not the planner's.
+    pub fn has_fast_endpoint(&self) -> bool {
+        self.provider == ProviderKind::OpenaiCompat && !self.fast_base_url.trim().is_empty()
+    }
+
+    /// The quick-reply service runs on this machine.
+    pub fn fast_is_local(&self) -> bool {
+        ["://localhost", "://127.0.0.1", "://[::1]"].iter().any(|h| self.fast_base_url.contains(h))
     }
 
     /// How many screenshots a task keeps in its conversation before older ones are dropped.
@@ -443,6 +457,7 @@ mod tests {
         assert_eq!(changed.len(), 3);
         for bad in [
             serde_json::json!({"base_url": "https://evil.example"}),
+            serde_json::json!({"fast_base_url": "https://evil.example"}),
             serde_json::json!({"self_source_dir": "/"}),
             serde_json::json!({"max_steps": 500}),
             serde_json::json!({"tier2_mode": "never"}),

@@ -36,6 +36,8 @@ pub struct Bootstrap {
 pub struct SettingsView {
     pub settings: Settings,
     pub has_api_key: bool,
+    /// A key for the quick-reply service is saved (when it's a separate one).
+    pub has_fast_key: bool,
     pub has_stt_key: bool,
     pub workspace: String,
     pub demo: bool,
@@ -46,6 +48,7 @@ fn view(state: &AppState, key_storage: Option<&'static str>) -> SettingsView {
     SettingsView {
         settings: state.settings.read().unwrap().clone(),
         has_api_key: state.secrets.get(Secret::LlmKey).is_some(),
+        has_fast_key: state.secrets.get(Secret::FastKey).is_some(),
         has_stt_key: state.secrets.get(Secret::SttKey).is_some(),
         workspace: state.workspace().root().display().to_string(),
         demo: state.is_demo(),
@@ -84,6 +87,25 @@ pub async fn test_key(state: State<'_, AppState>, settings: Settings, key: Optio
     let provider = waddle_core::llm::build_provider(&settings, key);
     let provider: std::sync::Arc<dyn waddle_core::llm::Provider> = if settings.is_local() { provider } else { std::sync::Arc::new(waddle_core::ledger::Metered::new(provider, state.ledger.clone())) };
     match waddle_core::diagnostics::probe_model(provider.as_ref(), &settings.model).await {
+        Ok((_, detail)) => Ok(format!("It works: {detail}.")),
+        Err(e) => Err(format!("{e:#}")),
+    }
+}
+
+/// "Test" for the quick-reply service: one tiny call to `fast_base_url` with the quick-reply
+/// model, using the pasted key or the saved one.
+#[tauri::command]
+pub async fn test_fast_service(state: State<'_, AppState>, settings: Settings, key: Option<String>) -> CmdResult<String> {
+    if !settings.has_fast_endpoint() {
+        return Err("Choose a service for quick replies first.".into());
+    }
+    let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| state.secrets.get(Secret::FastKey));
+    if key.is_none() && !settings.fast_is_local() {
+        return Err("Paste your key for this service first.".into());
+    }
+    let provider = waddle_core::llm::build_fast_provider(&settings, key).ok_or("Choose a service for quick replies first.")?;
+    let provider: std::sync::Arc<dyn waddle_core::llm::Provider> = if settings.fast_is_local() { provider } else { std::sync::Arc::new(waddle_core::ledger::Metered::new(provider, state.ledger.clone())) };
+    match waddle_core::diagnostics::probe_model(provider.as_ref(), settings.fast_model()).await {
         Ok((_, detail)) => Ok(format!("It works: {detail}.")),
         Err(e) => Err(format!("{e:#}")),
     }
@@ -537,6 +559,7 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     settings: Settings,
     api_key: Option<String>,
+    fast_key: Option<String>,
     stt_key: Option<String>,
     mcp_env: Option<crate::secrets::McpEnv>,
 ) -> CmdResult<SettingsView> {
@@ -544,6 +567,9 @@ pub async fn save_settings(
     let mut storage = None;
     if let Some(k) = api_key {
         storage = Some(state.secrets.set(Secret::LlmKey, &k).map_err(err)?);
+    }
+    if let Some(k) = fast_key {
+        state.secrets.set(Secret::FastKey, &k).map_err(err)?;
     }
     if let Some(k) = stt_key {
         state.secrets.set(Secret::SttKey, &k).map_err(err)?;
@@ -692,7 +718,7 @@ pub fn quit(app: AppHandle) {
 /// Whether the current settings can run without a key we don't have.
 pub fn needs_key(settings: &Settings) -> bool {
     settings.provider == ProviderKind::OpenaiCompat
-        && ["openrouter.ai", "api.openai.com", "api.groq.com"].iter().any(|h| settings.base_url.contains(h))
+        && ["openrouter.ai", "api.openai.com", "api.groq.com", "generativelanguage.googleapis.com"].iter().any(|h| settings.base_url.contains(h))
 }
 
 /// The user's 👍/👎 on a saved task.

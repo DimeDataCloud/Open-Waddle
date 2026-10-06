@@ -10,6 +10,8 @@ const SERVICE: &str = "dev.waddle.app";
 #[derive(Debug, Clone, Copy)]
 pub enum Secret {
     LlmKey,
+    /// The key for the quick-reply service, when it is a different one (`fast_base_url`).
+    FastKey,
     SttKey,
     /// Keeps Waddle signed in to Google.
     GoogleRefreshToken,
@@ -23,6 +25,7 @@ impl Secret {
     fn account(self) -> &'static str {
         match self {
             Secret::LlmKey => "llm_api_key",
+            Secret::FastKey => "fast_llm_api_key",
             Secret::SttKey => "stt_api_key",
             Secret::GoogleRefreshToken => "google_refresh_token",
             Secret::GoogleClient => "google_client_secret",
@@ -32,6 +35,7 @@ impl Secret {
     fn env_vars(self) -> &'static [&'static str] {
         match self {
             Secret::LlmKey => &["WADDLE_API_KEY", "OPENROUTER_API_KEY"],
+            Secret::FastKey => &["WADDLE_FAST_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"],
             Secret::SttKey => &["WADDLE_STT_API_KEY", "GROQ_API_KEY"],
             Secret::GoogleRefreshToken | Secret::GoogleClient | Secret::McpEnv => &[],
         }
