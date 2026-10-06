@@ -391,7 +391,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         }
         "halt" => {
             if let Some(state) = app.try_state::<AppState>() {
-                state.session.halt();
+                state.session.halt(waddle_core::session::HaltBy::Tray);
             }
         }
         "quit" => app.exit(0),

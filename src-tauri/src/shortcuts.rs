@@ -46,7 +46,7 @@ pub fn handle(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
     }
     let Some(state) = app.try_state::<AppState>() else { return };
     if *shortcut == halt_key() {
-        if state.host.halt_hotkey_allowed() && state.session.halt() {
+        if state.host.halt_hotkey_allowed() && state.session.halt(waddle_core::session::HaltBy::Escape) {
             let _ = app.emit_to("overlay", "agent", waddle_core::AgentEvent::Notice { text: "Stopping!".into() });
         }
     } else if *shortcut == talk_key() {

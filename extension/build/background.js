@@ -49,6 +49,12 @@ async function targetTab(tab) {
         throw new Error("no Chrome tab is open");
     return active;
 }
+/** Brings a tab to the front, restoring a minimised window, so the user sees what Waddle does. */
+async function show(t) {
+    await chrome.tabs.update(t.id, { active: true });
+    const w = await chrome.windows.get(t.windowId);
+    await chrome.windows.update(t.windowId, w.state === "minimized" ? { state: "normal", focused: true } : { focused: true });
+}
 async function inPage(tabId, func, args) {
     const [frame] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
     return frame?.result;
@@ -79,13 +85,13 @@ async function handle({ cmd, args }) {
             }
             if (action === "open") {
                 const t = await chrome.tabs.create({ url: webUrl(args.url) });
+                await show(t);
                 const done = await loaded(t.id);
                 return { id: done.id, title: done.title ?? "", url: done.url ?? "" };
             }
             const t = await targetTab(args.tab);
             if (action === "switch") {
-                await chrome.tabs.update(t.id, { active: true });
-                await chrome.windows.update(t.windowId, { focused: true });
+                await show(t);
                 return { id: t.id, title: t.title ?? "" };
             }
             if (action === "close") {
@@ -101,14 +107,14 @@ async function handle({ cmd, args }) {
         case "navigate": {
             const t = await targetTab(args.tab);
             await chrome.tabs.update(t.id, { url: webUrl(args.url) });
+            await show(t);
             const done = await loaded(t.id);
             return { title: done.title ?? "", url: done.url ?? "" };
         }
         case "locate": {
             // The tab must be in front for a real click to land on it.
             const t = await targetTab(args.tab);
-            await chrome.tabs.update(t.id, { active: true });
-            await chrome.windows.update(t.windowId, { focused: true });
+            await show(t);
             return inPage(t.id, locateElement, [String(args.element ?? "")]);
         }
         case "click": {
