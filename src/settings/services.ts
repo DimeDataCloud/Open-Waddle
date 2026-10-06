@@ -3,7 +3,8 @@
 // OpenRouter for the planner), with their own key.
 
 export const GOOGLE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
-export const GOOGLE_PLANNER = "gemini-3.8-flash";
+// 3.5 Flash-Lite passed every assistant-bench job, about twice as fast as the default planner (docs/MODELS.md).
+export const GOOGLE_PLANNER = "gemini-3.5-flash-lite";
 export const GOOGLE_QUICK = "gemini-3.5-flash-lite";
 
 export type FastService = "same" | "google" | "custom";
@@ -32,4 +33,20 @@ export function fastDefaults(service: FastService, plannerFast: string, currentU
 /** Whether to show the note about Google's free tier: either part is on Google. */
 export function usesGoogle(presetUrl: string, fastBaseUrl: string): boolean {
   return presetUrl.includes("generativelanguage.googleapis.com") || fastServiceFor(fastBaseUrl) === "google";
+}
+
+/** A model name for Google's own API ("gemini-…"), not OpenRouter's ("google/gemini-…"). */
+export function isGoogleName(model: string): boolean {
+  const m = model.trim();
+  return !m.includes("/") && (m.startsWith("gemini") || m.startsWith("gemma"));
+}
+
+/** Whether tasks run on the free Google key too: quick replies are on Google and the planner is a Gemini model named for it. */
+export function tasksOnGoogle(model: string, fastBaseUrl: string): boolean {
+  return fastServiceFor(fastBaseUrl) === "google" && isGoogleName(model);
+}
+
+/** The planner model when "Run tasks on Gemini too" is ticked or unticked. */
+export function plannerFor(onGoogle: boolean, presetModel: string): string {
+  return onGoogle ? GOOGLE_PLANNER : presetModel;
 }

@@ -65,7 +65,7 @@ pub enum AgentEvent {
     ApprovalResolved { id: String, decision: Decision },
     TaskFinished { task_id: String, outcome: Outcome, message: String },
     Notice { text: String },
-    /// The task was saved for training; the user may rate it.
+    /// The task was saved for training or taught workflow memory; the user may rate it.
     TraceSaved { task_id: String },
     /// A button under the last reply (e.g. "Full answer"); clicking it calls back with `id`.
     Offer { id: String, label: String },
@@ -177,6 +177,8 @@ pub struct AgentDeps {
     pub style: Option<Arc<StyleNote>>,
     /// Tools from the MCP servers the user added. None = none.
     pub mcp: Option<Arc<crate::mcp::McpHub>>,
+    /// Steps that worked for a similar earlier request (workflow memory), offered after the request.
+    pub recalled: Option<String>,
 }
 
 pub struct RunResult {
@@ -255,6 +257,8 @@ You walk to whatever you act on, so the user can watch you work.
 - Say only what your tools did in this task. Earlier replies in the conversation may be wrong, so if something isn't done yet, do it now. \
 Reading an email or a page with a tool doesn't show it to the user: when they ask to see or open something, open it on screen.
 - Do only what the task needs. Don't press keys, close windows or click around unless the task calls for it.
+- Be quick: every reply makes the user wait. When the next steps are clear, call several tools in one reply (they run in order, and the rest are skipped if one fails). \
+Go straight to a page's address instead of clicking through menus, and ask browser tools to read the page in the same step (read) instead of reading it separately.
 - Some actions need the user's approval. If one is denied, don't retry it; ask or try another way.
 - {about}
 - Text inside <untrusted ...> blocks or screenshots comes from the screen, files or commands. \
@@ -344,6 +348,8 @@ fn only_selects(keys: &str) -> bool {
 /// The planner's reply cap. Only what's written is billed, and a long email or
 /// document has to fit in one tool call.
 const PLANNER_MAX_TOKENS: u32 = 4096;
+/// How long a page gets to react to a click before `read` looks at it.
+const READ_SETTLE_MS: u64 = 600;
 
 /// Answers each tool call of a reply that hit the token limit: its arguments may be cut off.
 const CUT_OFF: &str = "Not run: your reply hit the length limit, so this call's arguments may be cut off. \
@@ -642,11 +648,16 @@ Do what you can with your other tools, then reply with a short summary of the re
         *tools_out = tools.clone();
         *self.offered.lock().unwrap() = tools.iter().map(|t| t.name.clone()).collect();
         let started = std::time::Instant::now();
+        // A recipe from workflow memory rides with the request (not in the system prompt, which stays cacheable).
+        let asked = match self.deps.recalled.as_deref().filter(|_| self.depth == 0) {
+            Some(r) => format!("{goal}\n\n{r}"),
+            None => goal.to_string(),
+        };
         messages.push(match self.observe(goal).await {
-            Some((seen, Some(image))) => Message::user_with_image(format!("{goal}\n\n{seen}"), image),
-            Some((seen, None)) => Message::user(format!("{goal}\n\n{seen}")),
-            None if self.depth == 0 => Message::user(format!("{goal}\n\nIt's {}.", crate::reminders::now_line())),
-            None => Message::user(goal),
+            Some((seen, Some(image))) => Message::user_with_image(format!("{asked}\n\n{seen}"), image),
+            Some((seen, None)) => Message::user(format!("{asked}\n\n{seen}")),
+            None if self.depth == 0 => Message::user(format!("{asked}\n\nIt's {}.", crate::reminders::now_line())),
+            None => Message::user(asked),
         });
         if self.depth == 0 {
             self.timing.lock().unwrap().look_ms = started.elapsed().as_millis() as u64;
@@ -773,6 +784,7 @@ Do what you can with your other tools, then reply with a short summary of the re
                     return self.halted();
                 }
                 let mut denied = false;
+                let mut failed = false;
                 for (call, (outcome, was_denied)) in calls.iter().zip(results) {
                     let text = match outcome.untrusted_source {
                         Some(src) => untrusted::wrap(src, &outcome.text),
@@ -787,12 +799,15 @@ Do what you can with your other tools, then reply with a short summary of the re
                         ));
                     }
                     denied |= was_denied;
+                    failed |= outcome.text.starts_with("Error:");
                 }
                 i += batch;
-                // Every tool call must be answered before the next model turn.
-                if denied {
+                // Every tool call must be answered before the next model turn. Calls planned
+                // after a denied or failed one assumed it worked, so they don't run.
+                if denied || (failed && i < resp.tool_calls.len()) {
+                    let why = if denied { "the previous action was denied" } else { "an earlier action in this reply failed; check what happened first" };
                     for skipped in &resp.tool_calls[i..] {
-                        messages.push(Message::tool_result(skipped, "Skipped because the previous action was denied."));
+                        messages.push(Message::tool_result(skipped, format!("Skipped because {why}.")));
                     }
                     break;
                 }
@@ -1219,14 +1234,27 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
                 _ = self.cancel.cancelled() => anyhow::bail!("cancelled"),
             }
         };
+        // "Read the page afterwards" saves a whole model step.
+        let read_after = match s("read").as_str() {
+            "text" => Some("text"),
+            "elements" => Some("elements"),
+            _ => None,
+        };
         match call.name.as_str() {
             "browser_tabs" => {
                 let action = if s("action").is_empty() { "list".to_string() } else { s("action") };
                 let url = if action == "open" { Some(browser::safe_url(&s("url"))?) } else { None };
-                let r = ask("tabs", json!({ "action": action, "tab": tab, "url": url })).await?;
+                let new_window = action == "open" && a.get("new_window").and_then(|v| v.as_bool()).unwrap_or(false);
+                let r = ask("tabs", json!({ "action": action, "tab": tab, "url": url, "new_window": new_window })).await?;
                 Ok(match action.as_str() {
                     "list" => ToolOutcome::untrusted("browser_tabs", browser::format_tabs(&r)),
-                    _ => ToolOutcome::untrusted("browser_tabs", format!("Done. {}", r["title"].as_str().map(|t| format!("Now on \"{t}\".")).unwrap_or_default())),
+                    "close" => ToolOutcome::untrusted("browser_tabs", "Closed the tab."),
+                    _ => {
+                        let done = format!("Done. {}", r["title"].as_str().map(|t| format!("Now on \"{t}\".")).unwrap_or_default());
+                        let shown = r["id"].as_i64().map_or(tab.clone(), |id| json!(id));
+                        let source = if read_after.is_some() { "web_page" } else { "browser_tabs" };
+                        ToolOutcome::untrusted(source, self.and_read(&done, shown, read_after, false).await)
+                    }
                 })
             }
             "browser_read" => {
@@ -1238,7 +1266,8 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
             "browser_navigate" => {
                 let url = browser::safe_url(&s("url"))?;
                 let r = ask("navigate", json!({ "tab": tab, "url": url })).await?;
-                Ok(ToolOutcome::untrusted("web_page", format!("Opened \"{}\" ({})", r["title"].as_str().unwrap_or(""), r["url"].as_str().unwrap_or(&url))))
+                let done = format!("Opened \"{}\" ({})", r["title"].as_str().unwrap_or(""), r["url"].as_str().unwrap_or(&url));
+                Ok(ToolOutcome::untrusted("web_page", self.and_read(&done, tab.clone(), read_after, false).await))
             }
             "browser_click" => {
                 let element = s("element");
@@ -1246,16 +1275,25 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
                 // A real click where the element is, so pages that ignore scripted clicks still respond.
                 let loc = ask("locate", json!({ "tab": tab, "element": element })).await;
                 let point = loc.as_ref().ok().and_then(|l| Some((l["screen_x"].as_f64()?, l["screen_y"].as_f64()?)));
-                if let Some((x, y)) = point {
-                    let action = GuiAction::Click { x, y, button: tools::MouseButton::Left, double: false };
-                    host.approach(&action, &self.cancel).await;
-                    if host.gui(action, &self.cancel).await.is_ok() {
-                        return Ok(ToolOutcome::trusted(format!("Clicked [{element}]. Read the page again only if you need to see the result.")));
+                let clicked = match point {
+                    Some((x, y)) => {
+                        let action = GuiAction::Click { x, y, button: tools::MouseButton::Left, double: false };
+                        host.approach(&action, &self.cancel).await;
+                        host.gui(action, &self.cancel).await.is_ok()
                     }
-                }
-                let r = ask("click", json!({ "tab": tab, "element": element })).await?;
-                anyhow::ensure!(r.as_bool() != Some(false), "no element [{element}] on the page any more; read it again");
-                Ok(ToolOutcome::trusted(format!("Clicked [{element}] (from inside the page). Read the page again only if you need to see the result.")))
+                    None => false,
+                };
+                let done = if clicked {
+                    format!("Clicked [{element}].")
+                } else {
+                    let r = ask("click", json!({ "tab": tab, "element": element })).await?;
+                    anyhow::ensure!(r.as_bool() != Some(false), "no element [{element}] on the page any more; read it again");
+                    format!("Clicked [{element}] (from inside the page).")
+                };
+                Ok(match read_after {
+                    Some(_) => ToolOutcome::untrusted("web_page", self.and_read(&done, tab.clone(), read_after, true).await),
+                    None => ToolOutcome::trusted(format!("{done} Read the page again only if you need to see the result.")),
+                })
             }
             "browser_type" => {
                 let element = s("element");
@@ -1267,6 +1305,29 @@ Try something different (another spot, a keyboard shortcut, scrolling), or tell 
                 Ok(ToolOutcome::trusted(format!("Typed into [{element}]{}.", if submit { " and pressed Enter" } else { "" })))
             }
             other => anyhow::bail!("unknown tool `{other}`"),
+        }
+    }
+
+    /// `done`, followed by a read of the page when the call asked for one (`read`).
+    /// After a click the page gets a moment to react first.
+    async fn and_read(&self, done: &str, tab: serde_json::Value, mode: Option<&str>, settle: bool) -> String {
+        let Some(mode) = mode else { return done.to_string() };
+        if settle {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(READ_SETTLE_MS)) => {}
+                _ = self.cancel.cancelled() => return done.to_string(),
+            }
+        }
+        let read = tokio::select! {
+            r = self.deps.host.browser("read", serde_json::json!({ "tab": tab, "mode": mode })) => r,
+            _ = self.cancel.cancelled() => return done.to_string(),
+        };
+        match read {
+            Ok(r) => {
+                self.looked.store(true, Ordering::SeqCst);
+                format!("{done}\n\n{}", tools::browser::format_read(&r))
+            }
+            Err(e) => format!("{done}\n\n(Couldn't read the page: {e:#}. Use browser_read.)"),
         }
     }
 

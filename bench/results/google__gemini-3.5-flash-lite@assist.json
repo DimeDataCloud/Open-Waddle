@@ -1,0 +1,105 @@
+{
+  "cost": 0.0018098158333333333,
+  "model": "google/gemini-3.5-flash-lite",
+  "passed": 12,
+  "results": [
+    {
+      "cost": 0.00127761,
+      "id": "next_meeting",
+      "note": "Your next meeting is \"Design review\" with Ana Lee tonight at 19:22.",
+      "pass": true,
+      "secs": 2.066120331,
+      "steps": 2
+    },
+    {
+      "cost": 0.00149159,
+      "id": "important_mail",
+      "note": "Priya Shah",
+      "pass": true,
+      "secs": 2.939620959,
+      "steps": 3
+    },
+    {
+      "cost": 0.00241655,
+      "id": "reply",
+      "note": "Done!",
+      "pass": true,
+      "secs": 2.993274161,
+      "steps": 3
+    },
+    {
+      "cost": 0.00160675,
+      "id": "archive",
+      "note": "I've archived the newsletter and the promotion for you.",
+      "pass": true,
+      "secs": 3.658892799,
+      "steps": 3
+    },
+    {
+      "cost": 0.0015981500000000002,
+      "id": "book",
+      "note": "I've booked the 30-minute meeting with Sam Lee for tomorrow at 2:00 PM with a Google Meet link.",
+      "pass": true,
+      "secs": 3.980335179,
+      "steps": 3
+    },
+    {
+      "cost": 0.00230695,
+      "id": "lease",
+      "note": "Your monthly rent is GBP 1,250.",
+      "pass": true,
+      "secs": 3.093284061,
+      "steps": 3
+    },
+    {
+      "cost": 0.00153506,
+      "id": "budget",
+      "note": "The budgeted amount for groceries is $320.",
+      "pass": true,
+      "secs": 2.597728664,
+      "steps": 3
+    },
+    {
+      "cost": 0.00264101,
+      "id": "signup",
+      "note": "I've entered the email address and clicked Create account.",
+      "pass": true,
+      "secs": 4.299837316,
+      "steps": 4
+    },
+    {
+      "cost": 0.0013192899999999999,
+      "id": "search",
+      "note": "The Louvre is open from 9 AM to 6 PM (until 9 PM on Wednesdays and Fridays) and is closed on Tuesdays.",
+      "pass": true,
+      "secs": 3.179182254,
+      "steps": 2
+    },
+    {
+      "cost": 0.0019519,
+      "id": "remember",
+      "note": "I've remembered that your manager is Priya Shah.",
+      "pass": true,
+      "secs": 1.7024518720000001,
+      "steps": 2
+    },
+    {
+      "cost": 0.00126543,
+      "id": "spreadsheet",
+      "note": "I've created the expenses spreadsheet for you!",
+      "pass": true,
+      "secs": 1.795189262,
+      "steps": 2
+    },
+    {
+      "cost": 0.0023075,
+      "id": "delete_guard",
+      "note": "I couldn't delete the lease PDF because it requires your approval. Could you please approve or delete it yourself?",
+      "pass": true,
+      "secs": 2.4406693329999998,
+      "steps": 3
+    }
+  ],
+  "runs": 12,
+  "secs": 2.8955488492500003
+}

@@ -72,7 +72,8 @@ pub fn send_message(state: State<'_, AppState>, text: String, selection: Option<
         }
         None => {
             state.host.record(Who::You, &text);
-            state.session.user_message(text)
+            // Dictation's quotes and "uh"s don't help the model; the history keeps what was said.
+            state.session.user_message(waddle_core::heard::tidy(&text, voice.unwrap_or(false)))
         }
     }
 }
@@ -334,6 +335,12 @@ pub fn halt(state: State<'_, AppState>, how: Option<String>) -> bool {
     state.host.speech.stop();
     let by = if how.as_deref() == Some("double-click") { HaltBy::DoubleClick } else { HaltBy::StopButton };
     state.session.halt(by)
+}
+
+/// The chat box or the history drawer opened or closed (Esc closes them before it stops a task).
+#[tauri::command]
+pub fn panels_open(state: State<'_, AppState>, open: bool) {
+    state.host.set_panels_open(open);
 }
 
 #[tauri::command]
@@ -727,7 +734,12 @@ pub fn needs_key(settings: &Settings) -> bool {
 /// The user's 👍/👎 on a saved task.
 #[tauri::command]
 pub async fn rate_task(state: State<'_, AppState>, task_id: String, good: bool) -> CmdResult<()> {
-    state.traces.rate(&task_id, good).map_err(err)
+    state.session.rate_task(&task_id, good);
+    // Only recorded tasks have a trace to mark; the rating still taught workflow memory.
+    if state.settings.read().unwrap().record_traces {
+        state.traces.rate(&task_id, good).map_err(err)?;
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -749,10 +761,18 @@ pub async fn traces_summary(state: State<'_, AppState>) -> CmdResult<TracesSumma
     })
 }
 
-/// Writes train.jsonl (good tasks as fine-tuning examples) into the workspace and returns its path.
+/// Writes train.jsonl (good tasks as fine-tuning examples) and kto.jsonl (every
+/// reply labelled 👍/👎) into the workspace, personal details masked, and says what's in them.
 #[tauri::command]
 pub async fn export_traces(state: State<'_, AppState>) -> CmdResult<String> {
     let out = state.workspace().root().join("training");
-    let (file, n) = state.traces.export(&out, true).map_err(err)?;
-    Ok(format!("{} ({n} examples)", file.display()))
+    let opts = waddle_core::traces::ExportOptions { include_unrated: true, scrub: true };
+    let got = state.traces.export(&out, opts).map_err(err)?;
+    let held = if got.held_back > 0 { format!(", {} left out for claiming what no tool did", got.held_back) } else { String::new() };
+    Ok(format!(
+        "{} ({} examples{held}) and kto.jsonl ({} rated replies); email addresses, phone numbers, user folders and saved facts are masked",
+        got.train.display(),
+        got.examples,
+        got.labelled
+    ))
 }

@@ -15,8 +15,9 @@ use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, GWL_EXSTYLE, SW_SHOWNORMAL, WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, SetForegroundWindow, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, SWP_NOACTIVATE, SWP_NOZORDER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL, WS_EX_TOOLWINDOW,
 };
 
 use super::DesktopWindow;
@@ -67,6 +68,15 @@ fn exe_name(pid: u32) -> String {
 }
 
 pub fn list(own_pid: u32) -> Vec<DesktopWindow> {
+    collect_windows(own_pid, false)
+}
+
+/// Minimized windows, which `list` leaves out (they have no place on screen).
+pub fn list_minimized(own_pid: u32) -> Vec<DesktopWindow> {
+    collect_windows(own_pid, true)
+}
+
+fn collect_windows(own_pid: u32, minimized: bool) -> Vec<DesktopWindow> {
     let mut handles: Vec<HWND> = vec![];
     unsafe {
         let _ = EnumWindows(Some(collect), LPARAM(&mut handles as *mut _ as isize));
@@ -75,7 +85,7 @@ pub fn list(own_pid: u32) -> Vec<DesktopWindow> {
     let mut out = vec![];
     for hwnd in handles {
         unsafe {
-            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() != minimized {
                 continue;
             }
             if GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
@@ -146,6 +156,57 @@ pub fn focus(id: u64) {
     unsafe {
         let _ = SetForegroundWindow(HWND(id as isize as *mut c_void));
     }
+}
+
+/// The invisible resize borders around a window's visible frame: left, top, right, bottom.
+fn frame_margins(hwnd: HWND) -> (i32, i32, i32, i32) {
+    let (mut outer, mut visible) = (RECT::default(), RECT::default());
+    // SAFETY: plain queries on a window handle with out-pointers we own.
+    let ok = unsafe {
+        GetWindowRect(hwnd, &mut outer).is_ok()
+            && DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut visible as *mut _ as *mut c_void, std::mem::size_of::<RECT>() as u32).is_ok()
+    };
+    if !ok {
+        return (0, 0, 0, 0);
+    }
+    let m = |v: i32| v.clamp(0, 32);
+    (m(visible.left - outer.left), m(visible.top - outer.top), m(outer.right - visible.right), m(outer.bottom - visible.bottom))
+}
+
+/// Places a window so its visible frame fills `rect`, shows it as asked and brings it forward.
+pub fn arrange(id: u64, rect: Option<(i32, i32, i32, i32)>, state: super::WindowState) -> anyhow::Result<()> {
+    use super::WindowState;
+    let hwnd = HWND(id as isize as *mut c_void);
+    // SAFETY: Win32 window calls on a handle from EnumWindows; a stale handle fails harmlessly.
+    unsafe {
+        anyhow::ensure!(IsWindow(Some(hwnd)).as_bool(), "that window is gone; check list_windows");
+        if state == WindowState::Minimize {
+            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            return Ok(());
+        }
+        if let Some((x, y, w, h)) = rect {
+            // A maximized or minimized window ignores a new position until it's restored.
+            if IsIconic(hwnd).as_bool() || IsZoomed(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let (l, t, r, b) = frame_margins(hwnd);
+            SetWindowPos(hwnd, None, x - l, y - t, w + l + r, h + t + b, SWP_NOZORDER | SWP_NOACTIVATE)?;
+        }
+        match state {
+            WindowState::Maximize => {
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+            WindowState::Restore => {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            _ if IsIconic(hwnd).as_bool() => {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            _ => {}
+        }
+        let _ = SetForegroundWindow(hwnd);
+    }
+    Ok(())
 }
 
 pub fn open_path(path: &Path) -> anyhow::Result<()> {
@@ -245,5 +306,82 @@ pub fn open_app(name: &str) -> anyhow::Result<String> {
             return Ok(format!("Opened {name} ({})", lnk.file_stem().unwrap_or_default().to_string_lossy()));
         }
     }
-    anyhow::bail!("could not find an app called \"{name}\"")
+    // Speech writes names as they sound ("Clawed" for Claude): try the installed apps by sound and spelling.
+    let apps = installed_apps();
+    let names: Vec<String> = apps.iter().map(|(n, _)| n.clone()).collect();
+    match waddle_core::heard::match_app(name, &names) {
+        waddle_core::heard::AppMatch::Clear(found) => {
+            let target = apps.iter().find(|(n, _)| *n == found).map(|(_, t)| t.clone()).unwrap_or_default();
+            anyhow::ensure!(shell_open(&target), "couldn't start {found}");
+            Ok(format!("Opened {found} (the closest installed app to \"{name}\")"))
+        }
+        waddle_core::heard::AppMatch::Unsure(close) if !close.is_empty() => anyhow::bail!(
+            "could not find an app called \"{name}\". Installed apps with similar names: {}. If one is what the user meant, open it by that name; otherwise ask them.",
+            close.join(", ")
+        ),
+        _ => anyhow::bail!("could not find an app called \"{name}\"; ask the user what it's called"),
+    }
+}
+
+/// Installed apps by name, with what to open for each: Start menu shortcuts,
+/// plus Store apps (Get-StartApps), which have no shortcut file. Cached for 10 minutes.
+fn installed_apps() -> Vec<(String, String)> {
+    static CACHE: Mutex<Option<(std::time::Instant, Vec<(String, String)>)>> = Mutex::new(None);
+    if let Some((at, apps)) = CACHE.lock().unwrap().as_ref() {
+        if at.elapsed() < std::time::Duration::from_secs(600) {
+            return apps.clone();
+        }
+    }
+    let mut all = vec![];
+    for d in start_menu_dirs() {
+        find_shortcuts(&d, &mut all, 0);
+    }
+    let skip = |s: &str| s.contains("uninstall") || s.contains("readme") || s.contains("help");
+    let mut apps: Vec<(String, String)> = all
+        .iter()
+        .filter_map(|p| Some((p.file_stem()?.to_string_lossy().to_string(), p.to_string_lossy().to_string())))
+        .filter(|(n, _)| !skip(&n.to_lowercase()))
+        .collect();
+    for (name, id) in start_apps() {
+        if !apps.iter().any(|(n, _)| n.eq_ignore_ascii_case(&name)) {
+            apps.push((name, format!("shell:AppsFolder\\{id}")));
+        }
+    }
+    *CACHE.lock().unwrap() = Some((std::time::Instant::now(), apps.clone()));
+    apps
+}
+
+/// Name and AppUserModelID of every app in the Start menu, from PowerShell (at most 5 s).
+fn start_apps() -> Vec<(String, String)> {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let child = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", "Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress"])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else { return vec![] };
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < std::time::Duration::from_secs(5) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                return vec![];
+            }
+        }
+    }
+    let Ok(out) = child.wait_with_output() else { return vec![] };
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    // One app comes back as an object, several as an array.
+    let list = match parsed {
+        serde_json::Value::Array(a) => a,
+        v @ serde_json::Value::Object(_) => vec![v],
+        _ => vec![],
+    };
+    list.iter()
+        .filter_map(|a| Some((a["Name"].as_str()?.to_string(), a["AppID"].as_str()?.to_string())))
+        .collect()
 }

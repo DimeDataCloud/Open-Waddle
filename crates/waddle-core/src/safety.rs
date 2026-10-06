@@ -75,6 +75,8 @@ pub fn classify(call: &ToolCall, ctx: &dyn SafetyContext) -> Assessment {
         "copy_to_clipboard" => assess(Tier::ScopedMutation, "replaces what's on the clipboard"),
         "drag" => assess(Tier::ScopedMutation, "drags in another application"),
         "open_app" => assess(Tier::NonDestructive, "opens an application"),
+        "arrange_window" => assess(Tier::NonDestructive, "moves or resizes a window"),
+        "duck" => assess(Tier::Passive, "moves Waddle itself"),
         "read_file" | "list_dir" => assess(Tier::NonDestructive, "reads the workspace"),
         "find_files" | "read_document" => assess(Tier::NonDestructive, "reads your files"),
         "drive_search" | "drive_read" => assess(Tier::NonDestructive, "reads your Google Drive"),
@@ -139,6 +141,11 @@ pub fn canonical_keys(keys: &str) -> String {
             "ins" => "insert",
             "pgup" => "pageup",
             "pgdn" => "pagedown",
+            "arrowup" => "up",
+            "arrowdown" => "down",
+            "arrowleft" => "left",
+            "arrowright" => "right",
+            "spacebar" => "space",
             other => other,
         };
         match MODIFIERS.iter().position(|m| *m == name) {
@@ -158,8 +165,22 @@ fn classify_keys(keys: &str) -> Assessment {
         "delete", "shift+delete", "ctrl+shift+delete", "ctrl+alt+delete", "meta+r",
         "meta+l", "ctrl+shift+escape",
     ];
+    // Keys that only move around (snap or switch windows and tabs, open a new
+    // tab, reach the address bar, scroll, zoom, go back) change nothing, so they
+    // don't wait for the countdown. Enter, Space and typing still do.
+    const MOVES: &[&str] = &[
+        "meta+left", "meta+right", "meta+up", "meta+down", "shift+meta+left", "shift+meta+right",
+        "alt+tab", "alt+shift+tab", "ctrl+tab", "ctrl+shift+tab", "ctrl+pageup", "ctrl+pagedown",
+        "ctrl+t", "ctrl+n", "ctrl+shift+n", "ctrl+l", "alt+d", "f6", "ctrl+f", "f3",
+        "alt+left", "alt+right", "f5", "ctrl+r", "f11",
+        "ctrl+plus", "ctrl+=", "ctrl+-", "ctrl+minus", "ctrl+0",
+        "up", "down", "left", "right", "pageup", "pagedown", "home", "end", "ctrl+home", "ctrl+end",
+        "tab", "shift+tab", "escape",
+    ];
     if DANGEROUS.contains(&norm.as_str()) {
         assess(Tier::Destructive, format!("`{keys}` can close windows or delete data"))
+    } else if MOVES.contains(&norm.as_str()) {
+        assess(Tier::NonDestructive, "moves around (switches, snaps, scrolls or opens a tab)")
     } else {
         assess(Tier::ScopedMutation, "presses keys in another application")
     }
@@ -327,6 +348,20 @@ mod tests {
         assert_eq!(canonical_keys("Shift + Control + Left"), "ctrl+shift+left");
         assert_eq!(canonical_keys("super+ctrl+ctrl+d"), "ctrl+meta+d");
         assert_eq!(tier_of("press_keys", json!({"keys":"ctrl+s"}), false), Tier::ScopedMutation);
+    }
+
+    #[test]
+    fn keys_that_only_move_around_skip_the_countdown() {
+        for k in ["win+right", "Windows + Left", "shift+win+right", "alt+tab", "ctrl+t", "ctrl+n", "ctrl+l", "ctrl+tab", "pagedown", "ArrowDown", "esc", "alt+left", "f5", "ctrl+plus"] {
+            assert_eq!(tier_of("press_keys", json!({ "keys": k }), false), Tier::NonDestructive, "{k}");
+        }
+        // These can send, submit, type, paste, undo or save: they keep the countdown.
+        for k in ["enter", "space", "ctrl+enter", "ctrl+v", "ctrl+z", "ctrl+s", "a", "ctrl+a", "ctrl+shift+enter", "shift+enter"] {
+            assert_eq!(tier_of("press_keys", json!({ "keys": k }), false), Tier::ScopedMutation, "{k}");
+        }
+        assert_eq!(tier_of("press_keys", json!({"keys":"ctrl+w"}), false), Tier::Destructive);
+        assert_eq!(tier_of("arrange_window", json!({"action":"left_half"}), false), Tier::NonDestructive);
+        assert_eq!(tier_of("duck", json!({"trick":"fly_around"}), false), Tier::Passive);
     }
 
     #[test]

@@ -43,6 +43,7 @@ fn fixture(script: Vec<waddle_core::llm::ChatResponse>) -> Fixture {
         google: None,
         style: None,
         mcp: None,
+        recalled: None,
     };
     Fixture { _dir: dir, host, provider, deps }
 }
@@ -125,4 +126,49 @@ async fn without_the_extension_there_are_no_browser_tools() {
     run(&f).await;
     let tools = f.provider.tools.lock().unwrap()[0].clone();
     assert!(!tools.iter().any(|t| t.starts_with("browser_")), "{tools:?}");
+}
+
+#[tokio::test]
+async fn going_to_a_page_can_read_it_in_the_same_step() {
+    let f = fixture(vec![
+        reply("", vec![call("browser_navigate", json!({ "url": "https://www.youtube.com/results?search_query=lofi", "read": "elements" }))]),
+        reply("Found it.", vec![]),
+    ]);
+    page(&f);
+    f.host.browser_replies.lock().unwrap().insert("navigate".into(), json!({ "title": "lofi - YouTube", "url": "https://www.youtube.com/results?search_query=lofi" }));
+    run(&f).await;
+    let cmds: Vec<String> = f.host.browser_calls.lock().unwrap().iter().map(|c| c.0.clone()).collect();
+    assert_eq!(cmds, ["navigate", "read"]);
+    assert_eq!(f.host.browser_calls.lock().unwrap()[1].1["mode"], "elements");
+    let r = &tool_results(&f)[0];
+    assert!(r.contains("Opened \"lofi - YouTube\"") && r.contains("[e2] button \"Create account\""), "{r}");
+    assert!(r.contains("<untrusted"), "the page is untrusted data: {r}");
+    assert_eq!(f.provider.requests.lock().unwrap().len(), 2, "no separate browser_read step");
+}
+
+#[tokio::test]
+async fn a_page_opens_in_a_new_window_when_asked() {
+    let f = fixture(vec![
+        reply("", vec![call("browser_tabs", json!({ "action": "open", "url": "music.youtube.com", "new_window": true }))]),
+        reply("Open.", vec![]),
+    ]);
+    f.host.browser_replies.lock().unwrap().insert("tabs".into(), json!({ "id": 7, "title": "YouTube Music", "url": "https://music.youtube.com/" }));
+    run(&f).await;
+    let calls = f.host.browser_calls.lock().unwrap().clone();
+    assert_eq!(calls[0].1["new_window"], true);
+    assert_eq!(calls[0].1["url"], "https://music.youtube.com/");
+    assert!(tool_results(&f)[0].contains("Now on \"YouTube Music\""));
+}
+
+#[tokio::test]
+async fn the_search_addresses_are_in_the_navigate_tool() {
+    let specs = waddle_core::tools::browser::specs();
+    let nav = specs.iter().find(|s| s.name == "browser_navigate").unwrap();
+    for site in ["youtube.com/results?search_query=", "music.youtube.com/search?q=", "github.com/search?q=", "@<handle>/videos"] {
+        assert!(nav.description.contains(site), "{site}");
+    }
+    for name in ["browser_navigate", "browser_click", "browser_tabs"] {
+        let s = specs.iter().find(|s| s.name == name).unwrap();
+        assert!(s.parameters["properties"]["read"].is_object(), "{name} takes read");
+    }
 }

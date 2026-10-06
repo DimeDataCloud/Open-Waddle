@@ -127,6 +127,7 @@ async fn run_with(hub: Arc<McpHub>, host: Arc<FakeHost>, provider: Arc<MockProvi
         google: None,
         style: None,
         mcp: Some(hub),
+        recalled: None,
     };
     let env = host.env();
     let agent = Agent::new(&deps, "t1".into(), CancellationToken::new(), Arc::new(Mutex::new(TaskStatus::default())), &env);

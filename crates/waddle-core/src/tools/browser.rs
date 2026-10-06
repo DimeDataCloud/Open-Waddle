@@ -8,20 +8,30 @@ use serde_json::{json, Value};
 use crate::llm::{ToolCall, ToolSpec};
 use crate::tools::spec;
 
+/// Search pages to go to directly, one step instead of typing into a search box.
+pub const SEARCH_ADDRESSES: &str = "Search straight from the address (put the words in with + between them): \
+the web https://www.google.com/search?q=<words>, YouTube https://www.youtube.com/results?search_query=<words>, \
+a YouTube channel's newest videos https://www.youtube.com/@<handle>/videos, YouTube Music https://music.youtube.com/search?q=<words>, \
+GitHub https://github.com/search?q=<words>&type=repositories, Google Maps https://www.google.com/maps/search/<place>, \
+Wikipedia https://en.wikipedia.org/w/index.php?search=<words>, Amazon https://www.amazon.com/s?k=<words>.";
+
 pub fn is_browser_tool(name: &str) -> bool {
     name.starts_with("browser_")
 }
 
 pub fn specs() -> Vec<ToolSpec> {
     let tab = json!({ "type": "integer", "description": "Tab id from browser_tabs (default: the active tab)" });
+    let read = json!({ "type": "string", "enum": ["text", "elements"], "description": "Also read the page afterwards, in the same step" });
     vec![
         spec(
             "browser_tabs",
-            "List, switch to, open or close Chrome tabs.",
+            "List, switch to, open or close Chrome tabs. To open a page beside another one (split screen, another monitor), open it with new_window, then arrange_window.",
             json!({
                 "action": { "type": "string", "enum": ["list", "switch", "open", "close"] },
                 "tab": tab,
-                "url": { "type": "string", "description": "For open" }
+                "url": { "type": "string", "description": "For open" },
+                "new_window": { "type": "boolean", "description": "For open: in a new Chrome window" },
+                "read": read
             }),
             &["action"],
         ),
@@ -33,14 +43,14 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "browser_navigate",
-            "Go to a web address in Chrome. To search the web, go to https://www.google.com/search?q=<words>, then browser_read.",
-            json!({ "url": { "type": "string" }, "tab": tab }),
+            &format!("Go to a web address in Chrome (it comes to the front). {SEARCH_ADDRESSES}"),
+            json!({ "url": { "type": "string" }, "tab": tab, "read": read }),
             &["url"],
         ),
         spec(
             "browser_click",
             "Click an element from the latest browser_read elements list, by its id (e.g. \"e12\").",
-            json!({ "element": { "type": "string" }, "tab": tab }),
+            json!({ "element": { "type": "string" }, "tab": tab, "read": read }),
             &["element"],
         ),
         spec(

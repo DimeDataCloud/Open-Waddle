@@ -230,6 +230,7 @@ async fn run_task(model: &str, key: &str, (id, goal, check): &(&'static str, &'s
         google: Some(w.fg.google()),
         style: Some(Arc::new(StyleNote::new(w.dir.path().join("style.md")))),
         mcp: None,
+        recalled: None,
     };
     let env = waddle_core::Host::env(w.host.as_ref());
     let agent = Agent::new(&deps, format!("bench-{id}"), CancellationToken::new(), Arc::default(), &env);

@@ -1,0 +1,242 @@
+{
+  "cost": 0.0027806876190476196,
+  "hits": 21,
+  "model": "google/gemini-3.5-flash-lite",
+  "passed": 16,
+  "results": [
+    {
+      "cost": 0.00602802,
+      "hit": true,
+      "id": "playlist",
+      "model_secs": 18.061,
+      "note": "StepLimit [windows look click(598,614) look click(598,614) look click(598,612)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 18.716498756,
+      "steps": 6,
+      "tokens": 21867
+    },
+    {
+      "cost": 0.00444024,
+      "hit": true,
+      "id": "search",
+      "model_secs": 7.343,
+      "note": "StepLimit [windows look type(\"rubber duck debugging\" @654,26) keys(enter) look type(\"rubber duck debugging\" @654,26) keys(enter) look type(\"rubber duck debugging\" @654,26) keys(enter) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 7.765032902,
+      "steps": 6,
+      "tokens": 22014
+    },
+    {
+      "cost": 0.00136845,
+      "hit": true,
+      "id": "open-email",
+      "model_secs": 3.32,
+      "note": "Done [windows look click(366,336)] Here is Grace's email about the Q3 budget.",
+      "pass": true,
+      "secs": 3.885552276,
+      "steps": 2,
+      "tokens": 7102
+    },
+    {
+      "cost": 0.0027752899999999997,
+      "hit": true,
+      "id": "compose",
+      "model_secs": 4.225,
+      "note": "Done [windows look click(76,101) look click(68,101)] I've started a new email for you.",
+      "pass": true,
+      "secs": 4.557498582,
+      "steps": 4,
+      "tokens": 14346
+    },
+    {
+      "cost": 0.00277955,
+      "hit": true,
+      "id": "delete-icon",
+      "model_secs": 4.875,
+      "note": "Done [windows look click(936,89) look click(936,89)] I've deleted the email you were reading.",
+      "pass": true,
+      "secs": 5.24083233,
+      "steps": 4,
+      "tokens": 14362
+    },
+    {
+      "cost": 0.00274875,
+      "hit": true,
+      "id": "toggle",
+      "model_secs": 4.333,
+      "note": "Done [windows look click(1341,222) look click(1341,229)] I've turned on Night light.",
+      "pass": true,
+      "secs": 4.692116266,
+      "steps": 4,
+      "tokens": 14318
+    },
+    {
+      "cost": 0.0027404200000000004,
+      "hit": true,
+      "id": "nav",
+      "model_secs": 4.953,
+      "note": "Done [windows look click(111,241) look click(111,241)] I've opened the Bluetooth settings.",
+      "pass": true,
+      "secs": 5.277025405,
+      "steps": 4,
+      "tokens": 14304
+    },
+    {
+      "cost": 0.00594879,
+      "hit": true,
+      "id": "bold",
+      "model_secs": 6.471,
+      "note": "StepLimit [windows look click(124,116) look click(121,119) look click(124,116) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 6.774986814,
+      "steps": 6,
+      "tokens": 21774
+    },
+    {
+      "cost": 0.0021907999999999997,
+      "hit": true,
+      "id": "dialog",
+      "model_secs": 2.42,
+      "note": "Done [windows look click(734,460)] I closed Notepad without saving.",
+      "pass": true,
+      "secs": 2.711056374,
+      "steps": 2,
+      "tokens": 7068
+    },
+    {
+      "cost": 0.00137229,
+      "hit": true,
+      "id": "file-row",
+      "model_secs": 2.602,
+      "note": "Done [windows look click(338,290)] I've opened budget-2026.xlsx for you.",
+      "pass": true,
+      "secs": 3.730235339,
+      "steps": 2,
+      "tokens": 7091
+    },
+    {
+      "cost": 0.00430748,
+      "hit": true,
+      "id": "sidebar",
+      "model_secs": 5.905,
+      "note": "StepLimit [windows look click(65,304) look click(65,304) look click(65,305)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 6.255494387,
+      "steps": 6,
+      "tokens": 21842
+    },
+    {
+      "cost": 0.0070691999999999994,
+      "hit": true,
+      "id": "form",
+      "model_secs": 6.915,
+      "note": "StepLimit [windows look type(\"Ada\" @423,358) click(445,429) look type(\"Ada\" @423,358) click(445,429) look type(\"Ada\" @360,358) click(445,429) look type(\"Ada\" @423,358) click(445,429) look type(\"Ada\" @360,358) click(445,429) look type(\"Ada\" @360,358) click(445,429) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 7.291329653,
+      "steps": 6,
+      "tokens": 23247
+    },
+    {
+      "cost": 0.001075,
+      "hit": true,
+      "id": "just-answer",
+      "model_secs": 1.511,
+      "note": "Done [windows look] The subject is Offsite agenda.",
+      "pass": true,
+      "secs": 1.970462984,
+      "steps": 1,
+      "tokens": 3532
+    },
+    {
+      "cost": 0.0014851,
+      "hit": true,
+      "id": "write-file",
+      "model_secs": 1.583,
+      "note": "Done [] I've created hello.txt for you.",
+      "pass": true,
+      "secs": 1.879061382,
+      "steps": 2,
+      "tokens": 4701
+    },
+    {
+      "cost": 0.00146642,
+      "hit": true,
+      "id": "a11y",
+      "model_secs": 2.211,
+      "note": "Done [windows elements look element(2)] I closed Notepad without saving.",
+      "pass": true,
+      "secs": 2.524177304,
+      "steps": 2,
+      "tokens": 7510
+    },
+    {
+      "cost": 0.0013559400000000001,
+      "hit": true,
+      "id": "where-toggle",
+      "model_secs": 2.452,
+      "note": "Done [windows look PointAt { x: 1339.2, y: 228.48, label: \"Night light\" }] Here is the Night light switch.",
+      "pass": true,
+      "secs": 2.874051197,
+      "steps": 2,
+      "tokens": 7107
+    },
+    {
+      "cost": 0.0013556100000000001,
+      "hit": true,
+      "id": "where-compose",
+      "model_secs": 1.995,
+      "note": "Done [windows look PointAt { x: 72.0, y: 100.8, label: \"Compose\" }] Click the Compose button on the top left.",
+      "pass": true,
+      "secs": 2.298049187,
+      "steps": 2,
+      "tokens": 7105
+    },
+    {
+      "cost": 0.00134165,
+      "hit": true,
+      "id": "scroll",
+      "model_secs": 2.335,
+      "note": "Done [windows look Scroll { dx: 0, dy: 5, at: Some((720.0, 480.0)) }] Done!",
+      "pass": true,
+      "secs": 3.138524601,
+      "steps": 2,
+      "tokens": 7086
+    },
+    {
+      "cost": 0.0036998400000000002,
+      "hit": true,
+      "id": "drag",
+      "model_secs": 4.925,
+      "note": "Done [windows look Drag { from: (334.08000000000004, 288.96), to: (64.8, 305.28000000000003) } look Drag { from: (334.08000000000004, 288.96), to: (60.480000000000004, 305.28000000000003) }] I've moved budget-2026.xlsx to your Downloads folder.",
+      "pass": true,
+      "secs": 6.025180705,
+      "steps": 4,
+      "tokens": 14449
+    },
+    {
+      "cost": 0.0013383,
+      "hit": true,
+      "id": "copy",
+      "model_secs": 2.306,
+      "note": "Done [windows look WriteClipboard { text: \"Offsite agenda\" }] I've copied the subject to your clipboard.",
+      "pass": true,
+      "secs": 4.001381089,
+      "steps": 2,
+      "tokens": 7094
+    },
+    {
+      "cost": 0.0015073,
+      "hit": true,
+      "id": "remind",
+      "model_secs": 1.556,
+      "note": "Done [] I've set a reminder to stretch for 18:36.",
+      "pass": true,
+      "secs": 2.769029993,
+      "steps": 2,
+      "tokens": 4709
+    }
+  ],
+  "runs": 21,
+  "secs": 4.97036083457143,
+  "tag": ""
+}

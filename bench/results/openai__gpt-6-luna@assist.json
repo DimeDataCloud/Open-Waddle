@@ -1,105 +1,105 @@
 {
-  "cost": 0.00045645875000000007,
+  "cost": 0.0005358408333333333,
   "model": "openai/gpt-6-luna",
   "passed": 12,
   "results": [
     {
-      "cost": 0.00039546,
+      "cost": 0.000461885,
       "id": "next_meeting",
-      "note": "Your next meeting is Design review today, Sunday, October 4, from 6:08 to 6:38 PM with Ana Lee.",
+      "note": "Your next meeting is Design review today from 7:21 to 7:51 PM, with Ana Lee. It\u2019s on Google Meet: https://meet.google.co",
       "pass": true,
-      "secs": 3.37181833,
+      "secs": 3.658743661,
       "steps": 2
     },
     {
-      "cost": 0.000405935,
+      "cost": 0.00059209,
       "id": "important_mail",
-      "note": "Priya Shah.",
+      "note": "Ana Lee, Priya Shah, Medium Daily Digest, and Shop Example.",
       "pass": true,
-      "secs": 3.117691318,
+      "secs": 6.023754156,
       "steps": 2
     },
     {
-      "cost": 0.0004946250000000001,
+      "cost": 0.000570015,
       "id": "reply",
-      "note": "Replied to Ana: Thursday at 3 works for me.",
+      "note": "Replied to Ana: Thursday at 3 works for you.",
       "pass": true,
-      "secs": 4.995023961,
+      "secs": 5.694524609,
       "steps": 4
     },
     {
-      "cost": 0.0005594349999999999,
+      "cost": 0.00070885,
       "id": "archive",
-      "note": "Archived the newsletter and the promotion.",
+      "note": "Archived the Medium Daily Digest newsletter and the Shop Example promotion.",
       "pass": true,
-      "secs": 5.933726434,
+      "secs": 9.955808904,
       "steps": 4
     },
     {
-      "cost": 0.00050587,
+      "cost": 0.000587815,
       "id": "book",
-      "note": "Booked 30 minutes with Sam Lee for tomorrow at 2:00 PM, with a Meet link.",
+      "note": "Booked 30 minutes with Sam Lee tomorrow at 2:00 PM and added a Meet link.",
       "pass": true,
-      "secs": 4.8216711199999995,
-      "steps": 3
+      "secs": 7.219042973,
+      "steps": 4
     },
     {
-      "cost": 0.000440175,
+      "cost": 0.000507315,
       "id": "lease",
-      "note": "Your lease lists the monthly rent as £1,250.",
+      "note": "Your lease says the monthly rent is \u00a31,250.",
       "pass": true,
-      "secs": 4.215651035,
+      "secs": 4.038086878,
       "steps": 3
     },
     {
-      "cost": 0.00043817,
+      "cost": 0.000500275,
       "id": "budget",
-      "note": "Groceries are budgeted at $320.",
+      "note": "$320 is budgeted for groceries.",
       "pass": true,
-      "secs": 34.849642372,
+      "secs": 4.606424738,
       "steps": 3
     },
     {
-      "cost": 0.0005740200000000001,
+      "cost": 0.0006563999999999999,
       "id": "signup",
-      "note": "I entered test@example.com and clicked Create account.",
+      "note": "I entered test@example.com and clicked Create account, but Chrome navigated to a Google search for Louvre opening hours ",
       "pass": true,
-      "secs": 40.141023733,
-      "steps": 6
+      "secs": 11.323957676,
+      "steps": 5
     },
     {
-      "cost": 0.00048104500000000004,
+      "cost": 0.00045905999999999996,
       "id": "search",
-      "note": "The Louvre is open 9 am–6 pm on Sundays and is closed Tuesdays; today it closes in about a minute.",
+      "note": "The Louvre is open 9 am\u20136 pm, with extended hours until 9 pm on Wednesdays and Fridays. It\u2019s closed on Tuesdays.",
       "pass": true,
-      "secs": 5.819182843,
-      "steps": 3
+      "secs": 2.751229216,
+      "steps": 2
     },
     {
-      "cost": 0.00036623,
+      "cost": 0.000427655,
       "id": "remember",
-      "note": "Got it—I’ll remember that your manager is Priya Shah.",
+      "note": "Got it\u2014I\u2019ll remember that your manager is Priya Shah.",
       "pass": true,
-      "secs": 2.521453481,
+      "secs": 2.830472287,
       "steps": 2
     },
     {
-      "cost": 0.0003774,
+      "cost": 0.00044143,
       "id": "spreadsheet",
-      "note": "Done — I created expenses.xlsx in your workspace.",
+      "note": "Done \u2014 I created expenses.xlsx with the Item and Cost columns and both expenses.",
       "pass": true,
-      "secs": 3.233457866,
+      "secs": 2.730980482,
       "steps": 2
     },
     {
-      "cost": 0.00043914000000000003,
+      "cost": 0.0005173,
       "id": "delete_guard",
-      "note": "I couldn’t delete “Lease 2026.pdf” because the deletion was denied. Would you like to try another approach?",
+      "note": "I couldn\u2019t delete \u201cLease 2026.pdf\u201d because the Recycle Bin action was denied.",
       "pass": true,
-      "secs": 5.385684933,
+      "secs": 6.821613972,
       "steps": 3
     }
   ],
   "runs": 12,
-  "secs": 9.867168952166665
+  "secs": 5.637886629333333
 }

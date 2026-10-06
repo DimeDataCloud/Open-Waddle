@@ -102,7 +102,11 @@ pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets, ledger: &Arc<
     let fast_key = secrets.get(Secret::FastKey);
     let fast = (fast_key.is_some() || settings.fast_is_local()).then(|| build_fast_provider(settings, fast_key)).flatten();
     let fast = fast.map(|f| if settings.fast_is_local() { f } else { Arc::new(Metered::new(f, ledger.clone())) as Arc<dyn Provider> });
-    let routed = Routed::new(main, fast, &settings.model, settings.fast_model(), settings.fast_base_url.contains("openrouter.ai"));
+    let mut routed = Routed::new(main, fast, &settings.model, settings.fast_model(), settings.fast_base_url.contains("openrouter.ai"));
+    if settings.fast_base_url.contains("generativelanguage.googleapis.com") {
+        // A Gemini planner model then runs on the free Google key too.
+        routed = routed.with_google(settings.is_openrouter());
+    }
     (Arc::new(routed), false)
 }
 
@@ -484,6 +488,7 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     );
 
     session.keep_memory_in(data_dir.join("memory.json"));
+    session.keep_experience(Arc::new(waddle_core::experience::ExperienceStore::open(data_dir.join("experience.json"))));
     session.keep_history(history);
     let mcp = waddle_core::mcp::McpHub::new(Some(data_dir.join("mcp_tools.json")));
     session.keep_mcp(mcp.clone());
@@ -622,6 +627,7 @@ pub fn run() {
             commands::warm_up,
             commands::run_self_test,
             commands::halt,
+            commands::panels_open,
             commands::answer_approval,
             commands::duck_arrived,
             commands::set_hit_rects,

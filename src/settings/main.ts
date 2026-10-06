@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanName, importJson, joinCommand, parseEnv, splitCommand, type McpEnv, type McpServer } from "./mcp";
-import { fastDefaults, fastServiceFor, GOOGLE_PLANNER, GOOGLE_QUICK, GOOGLE_URL, usesGoogle, type FastService } from "./services";
+import { fastDefaults, fastServiceFor, GOOGLE_PLANNER, GOOGLE_QUICK, GOOGLE_URL, plannerFor, tasksOnGoogle, usesGoogle, type FastService } from "./services";
 import { Tabs } from "./tabs";
 
 interface Settings {
@@ -95,6 +95,7 @@ function syncVisibility(): void {
   $("ollama-opts").classList.toggle("hidden", preset !== "ollama");
   const fast = $<HTMLSelectElement>("fast_service").value as FastService;
   $("fast-opts").classList.toggle("hidden", fast === "same");
+  $("tasks-google-row").classList.toggle("hidden", fast !== "google");
   $("fast_base_url").required = !demo && fast !== "same";
   $("google-note").classList.toggle("hidden", demo || !usesGoogle($("base_url").value, fast === "same" ? "" : $("fast_base_url").value));
   $("whisper-opts").classList.toggle("hidden", $<HTMLSelectElement>("voice_backend").value !== "whisper_api");
@@ -296,6 +297,7 @@ function fill(view: SettingsView): void {
   $("api_key").value = "";
   $("api_key").placeholder = view.has_api_key ? "saved (leave blank to keep)" : "paste your key";
   $<HTMLSelectElement>("fast_service").value = fastServiceFor(s.fast_base_url);
+  $<HTMLInputElement>("tasks_on_google").checked = tasksOnGoogle(s.model, s.fast_base_url);
   $("fast_base_url").value = s.fast_base_url;
   $("fast_key").value = "";
   $("fast_key").placeholder = view.has_fast_key ? "saved (leave blank to keep)" : "paste the key for this service";
@@ -767,6 +769,7 @@ $<HTMLSelectElement>("preset").addEventListener("change", () => {
     // A new planner service starts with quick replies on the same one.
     $("fast_base_url").value = "";
     $<HTMLSelectElement>("fast_service").value = "same";
+    $<HTMLInputElement>("tasks_on_google").checked = false;
   }
   syncVisibility();
 });
@@ -777,7 +780,16 @@ $<HTMLSelectElement>("fast_service").addEventListener("change", () => {
   const next = fastDefaults(service, planner?.fast_model ?? "", $("fast_base_url").value, $("fast_model").value);
   $("fast_base_url").value = next.url;
   $("fast_model").value = next.model;
+  // Leaving Google takes the planner back to the preset's model.
+  if (service !== "google" && $<HTMLInputElement>("tasks_on_google").checked) {
+    $<HTMLInputElement>("tasks_on_google").checked = false;
+    $("model").value = planner?.model ?? $("model").value;
+  }
   syncVisibility();
+});
+$("tasks_on_google").addEventListener("change", () => {
+  const planner = PRESETS[$<HTMLSelectElement>("preset").value];
+  $("model").value = plannerFor($<HTMLInputElement>("tasks_on_google").checked, planner?.model ?? $("model").value);
 });
 $("base_url").addEventListener("input", syncVisibility);
 $("fast_base_url").addEventListener("input", syncVisibility);
@@ -961,6 +973,7 @@ function welcomeChoice(): string {
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name="brain"]')) {
   r.addEventListener("change", () => {
     $("w-openrouter").classList.toggle("hidden", welcomeChoice() !== "openrouter");
+    $("w-google").classList.toggle("hidden", welcomeChoice() !== "google");
     $("w-ollama").classList.toggle("hidden", welcomeChoice() !== "ollama");
   });
 }
@@ -970,6 +983,16 @@ $("w-test").addEventListener("click", async () => {
   status.textContent = "Asking the model…";
   try {
     status.textContent = await invoke<string>("test_key", { settings: { ...current, ...PRESETS.openrouter }, key: $("w_key").value.trim() || null });
+  } catch (err) {
+    status.textContent = String(err);
+  }
+});
+
+$("w-gtest").addEventListener("click", async () => {
+  const status = $("w-gtest-status");
+  status.textContent = "Asking the model…";
+  try {
+    status.textContent = await invoke<string>("test_key", { settings: { ...current, ...PRESETS.google }, key: $("w_gkey").value.trim() || null });
   } catch (err) {
     status.textContent = String(err);
   }
@@ -1018,6 +1041,13 @@ async function finishWelcome(skip: boolean, then?: string): Promise<void> {
         return;
       }
       settings = { ...settings, ...PRESETS.openrouter };
+    } else if (choice === "google") {
+      apiKey = $("w_gkey").value.trim() || null;
+      if (!apiKey) {
+        status.textContent = "Paste your Google key first, or pick another option.";
+        return;
+      }
+      settings = { ...settings, ...PRESETS.google };
     } else if (choice === "ollama") {
       if (!ollamaModel) {
         status.textContent = "Press “Look for Ollama” first (it needs to be running).";

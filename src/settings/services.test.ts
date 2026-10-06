@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fastDefaults, fastServiceFor, GOOGLE_QUICK, GOOGLE_URL, usesGoogle } from "./services";
+import { fastDefaults, fastServiceFor, GOOGLE_PLANNER, GOOGLE_QUICK, GOOGLE_URL, isGoogleName, plannerFor, tasksOnGoogle, usesGoogle } from "./services";
 
 describe("quick-reply service", () => {
   it("is read from the saved address", () => {
@@ -27,5 +27,20 @@ describe("quick-reply service", () => {
     expect(usesGoogle("https://openrouter.ai/api/v1", "")).toBe(false);
     expect(usesGoogle(GOOGLE_URL, "")).toBe(true);
     expect(usesGoogle("https://openrouter.ai/api/v1", GOOGLE_URL)).toBe(true);
+  });
+});
+
+describe("tasks on a free Gemini key", () => {
+  it("is on when quick replies use Google and the planner is a Gemini model named for Google", () => {
+    expect(tasksOnGoogle("gemini-3.5-flash-lite", GOOGLE_URL)).toBe(true);
+    expect(tasksOnGoogle("google/gemini-3.5-flash-lite", GOOGLE_URL)).toBe(false);
+    expect(tasksOnGoogle("openai/gpt-6-luna", GOOGLE_URL)).toBe(false);
+    expect(tasksOnGoogle("gemini-3.5-flash-lite", "")).toBe(false);
+    expect(isGoogleName(" gemma-4 ")).toBe(true);
+  });
+
+  it("switches the planner between the Gemini model and the preset's", () => {
+    expect(plannerFor(true, "openai/gpt-6-luna")).toBe(GOOGLE_PLANNER);
+    expect(plannerFor(false, "openai/gpt-6-luna")).toBe("openai/gpt-6-luna");
   });
 });

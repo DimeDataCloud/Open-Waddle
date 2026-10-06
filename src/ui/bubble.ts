@@ -125,6 +125,22 @@ export class Bubble {
     this.show(REMINDER_LINGER_MS);
   }
 
+  /** "Try again" under a stopped task: one click runs the same request again. */
+  again(onClick: () => void): void {
+    const row = this.add("notice", "");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rate offer";
+    b.textContent = "Try again";
+    b.title = "Run the same request again";
+    b.addEventListener("click", () => {
+      row.remove();
+      onClick();
+    });
+    row.appendChild(b);
+    this.show(REMINDER_LINGER_MS);
+  }
+
   /** A nudge with buttons (Join, Snooze, Reply…). A button's answer, if any, replaces them. */
   nudge(text: string, actions: { id: string; label: string }[], onAction: (id: string) => Promise<string | null>): void {
     const row = this.add("reminder", plain(text));

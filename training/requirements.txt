@@ -1,4 +1,5 @@
 # GPU machine only (CUDA). Waddle itself needs none of this.
 unsloth>=2026.7
 trl>=0.20
+datasets
 pillow

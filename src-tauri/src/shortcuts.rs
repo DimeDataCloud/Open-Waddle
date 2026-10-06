@@ -1,5 +1,7 @@
 //! Global hotkeys. Escape halts the running task and is registered only while
-//! a task runs, so Waddle never steals Escape from other apps when idle.
+//! a task runs, so Waddle never steals Escape from other apps when idle. While
+//! the chat box or the history drawer is open, the first Escape closes it, as
+//! it would when idle; the next one stops the task.
 //! Ctrl+Alt+Space (any time) opens the chat and starts listening.
 //! Ctrl+Alt+A opens the chat with the text selected in the front app attached.
 //! Ctrl+Alt+H opens (or closes) the conversation history.
@@ -40,14 +42,42 @@ pub fn set_halt_hotkey(app: &AppHandle, on: bool) {
     }
 }
 
+/// What a press of Escape does while the hotkey is registered.
+#[derive(Debug, PartialEq, Eq)]
+enum EscAction {
+    /// Waddle pressed it itself, or nothing is running.
+    Ignore,
+    /// Close the chat box or history drawer, like Escape does when Waddle is idle.
+    Dismiss,
+    Halt,
+}
+
+fn esc_action(allowed: bool, panels_open: bool) -> EscAction {
+    match (allowed, panels_open) {
+        (false, _) => EscAction::Ignore,
+        (true, true) => EscAction::Dismiss,
+        (true, false) => EscAction::Halt,
+    }
+}
+
 pub fn handle(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
     if event.state() != ShortcutState::Pressed {
         return;
     }
     let Some(state) = app.try_state::<AppState>() else { return };
     if *shortcut == halt_key() {
-        if state.host.halt_hotkey_allowed() && state.session.halt(waddle_core::session::HaltBy::Escape) {
-            let _ = app.emit_to("overlay", "agent", waddle_core::AgentEvent::Notice { text: "Stopping!".into() });
+        match esc_action(state.host.halt_hotkey_allowed(), state.host.panels_open()) {
+            EscAction::Ignore => {}
+            EscAction::Dismiss => {
+                // The overlay reports the panel closed; don't wait for it before the next press.
+                state.host.set_panels_open(false);
+                let _ = app.emit_to("overlay", "ui:dismiss", ());
+            }
+            EscAction::Halt => {
+                if state.session.halt(waddle_core::session::HaltBy::Escape) {
+                    let _ = app.emit_to("overlay", "agent", waddle_core::AgentEvent::Notice { text: "Stopping!".into() });
+                }
+            }
         }
     } else if *shortcut == talk_key() {
         crate::focus_overlay(app);
@@ -63,5 +93,18 @@ pub fn handle(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
             crate::focus_overlay(&app);
             let _ = app.emit_to("overlay", "chat:open", serde_json::json!({ "voice": false, "selection": preview }));
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_closes_an_open_panel_before_it_stops_the_task() {
+        assert_eq!(esc_action(true, true), EscAction::Dismiss);
+        assert_eq!(esc_action(true, false), EscAction::Halt);
+        assert_eq!(esc_action(false, true), EscAction::Ignore);
+        assert_eq!(esc_action(false, false), EscAction::Ignore);
     }
 }

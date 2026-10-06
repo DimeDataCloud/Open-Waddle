@@ -1,3 +1,4 @@
+import type { Trick } from "./body/tricks";
 // Typed wrappers around the app's commands and events.
 
 import type { Intent } from "./body/intent";
@@ -104,6 +105,7 @@ export const api = {
   openLink: (url: string) => invoke<void>("open_link", { url }),
   warmUp: () => invoke<void>("warm_up"),
   halt: (how: "button" | "double-click" = "button") => invoke<boolean>("halt", { how }),
+  panelsOpen: (open: boolean) => invoke<void>("panels_open", { open }),
   answerApproval: (id: string, approved: boolean, draft: MailDraft | null = null) => invoke<void>("answer_approval", { id, approved, draft }),
   undoSend: (id: string) => invoke<void>("undo_send", { id }),
   nudgeAction: (id: string, action: string) => invoke<string | null>("nudge_action", { id, action }),
@@ -138,6 +140,8 @@ export interface Events {
   "history:changed": null;
   "history:toggle": null;
   "talk:listen": null;
+  "ui:dismiss": null;
+  "duck:trick": { id: string; trick: Trick; cursor: { x: number; y: number } | null };
 }
 
 export function on<K extends keyof Events>(name: K, handler: (payload: Events[K]) => void): Promise<UnlistenFn> {

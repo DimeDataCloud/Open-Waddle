@@ -30,6 +30,8 @@ export interface MoveOptions {
   maxSeconds?: number;
   facing?: 1 | -1;
   onArrive?: () => void;
+  /** Fly straight there instead of walking and jumping (tricks). */
+  fly?: boolean;
 }
 
 function legDuration(fromX: number, fromY: number, to: Waypoint): number {
@@ -79,7 +81,7 @@ export class Duck {
     this.cancelMove();
     const from = { x: this.body.x, y: this.body.y };
     const grounded = this.mode === "idle" && this.body.grounded;
-    const path = grounded ? planPath(segments, from, goal) : [{ x: goal.x, y: goal.y, kind: "fly" as const }];
+    const path = grounded && !opts.fly ? planPath(segments, from, goal) : [{ x: goal.x, y: goal.y, kind: "fly" as const }];
     let total = 0;
     let p = from;
     for (const w of path) {

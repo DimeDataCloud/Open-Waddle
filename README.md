@@ -55,6 +55,9 @@ Windows builds are not code-signed yet, so SmartScreen warns on first run: **Mor
 - **Act.**
   - See the screen: window list; on Windows, the buttons and fields of any window via UI Automation; screenshots when needed.
   - Open apps, click, type, press shortcuts, scroll and drag. Waddle walks to the target and stands beside it before each action.
+  - Arrange windows in one step: "GitHub on the left, YouTube Music on the right", "put that on my right monitor", "maximize Word".
+  - App names it mishears ("open the Clawed app") are matched to your installed apps by spelling and sound; when it isn't sure, it asks.
+  - It plans several steps at once when they're clear, reads a page in the same step it opens it, and goes straight to search results (YouTube, YouTube Music, GitHub, Google, Maps, Wikipedia, Amazon).
   - Read and write files and run terminal commands in its workspace folder (`Documents\Waddle`).
 - **Answer, research, or act: picked per message.** A tiny decision model sorts each message in about 0.3 s:
   - *Chat* ("thanks!", "what's a haiku?") gets an instant answer without a task. If it needs current facts ("who won last night?"), the answer uses a web search (about $0.007).
@@ -94,6 +97,8 @@ Windows builds are not code-signed yet, so SmartScreen warns on first run: **Mor
   - "Where's the export button?" or "how do I turn on Night light?": Waddle walks over and circles the spot with a label instead of clicking, so you learn where it is.
   - Reads what you copied ("summarise what I copied", "translate this") and puts results on your clipboard ("copy that address for me").
   - Reminders: "remind me in 20 minutes to stretch", "remind me at 3pm to call Sam". The duck chimes and pops up when one is due, even after a restart, and says so if it came due while Waddle was closed.
+- **Learn what works.** When a task goes well, Waddle keeps a short recipe of its steps (tool and app names and addresses, never what you typed or what a page said) and uses it the next time you ask for something similar. 👍 confirms one, 👎 forgets it, and **Forget conversation** clears them all.
+- **Play.** "Fly around the screen", "come here", "dance", "take a nap", "hide" or "make a mess" (a pretend one: dust, nothing touched).
 - **Improve itself, with your approval.**
   - Save "skills" (lessons it reads back at the start of every task) and change its own settings (model, wandering, safety countdown…).
   - Split big jobs into sub-tasks handled by nested copies of itself, up to 2 levels deep by default.
@@ -110,7 +115,8 @@ Windows builds are not code-signed yet, so SmartScreen warns on first run: **Mor
 
 - **Tiers are fixed rules, not a model's judgement.** Approval only comes from a click in Waddle's own UI, never from model output.
 - **Screen and file contents are treated as data.** Text from the screen, files and command output is wrapped in tags with an unguessable id. The model is told never to follow instructions inside them.
-- **Stopping:** Escape (registered only while a task runs), the ■ Stop button, double-clicking the duck, the tray menu, or saying "stop". The message says which one stopped it ("Stopped (you pressed Esc).").
+- **Stopping:** Escape (registered only while a task runs), the ■ Stop button, double-clicking the duck, the tray menu, or saying "stop". While the chat box or history is open, the first Escape closes it and the next one stops the task. The message says which one stopped it ("Stopped (you pressed Esc)."), with **Try again** in case it was a slip.
+- **Keys that only move around** (snapping or switching windows, a new tab, the address bar, scrolling, back) and arranging windows run without the 2 s notice; keys that can send, submit, type, paste or save still show it.
 - **Activity log:** every action, decision and result goes to a SQLite log that can only be appended to. Each entry is hash-chained to the previous one, so edits are detectable. Settings → Activity log → *Verify integrity*.
 - **No training on your data:** OpenRouter requests ask for providers that don't keep or train on prompts (`data_collection: deny`). Settings → Memory & privacy turns this off if a model you want needs it.
 - **Honest limits:** commands run in the workspace folder, but this is **not an OS sandbox**. Tier 3 approval is the real gate.
@@ -123,7 +129,7 @@ Waddle is built and tested first on Windows 11 on ARM (Surface Pro with Snapdrag
 
 1. Download the installer from the [Releases](../../releases) page: `Waddle_<version>_arm64-setup.exe` for Snapdragon PCs, `Waddle_<version>_x64-setup.exe` for Intel and AMD.
 2. It isn't code-signed yet, so Windows SmartScreen will warn you. Click **More info → Run anyway**.
-3. Waddle appears at the bottom of your screen with a short **welcome**: paste an OpenRouter key (and press Test), let it find Ollama, or just look around in demo mode.
+3. Waddle appears at the bottom of your screen with a short **welcome**: paste an OpenRouter key or a free Google Gemini key (and press Test), let it find Ollama, or just look around in demo mode.
 
 ### Option B: build from source
 
@@ -150,11 +156,11 @@ Right-click the duck → **Settings**:
 | Preset | Cost | Notes |
 |---|---|---|
 | **OpenRouter** (default) | ~$0.0005–0.001 per task (measured, [docs/MODELS.md](docs/MODELS.md)) | Create a key at <https://openrouter.ai/keys>, add $5 credit, paste the key. Defaults: `openai/gpt-6-luna` plans; `google/gemini-2.5-flash-lite` chats and researches; TypeSafe's Jev makes the split-second decisions. Your PC does almost no work. |
-| **Google Gemini API** | Free tier, or pennies | Get a key at <https://aistudio.google.com/apikey>. Planner `gemini-3.8-flash`, quick replies `gemini-3.5-flash-lite`. **On the free tier Google may use what you send to improve its products**, so use it to try Waddle, or turn on billing for private use. Web searches (research answers, "who won last night?") need OpenRouter. |
+| **Google Gemini API** | Free tier, or pennies | Get a key at <https://aistudio.google.com/apikey>. `gemini-3.5-flash-lite` plans and chats: it passed every assistant job in our benchmark, about twice as fast as the OpenRouter default. **On the free tier Google may use what you send to improve its products**, so use it to try Waddle, or turn on billing for private use. Web searches (research answers, "who won last night?") and the quick chat lane need OpenRouter. |
 | **Ollama** (local) | Free | Install <https://ollama.com> (0.17.6 or newer), run `ollama pull qwen3.5:4b`. Waddle turns off the model's hidden "thinking", caps it to a third of your CPU cores and unloads it 30 s after each task. On Snapdragon it runs on the CPU only, so it's slow and keeps the machine busy while it thinks. `qwen3.5:2b` is faster; `qwen3.5:9b` is smarter if you have 32 GB of RAM. |
 | LM Studio / Foundry Local / custom | Free | Any OpenAI-compatible endpoint. LM Studio (`qwen3.5-4b`) runs Qwen3.5 faster than Ollama does. Foundry Local can use the Snapdragon NPU (text models only). |
 
-**Use both:** Settings → Brain → **Quick replies run on** lets the quick-reply model (chat, research summaries, the morning brief) use a different service from the planner, with its own key. For example, the planner on OpenRouter and quick replies on Google's free Gemini API. Web searches still go through the planner's service, because only OpenRouter can run them for Waddle. The **Test** button there makes a real tool call, so you know it works before you rely on it.
+**Use both (fastest for the money):** Settings → Brain → **Quick replies run on** → **Google Gemini API (free key)** puts chat, research summaries and the morning brief on Google with its own key, and **Run tasks on Gemini too** runs tasks there as well. OpenRouter keeps the split-second decisions, the screen check and web searches, and if the Google key is missing, the same model runs through OpenRouter. The **Test** button makes a real tool call, so you know it works before you rely on it.
 
 API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Secret Service), not in files. For development, `OPENROUTER_API_KEY` or `WADDLE_API_KEY` env vars also work. `WADDLE_PROVIDER=mock` forces demo mode.
 
@@ -185,7 +191,7 @@ Each step says what to do → what you should see. Steps marked (G) need Google 
 10. "Delete hello.txt" → the duck turns red and an approval card waits. Press Tab to reach it and **Esc** → it's denied. Enter typed in the chat box never approves it.
 11. "Open Notepad and type hello" → Waddle opens Notepad, walks to it, and types.
 12. While it's working, say "actually type goodbye instead" → you get an instant reply in blue, and the task adapts.
-13. Press **Escape** mid-task → it stops.
+13. Press **Escape** mid-task → it stops, saying "Stopped (you pressed Esc)" with **Try again**; press that → the same request runs again. Send a request, then press **Escape** with the chat box still open → only the chat box closes and the task carries on; a second **Escape** stops it.
 14. Settings → Activity log shows each step; *Verify integrity* reports the log intact.
 
 **Conversation and voice**
@@ -234,6 +240,16 @@ Each step says what to do → what you should see. Steps marked (G) need Google 
 41. Quit Waddle, wait past a routine's time, start it → "I missed your routine …", and it doesn't run late.
 42. Settings → Assistant → Tools (MCP) → add an MCP server (for example the filesystem server from [docs/MCP.md](docs/MCP.md)) → **Test** lists its tools. Ask Waddle to use one → untrusted servers wait for your click.
 43. Settings → Diagnostics → **Run self-test** → every line is Pass or Skip (Warn only where it says why), and a report file is saved.
+
+**New in 0.3.0**
+
+44. With two Chrome windows open: "put GitHub on the left half and YouTube on the right half" → both snap in one step each, with no countdown and no screenshots. With two monitors: "move YouTube to my right monitor and maximize it" → it does.
+45. "Open the Clawed app" (or another misheard name of an installed app) → the right app opens. A name like "Banana Studio" → Waddle names the closest apps and asks.
+46. "Search YouTube for lo-fi beats" → the results page opens straight away (no typing into the search box).
+47. "Fly around the screen" → the duck flies a loop and comes back; "make a mess" → it pecks around in puffs of dust and nothing on screen changes.
+48. Do a task twice in slightly different words ("open YouTube Music and play a playlist", later "play a playlist on YouTube Music") → the second takes fewer steps (Waddle's log says "workflow memory: offering the recipe"); press 👎 after a task → its recipe is forgotten.
+49. Settings → Brain → Quick replies run on **Google Gemini API**, paste a free key, **Test** → "It works", tick **Run tasks on Gemini too**, **Save** → tasks answer noticeably faster.
+50. Settings → Memory & privacy → **Export training file** → it reports train.jsonl and kto.jsonl with personal details masked.
 
 **Updating:** Settings → Diagnostics → **Check for updates**. It checks the releases page when you ask, verifies the download's signature, and installs when you press **Install and restart**. Or download the new installer and run it; your settings and history stay.
 
