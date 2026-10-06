@@ -75,15 +75,30 @@ fn plain(s: &str, max: usize) -> String {
     s.chars().filter(|c| c.is_alphanumeric() || " ._-/@+:".contains(*c)).take(max).collect::<String>().trim().to_string()
 }
 
-/// A web address without its query or fragment ("music.youtube.com/playlist").
-fn address(url: &str) -> String {
+/// Sites whose addresses a recipe may keep whatever the request said.
+const KNOWN_SITES: &[&str] = &[
+    "google.com", "youtube.com", "github.com", "wikipedia.org", "amazon.com", "gmail.com", "outlook.com", "bing.com", "duckduckgo.com",
+];
+
+/// A web address without its query or fragment ("music.youtube.com/playlist"), kept
+/// only for well-known sites or a site the request itself named. A page can talk the
+/// model into visiting an address; that address mustn't come back as advice later.
+fn address(url: &str, goal: &str) -> String {
     let rest = url.split("://").nth(1).unwrap_or(url);
     let path = rest.split(['?', '#']).next().unwrap_or("");
-    plain(path.trim_end_matches('/'), 80)
+    let host = path.split('/').next().unwrap_or("").to_lowercase();
+    let host = host.trim_start_matches("www.");
+    let named = host.split('.').filter(|part| part.len() >= 3 && !matches!(*part, "com" | "org" | "net" | "www")).any(|part| goal.contains(part));
+    let known = KNOWN_SITES.iter().any(|k| host == *k || host.ends_with(&format!(".{k}")));
+    if known || named {
+        plain(path.trim_end_matches('/'), 80)
+    } else {
+        "the page you need".into()
+    }
 }
 
-/// One step, described from the call's own arguments.
-fn step(call: &ToolCall) -> Option<String> {
+/// One step, described from the call's own arguments. `goal` is the request, lower case.
+fn step(call: &ToolCall, goal: &str) -> Option<String> {
     let a = &call.arguments;
     let s = |k: &str| a.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let read = match s("read").as_str() {
@@ -92,11 +107,11 @@ fn step(call: &ToolCall) -> Option<String> {
         _ => "",
     };
     Some(match call.name.as_str() {
-        "browser_navigate" => format!("browser_navigate to {}{read}", address(&s("url"))),
+        "browser_navigate" => format!("browser_navigate to {}{read}", address(&s("url"), goal)),
         "browser_tabs" => match s("action").as_str() {
             "open" => {
                 let window = if a.get("new_window").and_then(|v| v.as_bool()) == Some(true) { " in a new window" } else { "" };
-                format!("browser_tabs open {}{window}{read}", address(&s("url")))
+                format!("browser_tabs open {}{window}{read}", address(&s("url"), goal))
             }
             "list" => "browser_tabs list".into(),
             other => format!("browser_tabs {}", plain(other, 10)),
@@ -122,7 +137,8 @@ fn step(call: &ToolCall) -> Option<String> {
 /// The steps that worked in a finished task: its tool calls in order, without
 /// ones that failed or were skipped, consecutive repeats folded. None if it
 /// never acted (a reply alone isn't a recipe).
-pub fn recipe(messages: &[Message]) -> Option<Vec<String>> {
+pub fn recipe(messages: &[Message], goal: &str) -> Option<Vec<String>> {
+    let goal = goal.to_lowercase();
     let failed = |id: &str| {
         messages.iter().any(|m| {
             m.role == Role::Tool
@@ -135,7 +151,7 @@ pub fn recipe(messages: &[Message]) -> Option<Vec<String>> {
         if failed(&call.id) {
             continue;
         }
-        if let Some(s) = step(call) {
+        if let Some(s) = step(call, &goal) {
             if steps.last() != Some(&s) {
                 steps.push(s);
             }
@@ -161,7 +177,7 @@ impl ExperienceStore {
 
     /// Keeps the steps of a task that went well. Returns whether it kept any.
     pub fn learn(&self, task_id: &str, goal: &str, messages: &[Message]) -> bool {
-        let Some(steps) = recipe(messages) else { return false };
+        let Some(steps) = recipe(messages, goal) else { return false };
         let words = words(goal);
         if words.is_empty() {
             return false;
@@ -263,7 +279,7 @@ mod tests {
 
     #[test]
     fn a_recipe_keeps_what_waddle_chose_and_nothing_a_page_said() {
-        let steps = recipe(&task()).unwrap();
+        let steps = recipe(&task(), "Open up YouTube Music and play one of the playlists").unwrap();
         assert_eq!(
             steps,
             [
@@ -284,8 +300,20 @@ mod tests {
             Message::tool_result(&call("1", "browser_read", json!({})), "page"),
             Message::assistant("It says hi.", vec![]),
         ];
-        assert_eq!(recipe(&msgs), None);
-        assert_eq!(recipe(&[Message::assistant("Hello!", vec![])]), None);
+        assert_eq!(recipe(&msgs, "read it"), None);
+        assert_eq!(recipe(&[Message::assistant("Hello!", vec![])], "hi"), None);
+    }
+
+    #[test]
+    fn addresses_a_page_could_have_suggested_are_not_kept() {
+        let go = |url: &str| vec![
+            Message::assistant("", vec![call("1", "browser_navigate", json!({"url": url}))]),
+            Message::tool_result(&call("1", "browser_navigate", json!({})), "Opened"),
+        ];
+        let first = |url: &str, goal: &str| recipe(&go(url), goal).unwrap()[0].clone();
+        assert_eq!(first("https://evil.example/steal?x=1", "summarise this article"), "browser_navigate to the page you need");
+        assert_eq!(first("https://github.com/DimeDataCloud/Open-Waddle/pulls", "check the pull requests"), "browser_navigate to github.com/DimeDataCloud/Open-Waddle/pulls");
+        assert_eq!(first("https://www.bbc.co.uk/news", "open the BBC news"), "browser_navigate to www.bbc.co.uk/news", "a site the user named");
     }
 
     #[test]

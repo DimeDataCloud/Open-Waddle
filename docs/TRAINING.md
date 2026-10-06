@@ -33,7 +33,7 @@ There are two levers, in order of payoff:
 Waddle gets better at your tasks as you use it, with no training run (the idea of [Agent Workflow Memory](https://arxiv.org/abs/2409.07429), which raised web-agent success 24–51% relative with fewer steps):
 
 1. When a task finishes without asking anything back, its tool calls are condensed into a short recipe ("browser_tabs open music.youtube.com in a new window, reading its elements → browser_click the element you need → arrange_window right_half on the right monitor"). Failed and skipped calls are left out.
-2. Only what Waddle itself chose is kept: tool names, app names, web addresses without their query, keys. Typed text, email bodies and anything a page or file said never are, so nothing untrusted can come back as advice.
+2. Only what Waddle itself chose is kept: tool names, app names, keys, and web addresses without their query (only for well-known sites or a site your request named, so an address a page suggested isn't remembered). Typed text, email bodies and anything a page or file said never are, so nothing untrusted can come back as advice.
 3. When a new request shares enough content words with an earlier one, the closest recipe rides along with the request as "a way that worked before (adapt it)".
 4. 👍 confirms a recipe (it ranks a little higher), 👎 deletes it, and **Forget conversation** clears them all. They're kept in `experience.json` in the app data folder (200 at most).
 
