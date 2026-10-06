@@ -260,7 +260,7 @@ mod tests {
     use serde_json::json;
 
     fn call(id: &str, name: &str, args: serde_json::Value) -> ToolCall {
-        ToolCall { id: id.into(), name: name.into(), arguments: args }
+        ToolCall { id: id.into(), name: name.into(), arguments: args, echo: None }
     }
 
     fn task() -> Vec<Message> {

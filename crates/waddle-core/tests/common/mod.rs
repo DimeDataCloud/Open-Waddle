@@ -43,8 +43,13 @@ pub struct FakeHost {
     pub undo: Mutex<bool>,
     pub undo_offers: Mutex<Vec<u64>>,
     /// Answers from the Chrome extension by command; any entry means it's connected.
+    /// "read:text" answers a text read; "read:text@<url>" only while that page is open.
     pub browser_replies: Mutex<std::collections::HashMap<String, serde_json::Value>>,
     pub browser_calls: Mutex<Vec<(String, serde_json::Value)>>,
+    /// The page Chrome shows: set by opening or going to an address, or by clicking a link.
+    pub browser_page: Mutex<Option<String>>,
+    /// Elements that go to another page when clicked (element id → address).
+    pub browser_links: Mutex<std::collections::HashMap<String, String>>,
     /// Whether the screen tools exist (off for text-only benchmarks).
     pub gui: Mutex<bool>,
     /// Follows the events like the app's history drawer does, when set.
@@ -72,6 +77,8 @@ impl FakeHost {
             undo_offers: Mutex::default(),
             browser_replies: Mutex::default(),
             browser_calls: Mutex::default(),
+            browser_page: Mutex::default(),
+            browser_links: Mutex::default(),
             gui: Mutex::new(true),
             history: Mutex::default(),
             started: Instant::now(),
@@ -120,10 +127,22 @@ impl Host for FakeHost {
     }
     async fn browser(&self, cmd: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         // A reply for this command and mode ("read:text") wins over one for the command alone.
+        // One for the page that's open wins over both.
         let mode = args.get("mode").and_then(|m| m.as_str()).map(|m| format!("{cmd}:{m}"));
+        let goes_to = match cmd {
+            "navigate" => args.get("url").and_then(|u| u.as_str()).map(str::to_string),
+            "tabs" if args.get("action").and_then(|a| a.as_str()) == Some("open") => args.get("url").and_then(|u| u.as_str()).map(str::to_string),
+            "click" => args.get("element").and_then(|e| e.as_str()).and_then(|e| self.browser_links.lock().unwrap().get(e).cloned()),
+            _ => None,
+        };
+        if goes_to.is_some() {
+            *self.browser_page.lock().unwrap() = goes_to;
+        }
+        let page = self.browser_page.lock().unwrap().clone();
         self.browser_calls.lock().unwrap().push((cmd.to_string(), args));
         let replies = self.browser_replies.lock().unwrap();
-        mode.and_then(|m| replies.get(&m).cloned()).or_else(|| replies.get(cmd).cloned()).ok_or_else(|| anyhow::anyhow!("the page didn't answer `{cmd}`"))
+        let keys = [mode.as_ref().zip(page.as_ref()).map(|(m, p)| format!("{m}@{p}")), page.as_ref().map(|p| format!("{cmd}@{p}")), mode, Some(cmd.to_string())];
+        keys.into_iter().flatten().find_map(|k| replies.get(&k).cloned()).ok_or_else(|| anyhow::anyhow!("the page didn't answer `{cmd}`"))
     }
     async fn offer_undo(&self, _id: &str, secs: u64) -> bool {
         self.undo_offers.lock().unwrap().push(secs);

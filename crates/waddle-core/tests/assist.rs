@@ -9,6 +9,8 @@
 //!
 //! Optional: WADDLE_BENCH_REPEAT (default 1), WADDLE_BENCH_ONLY=id,id,
 //! WADDLE_BENCH_CONCURRENCY (default 3). Results go to bench/results/<model>@assist.json.
+//! WADDLE_BENCH_PROVIDER=google runs Gemini models on Google's own API instead, with
+//! GEMINI_API_KEY (model names without "google/").
 
 mod common;
 
@@ -119,6 +121,15 @@ async fn world() -> World {
         r.insert("locate".into(), json!({ "screen_x": 300.0, "screen_y": 200.0 }));
         r.insert("navigate".into(), json!({ "title": "Search results", "url": "https://www.google.com/search?q=x" }));
         r.insert("tabs".into(), json!([{ "id": 7, "title": "Sign up - Duck Shop", "url": "https://shop.example/signup", "active": true }]));
+        // The sign-up page, and where Create account goes.
+        let signup = "https://shop.example/signup";
+        let welcome = "https://shop.example/welcome";
+        r.insert(format!("navigate@{signup}"), json!({ "title": "Sign up - Duck Shop", "url": signup }));
+        r.insert(format!("read:text@{signup}"), json!({ "title": "Sign up - Duck Shop", "url": signup, "text": "Create your account\nEmail address\nSend me the newsletter\nCreate account" }));
+        r.insert(format!("read@{welcome}"), json!({ "title": "Welcome - Duck Shop", "url": welcome, "elements": [{ "id": "e1", "role": "link", "name": "Start shopping" }] }));
+        r.insert(format!("read:text@{welcome}"), json!({ "title": "Welcome - Duck Shop", "url": welcome, "text": "Thanks for signing up! We sent a confirmation link to your email." }));
+        *host.browser_page.lock().unwrap() = Some(signup.into());
+        host.browser_links.lock().unwrap().insert("e3".into(), welcome.into());
     }
     let facts = Arc::new(FactStore::new(dir.path().join("facts.json")));
     World { fg, host, dir, facts }
@@ -203,9 +214,14 @@ struct Result1 {
     steps: usize,
 }
 
+/// Google's Gemini API instead of OpenRouter.
+fn google() -> bool {
+    std::env::var("WADDLE_BENCH_PROVIDER").is_ok_and(|v| v == "google")
+}
+
 async fn run_task(model: &str, key: &str, (id, goal, check): &(&'static str, &'static str, Check)) -> Result1 {
     let w = world().await;
-    let settings = Settings {
+    let mut settings = Settings {
         model: model.into(),
         look_first: false,
         smart_look: false,
@@ -214,6 +230,9 @@ async fn run_task(model: &str, key: &str, (id, goal, check): &(&'static str, &'s
         no_training: true,
         ..Settings::default()
     };
+    if google() {
+        settings.base_url = "https://generativelanguage.googleapis.com/v1beta/openai/".into();
+    }
     let workspace = Workspace::new(w.dir.path().join("ws")).unwrap().with_roots(&[w.dir.path().join("Documents")], &[]);
     let deps = AgentDeps {
         provider: Arc::new(Retry(build_provider(&settings, Some(key.to_string())))),
@@ -240,13 +259,23 @@ async fn run_task(model: &str, key: &str, (id, goal, check): &(&'static str, &'s
     let secs = started.elapsed().as_secs_f64();
     let usage = agent.usage();
     let steps = agent.timing().steps.len();
+    // What it did, to see where a failed run went wrong (✗ marks a tool that failed).
+    let did: Vec<String> = w
+        .host
+        .events()
+        .iter()
+        .filter_map(|e| match e {
+            waddle_core::AgentEvent::ToolFinished { tool, ok, .. } => Some(format!("{tool}{}", if *ok { "" } else { "✗" })),
+            _ => None,
+        })
+        .collect();
     let (pass, note) = match r {
         Err(_) => (false, "timed out".to_string()),
-        Ok(r) if r.outcome == waddle_core::Outcome::StepLimit => (false, "ran out of steps".to_string()),
+        Ok(r) if r.outcome == waddle_core::Outcome::StepLimit => (false, format!("ran out of steps [{}]", did.join(" "))),
         Ok(r) if r.message.contains("couldn't reach my brain") => (false, format!("provider error: {}", r.message.chars().take(100).collect::<String>())),
         Ok(r) => match check(&w, &r.message) {
             Ok(()) => (true, r.message.chars().take(120).collect()),
-            Err(why) => (false, format!("{why} — {:?}: {}", r.outcome, r.message.chars().take(120).collect::<String>())),
+            Err(why) => (false, format!("{why} — {:?} [{}]: {}", r.outcome, did.join(" "), r.message.chars().take(120).collect::<String>())),
         },
     };
     Result1 { id, pass, note, secs, cost: usage.cost.unwrap_or(0.0), steps }
@@ -255,7 +284,7 @@ async fn run_task(model: &str, key: &str, (id, goal, check): &(&'static str, &'s
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "spends money: needs OPENROUTER_API_KEY and WADDLE_BENCH_MODELS"]
 async fn assistant_tasks() {
-    let key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY");
+    let key = if google() { std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY") } else { std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY") };
     let models: Vec<String> = std::env::var("WADDLE_BENCH_MODELS").expect("WADDLE_BENCH_MODELS").split(',').map(|s| s.trim().to_string()).collect();
     let repeat: usize = std::env::var("WADDLE_BENCH_REPEAT").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
     let only: Option<Vec<String>> = std::env::var("WADDLE_BENCH_ONLY").ok().map(|v| v.split(',').map(str::to_string).collect());

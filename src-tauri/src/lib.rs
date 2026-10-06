@@ -26,7 +26,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 use waddle_core::audit::AuditLog;
 use waddle_core::config::ProviderKind;
-use waddle_core::llm::{build_fast_provider, build_provider, mock::MockProvider, Provider, Routed};
+use waddle_core::llm::{build_fast_provider, build_provider, mock::MockProvider, route, Provider};
 use waddle_core::decide::{Decider, Jev};
 use waddle_core::facts::FactStore;
 use waddle_core::google::style::StyleNote;
@@ -102,12 +102,7 @@ pub(crate) fn provider_for(settings: &Settings, secrets: &Secrets, ledger: &Arc<
     let fast_key = secrets.get(Secret::FastKey);
     let fast = (fast_key.is_some() || settings.fast_is_local()).then(|| build_fast_provider(settings, fast_key)).flatten();
     let fast = fast.map(|f| if settings.fast_is_local() { f } else { Arc::new(Metered::new(f, ledger.clone())) as Arc<dyn Provider> });
-    let mut routed = Routed::new(main, fast, &settings.model, settings.fast_model(), settings.fast_base_url.contains("openrouter.ai"));
-    if settings.fast_base_url.contains("generativelanguage.googleapis.com") {
-        // A Gemini planner model then runs on the free Google key too.
-        routed = routed.with_google(settings.is_openrouter());
-    }
-    (Arc::new(routed), false)
+    (route(settings, main, fast), false)
 }
 
 /// Quick decisions (Jev) need an OpenRouter key; the demo and other endpoints get none.

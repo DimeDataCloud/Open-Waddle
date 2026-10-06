@@ -32,7 +32,7 @@ fn parse_one(body: &str) -> Option<ToolCall> {
         Some(other) => other.clone(),
         None => Value::Object(Default::default()),
     };
-    Some(ToolCall { id: super::new_call_id(), name, arguments })
+    Some(ToolCall { id: super::new_call_id(), name, arguments, echo: None })
 }
 
 #[cfg(test)]

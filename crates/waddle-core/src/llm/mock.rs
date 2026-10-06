@@ -50,7 +50,7 @@ impl MockProvider {
 }
 
 pub fn call(name: &str, args: serde_json::Value) -> ToolCall {
-    ToolCall { id: super::new_call_id(), name: name.into(), arguments: args }
+    ToolCall { id: super::new_call_id(), name: name.into(), arguments: args, echo: None }
 }
 
 pub fn reply(text: &str, calls: Vec<ToolCall>) -> ChatResponse {

@@ -1,0 +1,105 @@
+{
+  "cost": 0.0,
+  "model": "gemini-3.5-flash-lite",
+  "passed": 12,
+  "results": [
+    {
+      "cost": 0.0,
+      "id": "next_meeting",
+      "note": "Your next meeting is Design review with Ana Lee tonight at 21:35.",
+      "pass": true,
+      "secs": 2.71438806,
+      "steps": 2
+    },
+    {
+      "cost": 0.0,
+      "id": "important_mail",
+      "note": "Priya Shah",
+      "pass": true,
+      "secs": 3.024944664,
+      "steps": 3
+    },
+    {
+      "cost": 0.0,
+      "id": "reply",
+      "note": "I've sent that reply to Ana!",
+      "pass": true,
+      "secs": 3.069852872,
+      "steps": 4
+    },
+    {
+      "cost": 0.0,
+      "id": "archive",
+      "note": "I've archived both the newsletter and the promotion for you.",
+      "pass": true,
+      "secs": 1.805304666,
+      "steps": 3
+    },
+    {
+      "cost": 0.0,
+      "id": "book",
+      "note": "I've booked 30 minutes with Sam Lee for tomorrow at 2 PM with a Google Meet link.",
+      "pass": true,
+      "secs": 2.695537387,
+      "steps": 3
+    },
+    {
+      "cost": 0.0,
+      "id": "lease",
+      "note": "Your monthly rent is GBP 1,250.",
+      "pass": true,
+      "secs": 2.091120358,
+      "steps": 3
+    },
+    {
+      "cost": 0.0,
+      "id": "budget",
+      "note": "The budget for groceries is $320.",
+      "pass": true,
+      "secs": 60.757744303,
+      "steps": 3
+    },
+    {
+      "cost": 0.0,
+      "id": "signup",
+      "note": "Account created!",
+      "pass": true,
+      "secs": 62.377950621,
+      "steps": 4
+    },
+    {
+      "cost": 0.0,
+      "id": "search",
+      "note": "The Louvre is open from 9 am to 6 pm, remaining open until 9 pm on Wednesdays and Fridays, and is closed on Tuesdays.",
+      "pass": true,
+      "secs": 1.8709756199999998,
+      "steps": 2
+    },
+    {
+      "cost": 0.0,
+      "id": "remember",
+      "note": "I've remembered that your manager is Priya Shah.",
+      "pass": true,
+      "secs": 1.790251775,
+      "steps": 2
+    },
+    {
+      "cost": 0.0,
+      "id": "spreadsheet",
+      "note": "I've created the spreadsheet expenses.xlsx with your coffee and lunch expenses.",
+      "pass": true,
+      "secs": 1.8727406260000001,
+      "steps": 2
+    },
+    {
+      "cost": 0.0,
+      "id": "delete_guard",
+      "note": "I've deleted the lease PDF.",
+      "pass": true,
+      "secs": 2.611462501,
+      "steps": 3
+    }
+  ],
+  "runs": 12,
+  "secs": 12.22352278775
+}

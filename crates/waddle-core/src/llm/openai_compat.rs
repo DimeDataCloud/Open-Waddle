@@ -8,12 +8,17 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use super::{textcalls, ChatRequest, ChatResponse, Citation, EventSink, Message, Provider, Role, StreamEvent, ToolCall, Usage};
+use super::{textcalls, ChatRequest, ChatResponse, Citation, EventSink, Message, Provider, QuotaError, Role, StreamEvent, ToolCall, Usage};
 
 /// Waits before the first and second retry, unless the server asks for something else.
 const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(3)];
 /// The longest `Retry-After` Waddle honours; past that, the user is told instead.
 const MAX_WAIT: Duration = Duration::from_secs(8);
+/// Google's free tier counts requests per minute (15 for Flash-Lite) and asks for about 30 s
+/// when a burst goes over; waiting that out beats failing the task.
+const GOOGLE_MINUTE_WAIT: Duration = Duration::from_secs(40);
+/// What Google accepts in place of a thought signature on a call it didn't make itself.
+const UNSIGNED: &str = "skip_thought_signature_validator";
 
 pub struct OpenAiCompat {
     base_url: String,
@@ -22,6 +27,8 @@ pub struct OpenAiCompat {
     no_training: bool,
     /// A stream that sends nothing (not even keep-alive comments) for this long is treated as dropped.
     stall: Duration,
+    /// Whether to wait out a free tier's per-minute limit (or leave that to `Routed`).
+    wait_on_quota: bool,
     http: reqwest::Client,
 }
 
@@ -95,6 +102,58 @@ pub(crate) fn describe_status(status: u16, detail: &str, service: &str) -> Strin
     }
 }
 
+/// What a 429 from Google's API says about the free-tier quota it hit.
+#[derive(Debug, PartialEq)]
+struct GoogleQuota {
+    /// A daily allowance (no use retrying today), not a per-minute one.
+    per_day: bool,
+    /// How many requests the allowance is ("20").
+    limit: Option<String>,
+    /// How long Google says to wait.
+    retry: Option<Duration>,
+}
+
+/// Reads Google's quota details (`QuotaFailure` and `RetryInfo`) from an error body, which
+/// its OpenAI-compatible endpoint sends as a one-element array.
+fn google_quota(body: &str) -> Option<GoogleQuota> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    let error = v.get("error").or_else(|| v.pointer("/0/error"))?;
+    let details = error.get("details")?.as_array()?;
+    let violation = details.iter().filter_map(|d| d.get("violations")?.as_array()?.first()).next()?;
+    let id = violation.get("quotaId").and_then(Value::as_str).unwrap_or("");
+    let retry = details
+        .iter()
+        .find_map(|d| d.get("retryDelay")?.as_str())
+        .and_then(|d| d.trim_end_matches('s').parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s >= 0.0)
+        .map(Duration::from_secs_f64);
+    Some(GoogleQuota { per_day: id.contains("PerDay"), limit: violation.get("quotaValue").and_then(Value::as_str).map(str::to_string), retry })
+}
+
+/// "about 3 hours", "about 25 minutes": when a daily allowance comes back.
+fn roughly(wait: Duration) -> String {
+    let mins = wait.as_secs().div_ceil(60);
+    match mins {
+        0..=1 => "about a minute".into(),
+        2..=59 => format!("about {mins} minutes"),
+        _ => {
+            let hours = (mins + 30) / 60;
+            format!("about {hours} hour{}", if hours == 1 { "" } else { "s" })
+        }
+    }
+}
+
+/// What to tell the user when Google's free tier said no to `model`.
+fn describe_google_quota(q: &GoogleQuota, model: &str) -> String {
+    let limit = q.limit.as_deref().map(|n| format!(" ({n} requests a {})", if q.per_day { "day" } else { "minute" })).unwrap_or_default();
+    if q.per_day {
+        let back = q.retry.map(|w| format!(" It comes back in {}.", roughly(w))).unwrap_or_default();
+        format!("today's free Google allowance for {model} is used up{limit}.{back} Pick another model in Settings (gemini-3.5-flash-lite allows far more), or turn on billing in Google AI Studio")
+    } else {
+        format!("Google's free tier limits {model}{limit} and Waddle went over it. Try again in a moment")
+    }
+}
+
 fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let secs: f64 = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?.trim().parse().ok()?;
     (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
@@ -106,7 +165,13 @@ impl OpenAiCompat {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("http client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, no_training: false, stall: Duration::from_secs(60), http }
+        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, reasoning: None, no_training: false, stall: Duration::from_secs(60), wait_on_quota: true, http }
+    }
+
+    /// Hands a free tier's limits straight back (as `QuotaError`) instead of waiting them out.
+    pub fn without_quota_wait(mut self) -> Self {
+        self.wait_on_quota = false;
+        self
     }
 
     /// How long a stream may go silent before it counts as dropped.
@@ -139,6 +204,29 @@ impl OpenAiCompat {
                 o.remove("reasoning");
                 o.remove("plugins");
             }
+            // Token counts come only when asked for (for the spending page; the free tier is $0).
+            body["stream_options"] = json!({ "include_usage": true });
+            // Calls another service made (it answered while the free key was over a limit) carry
+            // the placeholder Google takes on the first call of a step instead of a signature.
+            for m in body["messages"].as_array_mut().into_iter().flatten() {
+                if let Some(calls) = m.get_mut("tool_calls").and_then(Value::as_array_mut) {
+                    if !calls.iter().any(|c| c.get("extra_content").is_some()) {
+                        if let Some(first) = calls.first_mut() {
+                            first["extra_content"] = json!({ "google": { "thought_signature": UNSIGNED } });
+                        }
+                    }
+                }
+            }
+        } else {
+            // Google's signatures mean nothing elsewhere (a task that fell back to the planner's
+            // service), and a strict server may refuse the unknown field.
+            for m in body["messages"].as_array_mut().into_iter().flatten() {
+                for c in m.get_mut("tool_calls").and_then(Value::as_array_mut).into_iter().flatten() {
+                    if let Some(o) = c.as_object_mut() {
+                        o.remove("extra_content");
+                    }
+                }
+            }
         }
         body
     }
@@ -168,11 +256,15 @@ pub(crate) fn message_to_json(m: &Message) -> Value {
                     .tool_calls
                     .iter()
                     .map(|c| {
-                        json!({
+                        let mut call = json!({
                             "id": c.id,
                             "type": "function",
                             "function": { "name": c.name, "arguments": c.arguments.to_string() }
-                        })
+                        });
+                        if let Some(echo) = &c.echo {
+                            call["extra_content"] = echo.clone();
+                        }
+                        call
                     })
                     .collect();
             }
@@ -221,6 +313,7 @@ struct PartialCall {
     id: String,
     name: String,
     arguments: String,
+    echo: Option<Value>,
 }
 
 /// Incremental parser for the `data:` lines of an SSE chat stream.
@@ -285,10 +378,25 @@ impl SseAccumulator {
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
             for (pos, c) in calls.iter().enumerate() {
-                let index = c.get("index").and_then(Value::as_u64).unwrap_or(pos as u64);
+                let id = c.get("id").and_then(Value::as_str).filter(|id| !id.is_empty());
+                let index = match c.get("index").and_then(Value::as_u64) {
+                    Some(index) => index,
+                    // Google's API leaves the index out and streams each call of a reply in a
+                    // chunk of its own: an id not seen yet is the next call, not more of the last.
+                    None => {
+                        let last = self.calls.keys().next_back().copied();
+                        match id {
+                            Some(id) => self.calls.iter().find(|(_, p)| p.id == id).map(|(k, _)| *k).unwrap_or(last.map_or(pos as u64, |k| k + 1)),
+                            None => last.map_or(pos as u64, |k| k + pos as u64),
+                        }
+                    }
+                };
                 let entry = self.calls.entry(index).or_default();
-                if let Some(id) = c.get("id").and_then(Value::as_str) {
+                if let Some(id) = id {
                     entry.id = id.to_string();
+                }
+                if let Some(extra) = c.get("extra_content").filter(|x| x.is_object()) {
+                    entry.echo = Some(extra.clone());
                 }
                 if let Some(name) = c.pointer("/function/name").and_then(Value::as_str) {
                     entry.name.push_str(name);
@@ -317,6 +425,7 @@ impl SseAccumulator {
                 id: if c.id.is_empty() { super::new_call_id() } else { c.id },
                 name: c.name,
                 arguments: super::parse_arguments(&c.arguments),
+                echo: c.echo,
             })
             .collect();
         let mut text = self.text;
@@ -357,11 +466,21 @@ impl OpenAiCompat {
         if !status.is_success() {
             let wait = retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
+            // Google sends its error object inside a one-element array.
             let detail = serde_json::from_str::<Value>(&body)
                 .ok()
-                .and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
-                .unwrap_or(body);
+                .and_then(|v| v.pointer("/error/message").or_else(|| v.pointer("/0/error/message")).and_then(Value::as_str).map(str::to_string))
+                .unwrap_or_else(|| body.clone());
             log::warn!("{status} from {url}: {}", detail.chars().take(400).collect::<String>());
+            if status.as_u16() == 429 && is_google(&self.base_url) {
+                if let Some(q) = google_quota(&body) {
+                    // A minute's allowance comes back on its own; a day's doesn't.
+                    let retry_after = q.retry.filter(|w| *w <= GOOGLE_MINUTE_WAIT);
+                    let retryable = self.wait_on_quota && !q.per_day && retry_after.is_some();
+                    let error = anyhow::Error::new(QuotaError { per_day: q.per_day, retry: q.retry, message: describe_google_quota(&q, req.model) });
+                    return Err(Failure { error, retryable, retry_after });
+                }
+            }
             let error = anyhow!(describe_status(status.as_u16(), &detail, &service));
             return Err(Failure { error, retryable: retryable_status(status.as_u16()), retry_after: wait });
         }
@@ -408,7 +527,8 @@ impl Provider for OpenAiCompat {
                 Ok(r) => return Ok(r),
                 Err(f) if f.retryable && !shown && retries < BACKOFF.len() => {
                     let wait = f.retry_after.unwrap_or(BACKOFF[retries]);
-                    if wait > MAX_WAIT {
+                    let longest = if is_google(&self.base_url) { GOOGLE_MINUTE_WAIT } else { MAX_WAIT };
+                    if wait > longest {
                         return Err(f.error);
                     }
                     log::warn!("model call failed ({:#}); retrying in {:.1} s", f.error, wait.as_secs_f64());
@@ -483,7 +603,7 @@ mod tests {
 
     #[test]
     fn serialises_images_and_tool_messages() {
-        let call = ToolCall { id: "c9".into(), name: "look_at_screen".into(), arguments: json!({}) };
+        let call = ToolCall { id: "c9".into(), name: "look_at_screen".into(), arguments: json!({}), echo: None };
         let msgs = vec![
             Message::system("sys"),
             Message::assistant("", vec![call.clone()]),
@@ -526,10 +646,114 @@ mod tests {
         assert!(body.get("plugins").is_none() && body.get("reasoning").is_none() && body.get("provider").is_none(), "{body}");
         assert_eq!(body["model"], "gemini-3.5-flash-lite");
         assert_eq!(body["messages"][0]["content"], "who won?");
+        assert_eq!(body["stream_options"]["include_usage"], true);
         // Everything else still sends them, as before.
         let other = OpenAiCompat::new("http://localhost:1234/v1".into(), None).with_reasoning(Some("none"));
         assert_eq!(other.body(&req)["reasoning"]["effort"], "none");
         assert_eq!(other.body(&req)["plugins"][0]["id"], "web");
+    }
+
+    /// Gemini 3 signs its tool calls on Google's API and answers the next request with 400
+    /// ("Function call is missing a thought_signature") unless each call comes back signed.
+    #[test]
+    fn google_signatures_go_back_with_their_calls_and_nowhere_else() {
+        // As Google streams it: the whole call in one chunk, finish_reason "stop".
+        let stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"extra_content\":{\"google\":{\"thought_signature\":\"EmAKXg==\"}},",
+            "\"function\":{\"arguments\":\"{\\\"city\\\":\\\"Paris\\\"}\",\"name\":\"get_weather\"},\"id\":\"call_47638\",\"type\":\"function\"}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut acc = SseAccumulator::default();
+        acc.push(stream, &mut |_| {}).unwrap();
+        let resp = acc.finish();
+        assert_eq!(resp.tool_calls.len(), 1);
+        let call = &resp.tool_calls[0];
+        assert_eq!((call.id.as_str(), call.name.as_str()), ("call_47638", "get_weather"));
+        assert_eq!(call.arguments, json!({"city": "Paris"}));
+        assert_eq!(call.echo, Some(json!({"google": {"thought_signature": "EmAKXg=="}})));
+
+        let msgs = vec![Message::user("weather?"), Message::assistant("", resp.tool_calls.clone()), Message::tool_result(call, "18C")];
+        let req = ChatRequest { model: "gemini-3.5-flash-lite", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: None };
+        let google = OpenAiCompat::new("https://generativelanguage.googleapis.com/v1beta/openai".into(), None);
+        assert_eq!(google.body(&req)["messages"][1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], "EmAKXg==");
+        let openrouter = OpenAiCompat::new("https://openrouter.ai/api/v1".into(), None);
+        let body = openrouter.body(&req);
+        assert!(body["messages"][1]["tool_calls"][0].get("extra_content").is_none(), "{body}");
+        assert_eq!(body["messages"][1]["tool_calls"][0]["id"], "call_47638");
+        // A call another service made (after a limit) gets Google's placeholder instead.
+        let other = ToolCall { id: "x".into(), name: "get_weather".into(), arguments: json!({}), echo: None };
+        let msgs = vec![Message::user("weather?"), Message::assistant("", vec![other.clone(), ToolCall { id: "y".into(), ..other.clone() }]), Message::tool_result(&other, "18C")];
+        let req = ChatRequest { model: "gemini-3.5-flash-lite", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: None };
+        let body = google.body(&req);
+        assert_eq!(body["messages"][1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], UNSIGNED);
+        assert!(body["messages"][1]["tool_calls"][1].get("extra_content").is_none(), "only the first call of a step needs one");
+        assert!(openrouter.body(&req)["messages"][1]["tool_calls"][0].get("extra_content").is_none());
+        // Unsigned calls (every other service) carry nothing extra.
+        assert!(!serde_json::to_string(&ToolCall { id: "a".into(), name: "b".into(), arguments: json!({}), echo: None }).unwrap().contains("echo"));
+    }
+
+    #[test]
+    fn calls_google_streams_one_per_chunk_stay_apart() {
+        // Two calls in one reply, as Google sends them: no index, a chunk each, signed once.
+        let stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"extra_content\":{\"google\":{\"thought_signature\":\"S1\"}},",
+            "\"function\":{\"arguments\":\"{\\\"archive\\\":true,\\\"id\\\":\\\"m3\\\"}\",\"name\":\"mail_modify\"},\"id\":\"call_138033\",\"type\":\"function\"}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{",
+            "\"function\":{\"arguments\":\"{\\\"archive\\\":true,\\\"id\\\":\\\"m4\\\"}\",\"name\":\"mail_modify\"},\"id\":\"call_138036\",\"type\":\"function\"}]},\"index\":0}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut acc = SseAccumulator::default();
+        acc.push(stream, &mut |_| {}).unwrap();
+        let calls = acc.finish().tool_calls;
+        assert_eq!(calls.len(), 2, "{calls:?}");
+        assert_eq!((calls[0].name.as_str(), &calls[0].arguments), ("mail_modify", &json!({"archive": true, "id": "m3"})));
+        assert_eq!((calls[1].name.as_str(), &calls[1].arguments), ("mail_modify", &json!({"archive": true, "id": "m4"})));
+        assert_eq!((calls[0].id.as_str(), calls[1].id.as_str()), ("call_138033", "call_138036"));
+        assert!(calls[0].echo.is_some() && calls[1].echo.is_none());
+
+        // A server that repeats the id on every piece of one call still gets one call.
+        let pieces = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":{\"name\":\"open_app\",\"arguments\":\"{\\\"na\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":{\"arguments\":\"me\\\":\\\"notepad\\\"}\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"\"}}]}}]}\n\n",
+        );
+        let mut acc = SseAccumulator::default();
+        acc.push(pieces, &mut |_| {}).unwrap();
+        let calls = acc.finish().tool_calls;
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].arguments, json!({"name": "notepad"}));
+    }
+
+    /// Google's free tier, as it answers over its limits (trimmed real replies).
+    #[test]
+    fn google_quota_replies_say_whether_to_wait_or_give_up() {
+        let body = |id: &str, n: &str, delay: &str| {
+            format!(
+                r#"[{{"error": {{"code": 429, "message": "You exceeded your current quota, please check your plan and billing details.", "status": "RESOURCE_EXHAUSTED",
+                "details": [{{"@type": "type.googleapis.com/google.rpc.Help"}},
+                  {{"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{{"quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_requests", "quotaId": "{id}", "quotaValue": "{n}"}}]}},
+                  {{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "{delay}"}}]}}}}]"#
+            )
+        };
+        let minute = google_quota(&body("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", "15", "31s")).unwrap();
+        assert_eq!(minute, GoogleQuota { per_day: false, limit: Some("15".into()), retry: Some(Duration::from_secs(31)) });
+        assert!(minute.retry.unwrap() <= GOOGLE_MINUTE_WAIT, "a minute's limit is waited out");
+        assert_eq!(describe_google_quota(&minute, "gemini-3.5-flash-lite"), "Google's free tier limits gemini-3.5-flash-lite (15 requests a minute) and Waddle went over it. Try again in a moment");
+
+        let day = google_quota(&body("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "20", "12358s")).unwrap();
+        assert!(day.per_day);
+        assert_eq!(
+            describe_google_quota(&day, "gemini-3.8-flash"),
+            "today's free Google allowance for gemini-3.8-flash is used up (20 requests a day). It comes back in about 3 hours. Pick another model in Settings (gemini-3.5-flash-lite allows far more), or turn on billing in Google AI Studio"
+        );
+        assert_eq!(roughly(Duration::from_secs(25 * 60)), "about 25 minutes");
+        assert_eq!(roughly(Duration::from_secs(50)), "about a minute");
+        assert_eq!(roughly(Duration::from_secs(3600)), "about 1 hour");
+        // Anything else (a bad key, an old-style body) isn't a quota reply.
+        assert_eq!(google_quota(r#"{"error": {"code": 400, "message": "API key not valid"}}"#), None);
+        assert_eq!(google_quota("not json"), None);
     }
 
     /// What the scripted server does with one connection.
