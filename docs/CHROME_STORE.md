@@ -43,6 +43,4 @@ What to enter in the [Chrome Web Store developer console](https://chrome.google.
 
 ## After it's approved
 
-1. Copy the 32-letter item ID from the dashboard.
-2. Add it to the extension IDs the app accepts (`EXTENSION_ID` in `src-tauri/src/browser.rs`) beside the development one, and make Settings → Chrome open the store page.
-3. Each new version: bump `version` in `extension/manifest.json`, run `npm run build`, run `node scripts/pack-extension.mjs`, and upload the new zip.
+The item ID is `pdfkecmhiebhepheejpjmaejkhhgbffn`. The app already trusts it (`STORE_EXTENSION_ID` in `src-tauri/src/browser.rs`, beside the development ID), and Settings → Chrome → **Get Waddle for Chrome** opens `https://chromewebstore.google.com/detail/pdfkecmhiebhepheejpjmaejkhhgbffn`. For each new version, bump `version` in `extension/manifest.json`, run `npm run build`, run `node scripts/pack-extension.mjs`, and upload the new zip.

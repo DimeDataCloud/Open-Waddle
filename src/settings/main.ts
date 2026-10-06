@@ -696,6 +696,16 @@ async function loadBrowser(): Promise<void> {
   }
 }
 
+const CHROME_STORE_URL = "https://chromewebstore.google.com/detail/pdfkecmhiebhepheejpjmaejkhhgbffn";
+
+$("browser-store").addEventListener("click", async () => {
+  try {
+    await invoke("open_link", { url: CHROME_STORE_URL });
+  } catch (err) {
+    $("browser-status").textContent = `Couldn't open the Chrome Web Store: ${err}`;
+  }
+});
+
 $("browser-setup").addEventListener("click", async () => {
   try {
     showBrowser(await invoke<BrowserStatus>("browser_setup"));

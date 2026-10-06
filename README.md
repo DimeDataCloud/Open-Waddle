@@ -73,7 +73,7 @@ It runs on your own machine and is free and open source (MIT). Apart from cheap 
   - It makes new Word, Excel, CSV and Markdown files, and moves and renames files, only in its workspace and folders you allow (Settings → Files). Each change shows a 2 s notice.
   - Deleting sends things to the Recycle Bin and waits for your click. Overwriting a file keeps the old copy in the Recycle Bin.
   - App data, SSH keys, password databases, browser profiles and `.env` files are always off limits.
-- **Use Chrome properly** (with Waddle's extension: Settings → Chrome → **Set up Chrome extension**).
+- **Use Chrome properly** (with Waddle's extension: Settings → Assistant → Chrome → **Get Waddle for Chrome**).
   - Waddle reads the page's text, or its buttons, links and fields, instead of squinting at screenshots, and acts on them by name. "Fill in this form with my work address", "open the second result", "what does this page say about returns?"
   - Clicks are real mouse clicks: the duck walks to the button and presses it, so pages behave just as they do for you.
   - "Search for…" goes straight to Google's results and reads them.
@@ -152,7 +152,7 @@ API keys are stored in **Windows Credential Manager** (macOS Keychain / Linux Se
 ### Connect Google and Chrome (optional, 5 minutes each)
 
 - **Google** (Gmail, Calendar, Contacts, Drive): follow [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md). You create your own OAuth client, paste it into Settings → Google account, and press **Connect**.
-- **Chrome:** Settings → Chrome → **Set up Chrome extension**. Then in Chrome open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the folder that opened. See [extension/README.md](extension/README.md).
+- **Chrome:** Settings → Assistant → Chrome → **Get Waddle for Chrome** opens the Chrome Web Store page; press **Add to Chrome**. No store access? **Install from a file** shows the Developer-mode steps. See [extension/README.md](extension/README.md).
 - **Files:** Settings → Files. Waddle can read your user folders. Add the folders it may also change.
 
 ## Try it: on-device checklist
@@ -209,7 +209,7 @@ Each step says what to do → what you should see. Steps marked (G) need Google 
 
 **Chrome (C)**
 
-34. Settings → Chrome → **Set up Chrome extension**, then follow the three steps → "Connected (extension …)".
+34. Settings → Assistant → Chrome → **Get Waddle for Chrome**, then **Add to Chrome** on the store page → "Connected (extension …)" within a minute.
 35. On any search page: "fill in the search box with rubber ducks and press search" → the duck walks to the field and button on screen and the page reacts as if you'd clicked.
 36. "Search for the weather in Paris and tell me tomorrow's forecast" → Google's results open in Chrome and Waddle answers from them.
 
