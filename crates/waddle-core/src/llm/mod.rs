@@ -203,8 +203,10 @@ pub struct Routed {
     google: bool,
     /// What the planner's service runs instead when the second service can't take a request.
     fallback: String,
-    /// The planner's service is OpenRouter, which has every Gemini model too ("google/…").
-    main_is_openrouter: bool,
+    /// What OpenRouter runs when Google can't take a Gemini request (no key, a web search, or
+    /// over a free-tier limit): a model for tasks, which call tools, and one for quick replies.
+    /// Both cost less there than the same Gemini. None when the planner's service isn't OpenRouter.
+    instead: Option<(String, String)>,
     /// Until when Google's free key is left alone after one of its limits.
     resting_until: std::sync::Mutex<Option<std::time::Instant>>,
 }
@@ -224,26 +226,25 @@ impl Routed {
             fast_has_web,
             google: false,
             fallback: main_model.to_string(),
-            main_is_openrouter: false,
+            instead: None,
             resting_until: std::sync::Mutex::new(None),
         }
     }
 
-    /// The second service is Google's Gemini API. A planner model named for it runs
-    /// there too; without the Google key it runs as the same Gemini model on
-    /// OpenRouter (`main_is_openrouter`), or as the planner's model elsewhere.
-    pub fn with_google(mut self, main_is_openrouter: bool) -> Self {
+    /// The second service is Google's Gemini API. A planner model named for it runs there
+    /// too. What Google can't take goes to OpenRouter's `instead` models (tasks, quick
+    /// replies), or to the planner's model when its service isn't OpenRouter.
+    pub fn with_google(mut self, instead: Option<(&str, &str)>) -> Self {
         self.google = true;
-        self.main_is_openrouter = main_is_openrouter;
-        if main_is_openrouter && is_google_name(&self.main_model) {
-            self.fallback = format!("google/{}", self.main_model);
-        }
+        self.instead = instead.map(|(tasks, quick)| (tasks.to_string(), quick.to_string()));
         self
     }
 
-    /// The same model on OpenRouter (paid), for when Google's free key is over a limit.
-    fn paid_twin(&self, model: &str) -> Option<String> {
-        (self.google && self.main_is_openrouter && is_google_name(model)).then(|| format!("google/{model}"))
+    /// The OpenRouter model for a Gemini request Google can't take: the task model for one
+    /// that calls tools, the quick-reply model for one that doesn't.
+    fn instead(&self, req: &ChatRequest<'_>) -> Option<&str> {
+        let (tasks, quick) = self.instead.as_ref().filter(|_| self.google && is_google_name(req.model))?;
+        Some(if req.tools.is_empty() { quick } else { tasks })
     }
 
     fn google_resting(&self) -> bool {
@@ -271,7 +272,7 @@ impl Routed {
             Some(fast) if req.web.is_none() || self.fast_has_web => (fast, req),
             // No key for the second service yet, or a web search it can't do: the planner's
             // service answers instead.
-            _ => (&self.main, ChatRequest { model: &self.fallback, ..req }),
+            _ => (&self.main, ChatRequest { model: self.instead(&req).unwrap_or(&self.fallback), ..req }),
         }
     }
 }
@@ -280,19 +281,19 @@ impl Routed {
 impl Provider for Routed {
     async fn chat(&self, req: ChatRequest<'_>, on_event: EventSink<'_>) -> anyhow::Result<ChatResponse> {
         let (provider, routed) = self.pick(req);
-        let twin = self.paid_twin(req.model).filter(|_| self.goes_to_google(provider));
-        let Some(twin) = twin else { return provider.chat(routed, on_event).await };
-        // Over one of the free key's limits: the same model on OpenRouter carries on with the
-        // same conversation (it accepts Google's calls), and Google gets it back afterwards.
+        let instead = self.instead(&req).filter(|_| self.goes_to_google(provider));
+        let Some(instead) = instead else { return provider.chat(routed, on_event).await };
+        // Over one of the free key's limits: OpenRouter carries on with the same conversation
+        // (it accepts Google's calls), and Google gets it back afterwards.
         if self.google_resting() {
-            return self.main.chat(ChatRequest { model: &twin, ..req }, on_event).await;
+            return self.main.chat(ChatRequest { model: instead, ..req }, on_event).await;
         }
         match provider.chat(routed, on_event).await {
             Err(e) => match e.downcast_ref::<QuotaError>() {
                 Some(q) => {
-                    log::warn!("{q}; {twin} on OpenRouter answers until it lifts");
+                    log::warn!("{q}; {instead} on OpenRouter answers until it lifts");
                     self.rest_google(q);
-                    self.main.chat(ChatRequest { model: &twin, ..req }, on_event).await
+                    self.main.chat(ChatRequest { model: instead, ..req }, on_event).await
                 }
                 None => Err(e),
             },
@@ -315,7 +316,8 @@ pub fn route(settings: &Settings, main: Arc<dyn Provider>, fast: Option<Arc<dyn 
     let mut routed = Routed::new(main, fast, &settings.model, settings.fast_model(), settings.fast_base_url.contains("openrouter.ai"));
     if openai_compat::is_google(&settings.fast_base_url) {
         // A Gemini planner model then runs on the free Google key too.
-        routed = routed.with_google(settings.is_openrouter());
+        let instead = settings.is_openrouter().then(|| (settings.fallback_model(), crate::config::OPENROUTER_QUICK));
+        routed = routed.with_google(instead);
     }
     Arc::new(routed)
 }
@@ -426,17 +428,29 @@ mod routed_tests {
         }
     }
 
+    /// What OpenRouter runs instead of Gemini: the planner for tasks, a cheap model for quick replies.
+    const INSTEAD: Option<(&str, &str)> = Some(("inclusionai/ling-3.0-flash-vl", "google/gemini-2.5-flash-lite"));
+
+    /// A task step: it offers a tool.
+    async fn ask_task(p: &Routed, model: &str) {
+        let msgs = [Message::user("click it")];
+        let tools = [ToolSpec { name: "click".into(), description: "Click".into(), parameters: serde_json::json!({"type": "object"}) }];
+        let req = ChatRequest { model, messages: &msgs, tools: &tools, temperature: 0.2, max_tokens: 10, web: None };
+        p.chat(req, &mut |_| {}).await.unwrap();
+    }
+
     #[tokio::test]
-    async fn over_a_google_limit_the_same_model_carries_on_on_openrouter() {
+    async fn over_a_google_limit_cheaper_openrouter_models_carry_on() {
         let (main, _) = pair();
         let google = Arc::new(OverLimit { per_day: false, asked: Default::default() });
-        let r = Routed::new(main.clone(), Some(google.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(true);
-        ask(&r, "gemini-3.5-flash-lite", None).await;
-        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-3.5-flash-lite"], "answered at once on OpenRouter");
+        let r = Routed::new(main.clone(), Some(google.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(INSTEAD);
+        // A task step goes to the planner model, a quick reply to the cheap one.
+        ask_task(&r, "gemini-3.5-flash-lite").await;
+        assert_eq!(*main.models.lock().unwrap(), ["inclusionai/ling-3.0-flash-vl"], "answered at once on OpenRouter");
         // Until Google said to come back, the free key isn't asked again.
         ask(&r, "gemini-3.5-flash-lite", None).await;
         assert_eq!(*google.asked.lock().unwrap(), 1);
-        assert_eq!(main.models.lock().unwrap().len(), 2);
+        assert_eq!(main.models.lock().unwrap().last().unwrap(), "google/gemini-2.5-flash-lite");
         // Afterwards it is.
         *r.resting_until.lock().unwrap() = Some(std::time::Instant::now());
         ask(&r, "gemini-3.5-flash-lite", None).await;
@@ -450,8 +464,8 @@ mod routed_tests {
     async fn with_no_openrouter_to_fall_back_on_the_limit_is_reported() {
         let (main, _) = pair();
         let google = Arc::new(OverLimit { per_day: true, asked: Default::default() });
-        // The planner's service isn't OpenRouter (a local server, say): no paid twin to move to.
-        let r = Routed::new(main.clone(), Some(google.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(false);
+        // The planner's service isn't OpenRouter (a local server, say): nothing to move to.
+        let r = Routed::new(main.clone(), Some(google.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(None);
         let msgs = [Message::user("hi")];
         let req = ChatRequest { model: "gemini-3.5-flash-lite", messages: &msgs, tools: &[], temperature: 0.2, max_tokens: 10, web: None };
         let err = r.chat(req, &mut |_| {}).await.unwrap_err();
@@ -472,26 +486,26 @@ mod routed_tests {
     async fn tasks_run_on_a_free_gemini_key_when_the_planner_is_a_gemini_model() {
         // OpenRouter for routing and web searches, Google's free API for the planner and quick replies.
         let (main, fast) = pair();
-        let r = Routed::new(main.clone(), Some(fast.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(true);
+        let r = Routed::new(main.clone(), Some(fast.clone()), "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(INSTEAD);
         ask(&r, "gemini-3.5-flash-lite", None).await;
         assert_eq!(*fast.models.lock().unwrap(), ["gemini-3.5-flash-lite"], "the planner went to Google");
         assert!(main.models.lock().unwrap().is_empty());
-        // A web search Google's endpoint can't run goes to OpenRouter, under OpenRouter's name for the model.
+        // A web search Google's endpoint can't run goes to OpenRouter's cheap quick-reply model.
         ask(&r, "gemini-3.5-flash-lite", Some(5)).await;
-        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-3.5-flash-lite"]);
-        // Without the Google key, everything still works on OpenRouter.
+        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-2.5-flash-lite"]);
+        // Without the Google key, everything still works on OpenRouter: tasks on the planner model.
         let (main, _) = pair();
-        let r = Routed::new(main.clone(), None, "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(true);
+        let r = Routed::new(main.clone(), None, "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", false).with_google(INSTEAD);
+        ask_task(&r, "gemini-3.5-flash-lite").await;
         ask(&r, "gemini-3.5-flash-lite", None).await;
-        assert_eq!(*main.models.lock().unwrap(), ["google/gemini-3.5-flash-lite"]);
+        assert_eq!(*main.models.lock().unwrap(), ["inclusionai/ling-3.0-flash-vl", "google/gemini-2.5-flash-lite"]);
         // OpenRouter's own names stay on OpenRouter.
         let (main, fast) = pair();
-        let r = Routed::new(main.clone(), Some(fast.clone()), "openai/gpt-6-luna", "gemini-3.5-flash-lite", false).with_google(true);
+        let r = Routed::new(main.clone(), Some(fast.clone()), "openai/gpt-6-luna", "gemini-3.5-flash-lite", false).with_google(INSTEAD);
         ask(&r, "openai/gpt-6-luna", None).await;
         ask(&r, "google/gemini-3.8-flash", None).await;
         assert_eq!(main.models.lock().unwrap().len(), 2);
         assert!(fast.models.lock().unwrap().is_empty());
-        assert!(is_google_name("gemini-3.8-flash") && !is_google_name("google/gemini-3.8-flash") && !is_google_name("openai/gpt-6-luna"));
     }
 
     #[test]

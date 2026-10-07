@@ -1,0 +1,1218 @@
+{
+ "screen": {
+  "w": 1440,
+  "h": 960
+ },
+ "probes": [
+  {
+   "id": "dialog:file",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"File\".",
+   "boxes": [
+    [
+     188,
+     134,
+     231,
+     158
+    ]
+   ]
+  },
+  {
+   "id": "dialog:edit",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"Edit\".",
+   "boxes": [
+    [
+     235,
+     134,
+     279,
+     158
+    ]
+   ]
+  },
+  {
+   "id": "dialog:view",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"View\".",
+   "boxes": [
+    [
+     283,
+     134,
+     333,
+     158
+    ]
+   ]
+  },
+  {
+   "id": "dialog:save",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"Save\".",
+   "boxes": [
+    [
+     560,
+     444,
+     670,
+     476
+    ]
+   ]
+  },
+  {
+   "id": "dialog:don-t-save",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"Don't save\".",
+   "boxes": [
+    [
+     678,
+     444,
+     788,
+     476
+    ]
+   ]
+  },
+  {
+   "id": "dialog:cancel",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"Cancel\".",
+   "boxes": [
+    [
+     796,
+     444,
+     906,
+     476
+    ]
+   ]
+  },
+  {
+   "id": "dialog:notepad",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"Notepad\".",
+   "boxes": [
+    [
+     470,
+     330,
+     930,
+     364
+    ]
+   ]
+  },
+  {
+   "id": "dialog:do-you-want-to-save-changes-to-u",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"Do you want to save changes to Untitled?\".",
+   "boxes": [
+    [
+     470,
+     364,
+     930,
+     425
+    ]
+   ]
+  },
+  {
+   "id": "dialog:untitled-notepad",
+   "screen": "dialog",
+   "kind": "text",
+   "instruction": "Click \"*Untitled - Notepad\".",
+   "boxes": [
+    [
+     180,
+     90,
+     1180,
+     130
+    ]
+   ]
+  },
+  {
+   "id": "editor:editing",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Editing\".",
+   "boxes": [
+    [
+     836,
+     139,
+     888,
+     151
+    ]
+   ]
+  },
+  {
+   "id": "editor:a",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"A⁺\".",
+   "boxes": [
+    [
+     307,
+     76,
+     333,
+     102
+    ]
+   ]
+  },
+  {
+   "id": "editor:x₂",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"x₂\".",
+   "boxes": [
+    [
+     221,
+     108,
+     247,
+     134
+    ]
+   ]
+  },
+  {
+   "id": "editor:clipboard",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Clipboard\".",
+   "boxes": [
+    [
+     8,
+     139,
+     88,
+     151
+    ]
+   ]
+  },
+  {
+   "id": "editor:file",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"File\".",
+   "boxes": [
+    [
+     8,
+     39,
+     57,
+     68
+    ]
+   ]
+  },
+  {
+   "id": "editor:view",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"View\".",
+   "boxes": [
+    [
+     424,
+     39,
+     480,
+     68
+    ]
+   ]
+  },
+  {
+   "id": "editor:insert",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Insert\".",
+   "boxes": [
+    [
+     124,
+     39,
+     184,
+     68
+    ]
+   ]
+  },
+  {
+   "id": "editor:layout",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Layout\".",
+   "boxes": [
+    [
+     186,
+     39,
+     253,
+     68
+    ]
+   ]
+  },
+  {
+   "id": "editor:paste",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Paste\".",
+   "boxes": [
+    [
+     8,
+     82,
+     60,
+     124
+    ]
+   ]
+  },
+  {
+   "id": "editor:references",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"References\".",
+   "boxes": [
+    [
+     255,
+     39,
+     350,
+     68
+    ]
+   ]
+  },
+  {
+   "id": "editor:font",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Font\".",
+   "boxes": [
+    [
+     109,
+     139,
+     361,
+     151
+    ]
+   ]
+  },
+  {
+   "id": "editor:georgia",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Georgia ⌄\".",
+   "boxes": [
+    [
+     109,
+     77,
+     259,
+     101
+    ]
+   ]
+  },
+  {
+   "id": "editor:aabb-heading-1",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"AaBb Heading 1\".",
+   "boxes": [
+    [
+     633,
+     76,
+     723,
+     128
+    ]
+   ]
+  },
+  {
+   "id": "editor:quarterly-report",
+   "screen": "editor",
+   "kind": "text",
+   "instruction": "Click \"Quarterly Report\".",
+   "boxes": [
+    [
+     410,
+     274,
+     1030,
+     300
+    ]
+   ]
+  },
+  {
+   "id": "explorer:size",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"Size\".",
+   "boxes": [
+    [
+     1076,
+     145,
+     1196,
+     160
+    ]
+   ]
+  },
+  {
+   "id": "explorer:21-kb",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"21 KB\".",
+   "boxes": [
+    [
+     1076,
+     316,
+     1196,
+     331
+    ]
+   ]
+  },
+  {
+   "id": "explorer:3-kb",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"3 KB\".",
+   "boxes": [
+    [
+     1076,
+     452,
+     1196,
+     467
+    ]
+   ]
+  },
+  {
+   "id": "explorer:view",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"☷ View ⌄\".",
+   "boxes": [
+    [
+     400,
+     99,
+     478,
+     126
+    ]
+   ]
+  },
+  {
+   "id": "explorer:text-document",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"Text Document\".",
+   "boxes": [
+    [
+     896,
+     452,
+     1076,
+     467
+    ]
+   ]
+  },
+  {
+   "id": "explorer:10-4-2026-9-12-am",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"10/4/2026 9:12 AM\".",
+   "boxes": [
+    [
+     696,
+     180,
+     896,
+     195
+    ]
+   ]
+  },
+  {
+   "id": "explorer:10-2-2026-11-50-am",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"10/2/2026 11:50 AM\".",
+   "boxes": [
+    [
+     696,
+     316,
+     896,
+     331
+    ]
+   ]
+  },
+  {
+   "id": "explorer:10-3-2026-3-44-pm",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"10/3/2026 3:44 PM\".",
+   "boxes": [
+    [
+     696,
+     452,
+     896,
+     467
+    ]
+   ]
+  },
+  {
+   "id": "explorer:waddle",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"📁 Waddle\".",
+   "boxes": [
+    [
+     256,
+     180,
+     696,
+     195
+    ]
+   ]
+  },
+  {
+   "id": "explorer:budget-2026-notes-docx",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"📄 budget-2026 notes.docx\".",
+   "boxes": [
+    [
+     256,
+     316,
+     696,
+     331
+    ]
+   ]
+  },
+  {
+   "id": "explorer:lease-agreement-pdf",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"📄 lease-agreement.pdf\".",
+   "boxes": [
+    [
+     256,
+     418,
+     696,
+     433
+    ]
+   ]
+  },
+  {
+   "id": "explorer:gallery",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"🖼 Gallery\".",
+   "boxes": [
+    [
+     8,
+     176,
+     231,
+     208
+    ]
+   ]
+  },
+  {
+   "id": "explorer:documents",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"📄 Documents\".",
+   "boxes": [
+    [
+     8,
+     321,
+     231,
+     353
+    ]
+   ]
+  },
+  {
+   "id": "explorer:this-pc",
+   "screen": "explorer",
+   "kind": "text",
+   "instruction": "Click \"💻 This PC\".",
+   "boxes": [
+    [
+     8,
+     466,
+     231,
+     498
+    ]
+   ]
+  },
+  {
+   "id": "inbox:12",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"12\".",
+   "boxes": [
+    [
+     220,
+     152,
+     236,
+     168
+    ]
+   ]
+  },
+  {
+   "id": "inbox:10-15",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"10:15\".",
+   "boxes": [
+    [
+     700,
+     201,
+     760,
+     215
+    ]
+   ]
+  },
+  {
+   "id": "inbox:oct-1",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Oct 1\".",
+   "boxes": [
+    [
+     700,
+     649,
+     760,
+     663
+    ]
+   ]
+  },
+  {
+   "id": "inbox:sep-29",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Sep 29\".",
+   "boxes": [
+    [
+     700,
+     777,
+     760,
+     791
+    ]
+   ]
+  },
+  {
+   "id": "inbox:waddle-pr-3",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"[Waddle] PR #3\".",
+   "boxes": [
+    [
+     432,
+     200,
+     533,
+     216
+    ]
+   ]
+  },
+  {
+   "id": "inbox:github",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"GitHub\".",
+   "boxes": [
+    [
+     272,
+     200,
+     422,
+     216
+    ]
+   ]
+  },
+  {
+   "id": "inbox:pond-weekly",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Pond Weekly\".",
+   "boxes": [
+    [
+     272,
+     456,
+     422,
+     472
+    ]
+   ]
+  },
+  {
+   "id": "inbox:bank",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Bank\".",
+   "boxes": [
+    [
+     272,
+     648,
+     422,
+     664
+    ]
+   ]
+  },
+  {
+   "id": "inbox:budget-for-the-q4-hackathon",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Budget for the Q4 hackathon\".",
+   "boxes": [
+    [
+     432,
+     392,
+     624,
+     408
+    ]
+   ]
+  },
+  {
+   "id": "inbox:invitation-design-sync-mon-oct-6",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Invitation: Design sync @ Mon Oct 6, 2pm\".",
+   "boxes": [
+    [
+     432,
+     520,
+     690,
+     536
+    ]
+   ]
+  },
+  {
+   "id": "inbox:mail",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"✉ Mail\".",
+   "boxes": [
+    [
+     64,
+     19,
+     294,
+     45
+    ]
+   ]
+  },
+  {
+   "id": "inbox:inbox",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Inbox\".",
+   "boxes": [
+    [
+     8,
+     144,
+     248,
+     176
+    ]
+   ]
+  },
+  {
+   "id": "inbox:snoozed",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Snoozed\".",
+   "boxes": [
+    [
+     8,
+     208,
+     248,
+     240
+    ]
+   ]
+  },
+  {
+   "id": "inbox:spam",
+   "screen": "inbox",
+   "kind": "text",
+   "instruction": "Click \"Spam\".",
+   "boxes": [
+    [
+     8,
+     304,
+     248,
+     336
+    ]
+   ]
+  },
+  {
+   "id": "settings:sam-mallard",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Sam Mallard\".",
+   "boxes": [
+    [
+     96,
+     76,
+     178,
+     92
+    ]
+   ]
+  },
+  {
+   "id": "settings:on",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"On\".",
+   "boxes": [
+    [
+     1292,
+     292,
+     1360,
+     312
+    ]
+   ]
+  },
+  {
+   "id": "settings:off",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Off ⌄\".",
+   "boxes": [
+    [
+     1325,
+     358,
+     1381,
+     388
+    ]
+   ]
+  },
+  {
+   "id": "settings:2880-1920-recommended",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"2880 × 1920 (Recommended) ⌄\".",
+   "boxes": [
+    [
+     1157,
+     541,
+     1381,
+     571
+    ]
+   ]
+  },
+  {
+   "id": "settings:system",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"🖥 System\".",
+   "boxes": [
+    [
+     12,
+     186,
+     288,
+     224
+    ]
+   ]
+  },
+  {
+   "id": "settings:network-internet",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"🌐 Network & internet\".",
+   "boxes": [
+    [
+     12,
+     262,
+     288,
+     300
+    ]
+   ]
+  },
+  {
+   "id": "settings:accounts",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"👤 Accounts\".",
+   "boxes": [
+    [
+     12,
+     376,
+     288,
+     414
+    ]
+   ]
+  },
+  {
+   "id": "settings:gaming",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"🎮 Gaming\".",
+   "boxes": [
+    [
+     12,
+     452,
+     288,
+     490
+    ]
+   ]
+  },
+  {
+   "id": "settings:privacy-security",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"🛡 Privacy & security\".",
+   "boxes": [
+    [
+     12,
+     528,
+     288,
+     566
+    ]
+   ]
+  },
+  {
+   "id": "settings:content-adaptive-brightness-cont",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Content adaptive brightness control\".",
+   "boxes": [
+    [
+     384,
+     375,
+     1309,
+     389
+    ]
+   ]
+  },
+  {
+   "id": "settings:brightness-color",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Brightness & color\".",
+   "boxes": [
+    [
+     332,
+     102,
+     1400,
+     118
+    ]
+   ]
+  },
+  {
+   "id": "settings:display-resolution",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Display resolution\".",
+   "boxes": [
+    [
+     380,
+     540,
+     1141,
+     572
+    ]
+   ]
+  },
+  {
+   "id": "settings:night-light",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Night light\".",
+   "boxes": [
+    [
+     380,
+     215,
+     1276,
+     247
+    ]
+   ]
+  },
+  {
+   "id": "settings:change-brightness-based-on-conte",
+   "screen": "settings",
+   "kind": "text",
+   "instruction": "Click \"Change brightness based on content\".",
+   "boxes": [
+    [
+     384,
+     357,
+     1309,
+     389
+    ]
+   ]
+  },
+  {
+   "id": "video:8-41",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"8:41\".",
+   "boxes": [
+    [
+     795,
+     245,
+     826,
+     261
+    ]
+   ]
+  },
+  {
+   "id": "video:12-04",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"12:04\".",
+   "boxes": [
+    [
+     496,
+     245,
+     534,
+     261
+    ]
+   ]
+  },
+  {
+   "id": "video:code-pond-410k-views-1-week-ago",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"Code Pond · 410K views · 1 week ago\".",
+   "boxes": [
+    [
+     556,
+     301,
+     832,
+     316
+    ]
+   ]
+  },
+  {
+   "id": "video:ambient-lab-2-9m-views-1-year-ag",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"Ambient Lab · 2.9M views · 1 year ago\".",
+   "boxes": [
+    [
+     1140,
+     301,
+     1416,
+     316
+    ]
+   ]
+  },
+  {
+   "id": "video:public-updated-3-weeks-ago",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"Public · Updated 3 weeks ago\".",
+   "boxes": [
+    [
+     848,
+     579,
+     1124,
+     594
+    ]
+   ]
+  },
+  {
+   "id": "video:ducktube",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"DuckTube\".",
+   "boxes": [
+    [
+     16,
+     17,
+     216,
+     40
+    ]
+   ]
+  },
+  {
+   "id": "video:workout-bangers",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"Workout Bangers\".",
+   "boxes": [
+    [
+     264,
+     555,
+     540,
+     575
+    ]
+   ]
+  },
+  {
+   "id": "video:lo-fi-beats-old",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"Lo-fi Beats (old)\".",
+   "boxes": [
+    [
+     1140,
+     555,
+     1416,
+     575
+    ]
+   ]
+  },
+  {
+   "id": "video:shorts",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"▶ Shorts\".",
+   "boxes": [
+    [
+     12,
+     108,
+     216,
+     148
+    ]
+   ]
+  },
+  {
+   "id": "video:history",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"↺ History\".",
+   "boxes": [
+    [
+     12,
+     253,
+     216,
+     293
+    ]
+   ]
+  },
+  {
+   "id": "video:watch-later",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"◷ Watch later\".",
+   "boxes": [
+    [
+     12,
+     333,
+     216,
+     373
+    ]
+   ]
+  },
+  {
+   "id": "video:music",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"♫ Music\".",
+   "boxes": [
+    [
+     12,
+     478,
+     216,
+     518
+    ]
+   ]
+  },
+  {
+   "id": "video:24-videos",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"24 videos ≡\".",
+   "boxes": [
+    [
+     430,
+     395,
+     540,
+     545
+    ]
+   ]
+  },
+  {
+   "id": "video:9-videos",
+   "screen": "video",
+   "kind": "text",
+   "instruction": "Click \"9 videos ≡\".",
+   "boxes": [
+    [
+     1306,
+     395,
+     1416,
+     545
+    ]
+   ]
+  },
+  {
+   "id": "task:playlist",
+   "screen": "video",
+   "kind": "task",
+   "instruction": "Play my Lo-fi Study Mix playlist",
+   "boxes": [
+    [
+     556,
+     600,
+     642,
+     627
+    ],
+    [
+     556,
+     395,
+     832,
+     627
+    ]
+   ]
+  },
+  {
+   "id": "task:open-email",
+   "screen": "inbox",
+   "kind": "task",
+   "instruction": "Open Grace's email about the Q3 budget",
+   "boxes": [
+    [
+     256,
+     304,
+     776,
+     368
+    ]
+   ]
+  },
+  {
+   "id": "task:compose",
+   "screen": "inbox",
+   "kind": "task",
+   "instruction": "Start writing a new email",
+   "boxes": [
+    [
+     8,
+     72,
+     136,
+     128
+    ]
+   ]
+  },
+  {
+   "id": "task:toggle",
+   "screen": "settings",
+   "kind": "task",
+   "instruction": "Turn on Night light",
+   "boxes": [
+    [
+     1320,
+     221,
+     1360,
+     241
+    ]
+   ]
+  },
+  {
+   "id": "task:nav",
+   "screen": "settings",
+   "kind": "task",
+   "instruction": "Open the Bluetooth settings",
+   "boxes": [
+    [
+     12,
+     224,
+     288,
+     262
+    ]
+   ]
+  },
+  {
+   "id": "task:file-row",
+   "screen": "explorer",
+   "kind": "task",
+   "instruction": "Open budget-2026.xlsx",
+   "boxes": [
+    [
+     240,
+     272,
+     1440,
+     306
+    ]
+   ]
+  },
+  {
+   "id": "task:sidebar",
+   "screen": "explorer",
+   "kind": "task",
+   "instruction": "Show me my Downloads folder",
+   "boxes": [
+    [
+     8,
+     289,
+     231,
+     321
+    ]
+   ]
+  }
+ ]
+}

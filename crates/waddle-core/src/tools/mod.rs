@@ -468,11 +468,35 @@ pub fn is_parallel_read(name: &str) -> bool {
 }
 
 fn num(args: &Value, k: &str) -> Option<f64> {
-    match args.get(k)? {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.trim().parse().ok(),
-        _ => None,
+    match args.get(k) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse().ok(),
+        Some(_) => None,
+        // Arguments that weren't valid JSON (kept as `_raw`): small models sometimes garble
+        // them, as in `{"x":": 380, "y": 352}`, with the numbers still there to read.
+        None => {
+            let raw = args.get("_raw")?.as_str()?;
+            let re = regex::Regex::new(&format!(r#""{}"\s*:[\s":]*(-?\d+(?:\.\d+)?)"#, regex::escape(k))).ok()?;
+            re.captures(raw)?.get(1)?.as_str().parse().ok()
+        }
     }
+}
+
+/// A point given as a pair (`"coordinate": [x, y]`, the shape OpenAI's and Anthropic's
+/// computer-use tools use), or crammed into `x` (`"x": [564, 263]`, or garbled JSON such as
+/// `{"x": 564, 263]`): some models answer this way even when offered separate x and y.
+fn pair(args: &Value) -> Option<(f64, f64)> {
+    let two = |v: &Value| {
+        let n = v.as_array().filter(|a| a.len() == 2)?;
+        Some((n[0].as_f64()?, n[1].as_f64()?))
+    };
+    if let Some(p) = ["x", "coordinate", "coordinates", "point", "position"].iter().find_map(|k| args.get(*k).and_then(two)) {
+        return Some(p);
+    }
+    let raw = args.get("_raw")?.as_str()?;
+    let re = regex::Regex::new(r#""(?:x|coordinates?|point|position)"\s*:[\s\[\(\\]*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)"#).ok()?;
+    let c = re.captures(raw)?;
+    Some((c.get(1)?.as_str().parse().ok()?, c.get(2)?.as_str().parse().ok()?))
 }
 
 fn text(args: &Value, k: &str) -> Option<String> {
@@ -483,9 +507,9 @@ fn text(args: &Value, k: &str) -> Option<String> {
 pub fn parse_gui_action(call: &ToolCall, coords: &Coords) -> Result<GuiAction, String> {
     let a = &call.arguments;
     let point = |required: bool| -> Result<Option<(f64, f64)>, String> {
-        match (num(a, "x"), num(a, "y")) {
-            (Some(x), Some(y)) => Ok(Some(coords.to_screen(x, y))),
-            (None, None) if !required => Ok(None),
+        match (num(a, "x"), num(a, "y"), pair(a)) {
+            (_, _, Some((x, y))) | (Some(x), Some(y), None) => Ok(Some(coords.to_screen(x, y))),
+            (None, None, None) if !required => Ok(None),
             _ => Err("both x and y are required numbers".into()),
         }
     };
@@ -747,6 +771,24 @@ mod tests {
         let a = parse_gui_action(&call("click", json!({"x":"250","y":100,"button":"right"})), &coords(CoordMode::Norm1000)).unwrap();
         assert_eq!(a, GuiAction::Click { x: 360.0, y: 96.0, button: MouseButton::Right, double: false });
         assert_eq!(a.target(), Some((360.0, 96.0)));
+    }
+
+    #[test]
+    fn garbled_coordinates_are_still_read() {
+        // A real answer from qwen/qwen3-vl-8b-instruct (October 2026), kept as `_raw` by the parser.
+        let garbled = ToolCall { id: "1".into(), name: "click".into(), arguments: crate::llm::parse_arguments(r#"{"x":": 380, "y": 352}"#), echo: None };
+        assert_eq!(parse_gui_action(&garbled, &coords(CoordMode::Pixels)).unwrap().target(), Some((380.0, 352.0)));
+        let stringy = ToolCall { arguments: crate::llm::parse_arguments(r#"{"x": "380", "y": "352"#), ..garbled.clone() };
+        assert_eq!(parse_gui_action(&stringy, &coords(CoordMode::Pixels)).unwrap().target(), Some((380.0, 352.0)));
+        // A point pair, in the shapes Qwen3-VL 8B answered with in the click lab.
+        for args in [r#"{"x": [564, 263], "y": 263}"#, r#"{"x": 564, 263]"#, r#"{"x": \(251, 304\), "y": 304}"#, r#"{"coordinate": [564, 263]}"#] {
+            let call = ToolCall { arguments: crate::llm::parse_arguments(args), ..garbled.clone() };
+            let at = parse_gui_action(&call, &coords(CoordMode::Pixels)).unwrap().target().unwrap();
+            assert!(at == (564.0, 263.0) || at == (251.0, 304.0), "{args}: {at:?}");
+        }
+        // Nothing to read is still an error.
+        let empty = ToolCall { arguments: crate::llm::parse_arguments(r#"{"x": "#), ..garbled };
+        assert!(parse_gui_action(&empty, &coords(CoordMode::Pixels)).is_err());
     }
 
     #[test]

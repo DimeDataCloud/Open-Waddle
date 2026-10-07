@@ -194,6 +194,13 @@ Through OpenRouter, with the 0.3.0 prompt and tools (arrange_window, read-in-the
 - **Reading:** Flash-Lite is the quickest model that passes everything, and quick is what matters most once a task is right: a model step is most of the wait (the median step in real use was 3.2 s on the default). 3.8 Flash is as accurate but slower and costlier, so it isn't worth it for Waddle's short tasks.
 - **On a free Google key** Flash-Lite costs nothing. Keep OpenRouter's key too: routing (Jev), the screen check and web searches stay there, and if the Google key is missing or over one of Google's limits, the same model runs through OpenRouter instead (`google/gemini-3.5-flash-lite`). With only a Google key, everything runs on Google (no quick chat lane: every message goes to the planner).
 
+### The click lab (0.3.2, October 6, 2026)
+
+One request per probe (a screenshot and "Click X"), 86 probes on the bench screens, each model in pixels and on a 0–1000 grid, for about $0.04 in all. Details and the full table are in [LAB.md](LAB.md).
+- **Coordinates matter more than the model.** Gemini 3.5 Flash-Lite: 92% on the grid, 30% in pixels. GPT-6 Luna: 93% in pixels, 60% on the grid. Models answer in their own space whatever they're asked for, so Waddle's Auto mode follows the family. Ling is now on the grid list with Gemini, Gemma and Qwen.
+- **Waddle had been throwing good answers away.** Some Qwen answers garble the arguments (`{"x":": 380, …}`) or send a point pair (`"x": [564, 263]`); they're read now.
+- **Gemini's OpenRouter fallback is now Ling 3.0 Flash VL.** It clicks on Gemini's grid (83%), passed 11 of 12 assistant jobs and 16 of 21 screen tasks on target, and costs $0.0003 a task, about a sixth of Gemini 3.5 Flash-Lite there.
+
 ### On Google's own API with a free key (0.3.1, October 6, 2026)
 
 The first run with a real Google key failed every task at its second step: Gemini 3 signs its tool calls and Google refuses a conversation that drops the signature (OpenRouter handles this itself). With 0.3.1's fixes:

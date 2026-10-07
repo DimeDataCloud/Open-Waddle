@@ -1,0 +1,242 @@
+{
+  "cost": 0.0003076498666666666,
+  "hits": 16,
+  "model": "inclusionai/ling-3.0-flash-vl",
+  "passed": 13,
+  "results": [
+    {
+      "cost": 0.0003324496,
+      "hit": true,
+      "id": "playlist",
+      "model_secs": 8.498554418000001,
+      "note": "Done [windows look click(583,593) look click(590,593)] Your Lo-fi Study Mix playlist is now playing — 57 videos ready to study to. 🎧🦆",
+      "pass": true,
+      "secs": 9.050388552000001,
+      "steps": 4,
+      "tokens": 22640
+    },
+    {
+      "cost": 0.00028638679999999997,
+      "hit": true,
+      "id": "search",
+      "model_secs": 7.121557996000001,
+      "note": "Done [windows look click(685,27) type(\"rubber duck debugging\") keys(enter)] Done — I searched DuckTube for \"rubber duck debugging\" and the results are now on screen. Quack!",
+      "pass": true,
+      "secs": 7.404098805000001,
+      "steps": 4,
+      "tokens": 22291
+    },
+    {
+      "cost": 0.000475496,
+      "hit": false,
+      "id": "open-email",
+      "model_secs": 7.090996829,
+      "note": "Done [windows look click(562,290) look click(562,302)] Done — Grace Hopper's \"Q3 budget review\" email is now open. It mentions an attachment and was received at 9:31.",
+      "pass": false,
+      "secs": 7.429707492,
+      "steps": 4,
+      "tokens": 22426
+    },
+    {
+      "cost": 0.0007189042,
+      "hit": true,
+      "id": "compose",
+      "model_secs": 10.198295479,
+      "note": "StepLimit [windows look click(82,103) look click(75,103) look click(75,103) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 10.597868937,
+      "steps": 6,
+      "tokens": 34009
+    },
+    {
+      "cost": 0.0005096322000000001,
+      "hit": true,
+      "id": "delete-icon",
+      "model_secs": 14.408476637000001,
+      "note": "StepLimit [windows look click(913,86) look click(913,86) keys(delete)] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 14.731529920000002,
+      "steps": 6,
+      "tokens": 34790
+    },
+    {
+      "cost": 0.00023354240000000002,
+      "hit": false,
+      "id": "toggle",
+      "model_secs": 4.304894063,
+      "note": "Done [windows look click(1359,252)] Night light is now turned on.",
+      "pass": false,
+      "secs": 4.5989709780000005,
+      "steps": 2,
+      "tokens": 11090
+    },
+    {
+      "cost": 0.00023208499999999998,
+      "hit": false,
+      "id": "nav",
+      "model_secs": 3.10831135,
+      "note": "Done [windows look click(117,272)] Done — I've opened the Bluetooth & devices settings for you.",
+      "pass": false,
+      "secs": 3.3936342369999997,
+      "steps": 2,
+      "tokens": 11067
+    },
+    {
+      "cost": 0.0002368114,
+      "hit": true,
+      "id": "bold",
+      "model_secs": 3.51772142,
+      "note": "Done [windows look click(122,112)] Done — the selected text is now bold.",
+      "pass": true,
+      "secs": 3.9698451709999993,
+      "steps": 2,
+      "tokens": 11149
+    },
+    {
+      "cost": 0.0002332204,
+      "hit": true,
+      "id": "dialog",
+      "model_secs": 3.259704469,
+      "note": "Done [windows look click(737,458)] Done — Notepad closed without saving.",
+      "pass": true,
+      "secs": 3.5759901000000003,
+      "steps": 2,
+      "tokens": 11094
+    },
+    {
+      "cost": 0.0005691839999999999,
+      "hit": false,
+      "id": "file-row",
+      "model_secs": 11.837875064000002,
+      "note": "StepLimit [windows look click(446,322) look click(446,322) keys(enter) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 12.159539973000001,
+      "steps": 6,
+      "tokens": 34554
+    },
+    {
+      "cost": 0.0005504981999999999,
+      "hit": true,
+      "id": "sidebar",
+      "model_secs": 10.512763301,
+      "note": "StepLimit [windows look click(82,303) look click(68,303) look click(71,341) look] I've taken 6 steps and stopped to check in. Want me to keep going?",
+      "pass": false,
+      "secs": 10.873213750000001,
+      "steps": 6,
+      "tokens": 33864
+    },
+    {
+      "cost": 0.0003797136,
+      "hit": true,
+      "id": "form",
+      "model_secs": 5.212334343999999,
+      "note": "Done [windows look click(422,366) type(\"Ada\") click(441,443)] Done — I typed \"Ada\" in the name box and pressed Subscribe.",
+      "pass": true,
+      "secs": 5.65661378,
+      "steps": 4,
+      "tokens": 22386
+    },
+    {
+      "cost": 0.0001193164,
+      "hit": true,
+      "id": "just-answer",
+      "model_secs": 2.190168045,
+      "note": "Done [windows look] The subject of the open email is **\"Offsite agenda\"** (from Priya Nair).",
+      "pass": true,
+      "secs": 2.6351171649999996,
+      "steps": 1,
+      "tokens": 5585
+    },
+    {
+      "cost": 0.000104279,
+      "hit": true,
+      "id": "write-file",
+      "model_secs": 2.3421383400000004,
+      "note": "Done [] Created `hello.txt` with the text \"hi\" in it.",
+      "pass": true,
+      "secs": 2.642453762,
+      "steps": 2,
+      "tokens": 8111
+    },
+    {
+      "cost": 0.0001546958,
+      "hit": true,
+      "id": "a11y",
+      "model_secs": 2.7558382320000003,
+      "note": "Done [windows elements look element(2)] Notepad is closing without saving — done! 🦆",
+      "pass": true,
+      "secs": 3.049231583,
+      "steps": 2,
+      "tokens": 11727
+    },
+    {
+      "cost": 0.0001525566,
+      "hit": true,
+      "id": "where-toggle",
+      "model_secs": 4.447103288,
+      "note": "Done [windows look PointAt { x: 1332.0, y: 235.2, label: \"Night light toggle (currently Off)\" }] There you go — Night light is right there in **System > Display**, under \"Brightness & color.\" The toggle is currently set to **Off**; just click it to switch it on. It'll warm up your screen colors to reduce blue light.",
+      "pass": true,
+      "secs": 4.724280532,
+      "steps": 2,
+      "tokens": 11255
+    },
+    {
+      "cost": 0.0001486366,
+      "hit": true,
+      "id": "where-compose",
+      "model_secs": 3.939290303,
+      "note": "Done [windows look PointAt { x: 74.88, y: 96.0, label: \"Compose button — click here to start a new email\" }] Click the **Compose** button on the top-left of your inbox — that's the light-blue button with the pencil icon I just pointed at. It will open a new email window where you can type your recipient, subject, and message.",
+      "pass": true,
+      "secs": 4.2447393280000005,
+      "steps": 2,
+      "tokens": 11194
+    },
+    {
+      "cost": 0.0005052572,
+      "hit": true,
+      "id": "scroll",
+      "model_secs": 9.399700261999998,
+      "note": "Done [windows look Scroll { dx: 0, dy: 5, at: None } look Scroll { dx: 0, dy: 5, at: None } look] I scrolled down so you can see more of DuckTube — the Recommended videos and your playlists are now visible. It looks like we've reached the bottom of the page, so there's nothing more to scroll to. Want me to click on any of these videos or playlists?",
+      "pass": true,
+      "secs": 9.958938560999998,
+      "steps": 5,
+      "tokens": 28253
+    },
+    {
+      "cost": 0.0002395246,
+      "hit": false,
+      "id": "drag",
+      "model_secs": 4.864362662,
+      "note": "Done [windows look Drag { from: (316.8, 319.68), to: (79.2, 304.32) }] Done — I dragged budget-2026.xlsx into the Downloads folder in the sidebar.",
+      "pass": false,
+      "secs": 5.362109952999999,
+      "steps": 2,
+      "tokens": 11226
+    },
+    {
+      "cost": 0.0001448678,
+      "hit": true,
+      "id": "copy",
+      "model_secs": 3.37170579,
+      "note": "Done [windows look WriteClipboard { text: \"Offsite agenda\" }] Done — the subject \"Offsite agenda\" is now on your clipboard.",
+      "pass": true,
+      "secs": 3.7005506509999995,
+      "steps": 2,
+      "tokens": 11117
+    },
+    {
+      "cost": 0.00013358939999999999,
+      "hit": true,
+      "id": "remind",
+      "model_secs": 4.557055871,
+      "note": "Done [] The task is already finished! The reminder was set successfully in my previous response — you'll be reminded to stretch at 23:53 (in 20 minutes). No further action needed. 🦆",
+      "pass": true,
+      "secs": 4.863532551,
+      "steps": 3,
+      "tokens": 12423
+    }
+  ],
+  "runs": 21,
+  "secs": 6.410588370523809,
+  "tag": "lab-pick"
+}

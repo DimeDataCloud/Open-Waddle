@@ -22,7 +22,7 @@ pub enum CoordMode {
     Auto,
     /// x,y are pixels of the latest screenshot (screenshots are taken at logical screen size).
     Pixels,
-    /// x,y are normalised 0..1000 across the screen (Qwen-VL, Gemini, Gemma families).
+    /// x,y are normalised 0..1000 across the screen (Qwen-VL, Gemini, Gemma and Ling families).
     Norm1000,
 }
 
@@ -31,7 +31,8 @@ impl CoordMode {
         match self {
             CoordMode::Auto => {
                 let m = model.to_ascii_lowercase();
-                if ["qwen", "gemini", "gemma"].iter().any(|k| m.contains(k)) {
+                // Each family answers in its own space whatever it's asked for (bench/lab/REPORT.md).
+                if ["qwen", "gemini", "gemma", "ling-"].iter().any(|k| m.contains(k)) {
                     CoordMode::Norm1000
                 } else {
                     CoordMode::Pixels
@@ -211,6 +212,10 @@ pub struct Settings {
     /// A second service for the quick-reply model (for example Google's Gemini API next to
     /// OpenRouter for the planner). Empty = the same service as `base_url`. User-only.
     pub fast_base_url: String,
+    /// The OpenRouter model for tasks Google's free key can't take (over a limit, no key yet):
+    /// cheaper there than the same Gemini. Empty = `GOOGLE_FALLBACK`. Quick replies use
+    /// `OPENROUTER_QUICK`. User-only.
+    pub fallback_model: String,
     pub coord_mode: CoordMode,
     /// Hidden thinking for hosted models (OpenAI-compatible endpoints only).
     pub reasoning: Reasoning,
@@ -288,9 +293,10 @@ impl Default for Settings {
         Self {
             provider: ProviderKind::OpenaiCompat,
             base_url: "https://openrouter.ai/api/v1".into(),
-            model: "openai/gpt-6-luna".into(),
-            fast_model: "google/gemini-2.5-flash-lite".into(),
+            model: OPENROUTER_PLANNER.into(),
+            fast_model: OPENROUTER_QUICK.into(),
             fast_base_url: String::new(),
+            fallback_model: String::new(),
             coord_mode: CoordMode::Auto,
             reasoning: Reasoning::Default,
             look_first: true,
@@ -341,6 +347,14 @@ impl Settings {
         }
     }
 
+    /// The OpenRouter model for tasks when Google's free key can't take them.
+    pub fn fallback_model(&self) -> &str {
+        match self.fallback_model.trim() {
+            "" => GOOGLE_FALLBACK,
+            m => m,
+        }
+    }
+
     pub fn coord_mode(&self) -> CoordMode {
         self.coord_mode.resolve(&self.model)
     }
@@ -379,6 +393,15 @@ impl Settings {
 /// Settings Waddle may change about itself (with approval). Endpoints, keys,
 /// folders and the self-editing switch stay user-only, so a compromised task
 /// can't redirect traffic or widen its own reach.
+/// Waddle's planner on OpenRouter: the cheapest model that passed every assistant job.
+pub const OPENROUTER_PLANNER: &str = "openai/gpt-6-luna";
+/// Waddle's quick-reply model on OpenRouter: chat, research summaries, the morning brief.
+pub const OPENROUTER_QUICK: &str = "google/gemini-2.5-flash-lite";
+/// What OpenRouter runs for a Gemini task Google turns down. Gemini clicks on a 0-1000 grid,
+/// so its stand-in must too: in the click lab Ling hit 83-90% there (GPT-6 Luna, a pixel
+/// model, 60%), passed 11 of 12 assistant jobs, and costs about half as much as Luna.
+pub const GOOGLE_FALLBACK: &str = "inclusionai/ling-3.0-flash-vl";
+
 pub const SELF_EDITABLE: &[&str] = &[
     "model",
     "fast_model",
@@ -505,6 +528,9 @@ mod tests {
         assert_eq!(CoordMode::Auto.resolve("qwen/qwen3-vl-8b-instruct"), CoordMode::Norm1000);
         assert_eq!(CoordMode::Auto.resolve("google/gemini-2.5-flash-lite"), CoordMode::Norm1000);
         assert_eq!(CoordMode::Auto.resolve("anthropic/claude-haiku-4.5"), CoordMode::Pixels);
+        assert_eq!(CoordMode::Auto.resolve("inclusionai/ling-3.0-flash-vl"), CoordMode::Norm1000);
+        assert_eq!(CoordMode::Auto.resolve("openai/gpt-6-luna"), CoordMode::Pixels);
+        assert_eq!(CoordMode::Auto.resolve("xiaomi/mimo-v2.6-flash"), CoordMode::Pixels);
         assert_eq!(CoordMode::Pixels.resolve("qwen3-vl:4b"), CoordMode::Pixels);
     }
 
