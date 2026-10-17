@@ -22,7 +22,7 @@ Waddle runs on your own machine and is free and open source under the MIT licens
 - **Voice.** Push to talk, with spoken replies available. Works with the built-in Windows voice typing, or a Whisper-compatible server.
 - **MCP.** Uses the tools of other apps through Model Context Protocol servers.
 - **Budget.** Keeps paid model calls under a monthly limit you set, and shows what was spent on tasks, chat, research and decisions.
-- **Safety.** Four permission tiers, an approval step for risky actions, an undo window for sent mail, and a tamper-evident activity log. See [Safety model](#safety-model).
+- **Safety.** Tiered permissions, an approval step for risky actions, an undo window for sent mail, and a tamper-evident activity log. See [Safety model](#safety-model).
 
 ## Download
 
